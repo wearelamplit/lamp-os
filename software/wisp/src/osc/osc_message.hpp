@@ -42,8 +42,8 @@ bool oscFloatArgs(const OscMessage& msg, float* out, size_t cap,
 // `prefix`.
 bool oscHasAddressPrefix(const uint8_t* data, size_t len, const char* prefix);
 
-// Floats of the first message in the packet addressed exactly `address`.
-// False when no such message parses or the packet is malformed.
+// Floats of the first message in the packet addressed exactly `address`
+// whose arguments read whole. False when none does or the packet is malformed.
 bool oscFindFloats(const uint8_t* data, size_t len, const char* address,
                    float* out, size_t cap, size_t& count);
 

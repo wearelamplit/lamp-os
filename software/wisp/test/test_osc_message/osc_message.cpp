@@ -66,14 +66,14 @@ void assertGoldenPalette(const float* f, size_t n) {
 
 // One OSC message to `address` carrying `floats` f-tagged arguments, channel
 // k = k / floats.
-std::vector<uint8_t> floatMessage(const char* address, size_t floats) {
+std::vector<uint8_t> floatsMessage(const char* address,
+                                   const std::vector<float>& values) {
   std::vector<uint8_t> out(address, address + std::strlen(address));
   do out.push_back(0); while (out.size() % 4 != 0);
   out.push_back(',');
-  for (size_t i = 0; i < floats; ++i) out.push_back('f');
+  for (size_t i = 0; i < values.size(); ++i) out.push_back('f');
   do out.push_back(0); while (out.size() % 4 != 0);
-  for (size_t i = 0; i < floats; ++i) {
-    const float v = static_cast<float>(i) / static_cast<float>(floats);
+  for (float v : values) {
     uint32_t bits;
     std::memcpy(&bits, &v, sizeof bits);
     for (int shift = 24; shift >= 0; shift -= 8) {
@@ -81,6 +81,14 @@ std::vector<uint8_t> floatMessage(const char* address, size_t floats) {
     }
   }
   return out;
+}
+
+std::vector<uint8_t> floatMessage(const char* address, size_t floats) {
+  std::vector<float> values(floats);
+  for (size_t i = 0; i < floats; ++i) {
+    values[i] = static_cast<float>(i) / static_cast<float>(floats);
+  }
+  return floatsMessage(address, values);
 }
 
 struct Seen {
@@ -226,23 +234,6 @@ void test_osc_cap_is_50_colours(void) {
   TEST_ASSERT_EQUAL_INT((int)wisp::OscFeedPacket::Other,
       (int)wisp::oscClassifyFeedPacket(over.data(), over.size(), kPaletteAddr,
                                        "/straylight/", f.data(), f.size(), n));
-}
-
-std::vector<uint8_t> floatsMessage(const char* address,
-                                   const std::vector<float>& values) {
-  std::vector<uint8_t> out(address, address + std::strlen(address));
-  do out.push_back(0); while (out.size() % 4 != 0);
-  out.push_back(',');
-  for (size_t i = 0; i < values.size(); ++i) out.push_back('f');
-  do out.push_back(0); while (out.size() % 4 != 0);
-  for (float v : values) {
-    uint32_t bits;
-    std::memcpy(&bits, &v, sizeof bits);
-    for (int shift = 24; shift >= 0; shift -= 8) {
-      out.push_back(static_cast<uint8_t>(bits >> shift));
-    }
-  }
-  return out;
 }
 
 // One NaN or infinity anywhere refuses the whole message.
