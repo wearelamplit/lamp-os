@@ -11,6 +11,7 @@
 #include "config/wisp_config.hpp"  // kManualPaletteMaxColors, OscRole
 #include "config/wisp_op_dispatcher.hpp"  // DispatchResult
 #include "osc/osc_freshness.hpp"
+#include "osc/osc_listener.hpp"  // kOscPaletteMaxColors
 #include "status/status_ring.hpp"  // kMaxRingPixels
 #include "util/rate_gate.hpp"
 
@@ -42,15 +43,13 @@ class WispController {
   // Apply the DispatchResult from a CONTROL_OP. MeshRouter result callback.
   void applyOpResult(DispatchResult res);
 
-  static constexpr size_t kOscMaxColors = 50;
-
-  // OSC palette input (flat RGB floats 0..1, at most kOscMaxColors).
+  // OSC palette input (channels 0..1, at most kOscPaletteMaxColors).
   // Applied only in Osc mode; an unchanged palette only refreshes liveness
   // and a blank one counts as no palette. Ring updates at once; lamp paint,
   // STATE and ArtNet follow at most once per kOscPaintIntervalMs, trailing
   // edge included. Never changes paint mode.
-  void onOscPalette(const float* rgb, size_t colours, const char* via,
-                    uint32_t nowMs);
+  void onOscPalette(const PaletteColor* colours, size_t count,
+                    const char* via, uint32_t nowMs);
 
   // Any other packet from the Straylight feed: keeps a held palette live.
   void onOscFeed(uint32_t nowMs);
@@ -88,7 +87,6 @@ class WispController {
   void holdOscStream();
   void pushOscPaint();
 
-  static constexpr size_t kOscMaxFloats = kOscMaxColors * 3;
   // A fast-moving palette re-colours lamps at most this often; each pass
   // re-assigns every lamp and bursts STATE over the mesh.
   static constexpr uint32_t kOscPaintIntervalMs = 1000;
@@ -97,11 +95,8 @@ class WispController {
   bool haveAppliedMode_ = false;
   OscFreshness oscFresh_;
   RateGate oscPaintGate_{kOscPaintIntervalMs};
-  // Last applied palette and its role; an identical one only refreshes
-  // liveness. A role change applies the new role's first palette.
-  float oscLast_[kOscMaxFloats] = {0};
-  size_t oscLastFloats_ = 0;
-  OscRole oscLastRole_ = OscRole::Primary;
+  // A role change applies the new role's first palette.
+  OscPaletteMemo oscLast_;
   uint32_t oscLastLogMs_ = 0;
   // Reused across changes so a streaming palette never reallocates.
   Palette oscScratch_;

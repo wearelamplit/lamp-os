@@ -185,6 +185,13 @@ WispConfigFields StatusEmitter::configFields() const {
   c.driftFadePct = config_->driftFadePct();
   c.shuffleSeed = config_->shuffleSeed();
   c.opSeq = config_->opSeq();
+  c.swatches = config_->paletteStyle() == PaletteStyle::Swatches;
+  char ethIp[16];
+  eth::formatIp(ethIp, sizeof(ethIp));
+  const bool staConnected = WiFi.isConnected();
+  char staIp[16] = "";
+  if (staConnected) eth::formatAddr(WiFi.localIP(), staIp, sizeof(staIp));
+  pickOscSendToIp(ethIp, staConnected, staIp, c.ip, sizeof(c.ip));
   return c;
 }
 

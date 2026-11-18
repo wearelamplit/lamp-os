@@ -8,6 +8,8 @@
 #include <cstring>
 #include <vector>
 
+#include "artnet/artnet_frame.hpp"
+
 namespace {
 
 struct RGBW {
@@ -163,6 +165,44 @@ void test_eight_fixtures_emitted() {
   }
 }
 
+static bool isEntry(const std::vector<wisp::RGBW>& palette, const uint8_t* c) {
+  for (const auto& e : palette) {
+    if (e.r == c[0] && e.g == c[1] && e.b == c[2] && e.w == c[3]) return true;
+  }
+  return false;
+}
+
+// In swatches every fixture's shade (channels 0..3) and base (4..7) are
+// palette colours exactly, and two different ones.
+void test_production_swatches_frame_carries_exact_colours() {
+  const std::vector<wisp::RGBW> palette = {
+      {255, 0, 0, 0}, {0, 255, 0, 0}, {0, 0, 255, 0}, {0, 0, 0, 255}};
+  uint8_t buf[530] = {0};
+  TEST_ASSERT_EQUAL_UINT(530, wisp::buildArtnetDmxFrame(
+      palette, 0, buf, sizeof(buf), wisp::PaletteStyle::Swatches));
+  for (size_t i = 0; i < 8; ++i) {
+    const uint8_t* f = buf + 18 + i * 10;
+    TEST_ASSERT_TRUE(isEntry(palette, f));
+    TEST_ASSERT_TRUE(isEntry(palette, f + 4));
+    TEST_ASSERT_NOT_EQUAL(0, std::memcmp(f, f + 4, 4));
+  }
+}
+
+// In gradient a two-colour palette blends, so some fixture shows a colour
+// that is no palette entry.
+void test_production_gradient_frame_blends() {
+  const std::vector<wisp::RGBW> palette = {{255, 128, 0, 0}, {0, 200, 80, 0}};
+  uint8_t buf[530] = {0};
+  TEST_ASSERT_EQUAL_UINT(530, wisp::buildArtnetDmxFrame(
+      palette, 0, buf, sizeof(buf), wisp::PaletteStyle::Gradient));
+  bool blended = false;
+  for (size_t i = 0; i < 8; ++i) {
+    const uint8_t* f = buf + 18 + i * 10;
+    blended = blended || !isEntry(palette, f) || !isEntry(palette, f + 4);
+  }
+  TEST_ASSERT_TRUE(blended);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_frame_size_is_530);
@@ -171,5 +211,7 @@ int main(int, char**) {
   RUN_TEST(test_first_fixture_carries_base_then_shade);
   RUN_TEST(test_unused_fixtures_zeroed_with_empty_palette);
   RUN_TEST(test_eight_fixtures_emitted);
+  RUN_TEST(test_production_swatches_frame_carries_exact_colours);
+  RUN_TEST(test_production_gradient_frame_blends);
   return UNITY_END();
 }

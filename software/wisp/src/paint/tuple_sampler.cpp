@@ -81,10 +81,56 @@ constexpr uint32_t kGolden   = 0x9E3779B9u;  // posB salt (decorrelates from pos
 constexpr uint32_t kSwapSalt = 0xCAFEBABEu;  // independent third hash space
 constexpr uint32_t kMinGap   = 0x40000000u;  // 0.25 of the gradient span
 
+// Entry (pos * n) >> 32 of n. Every entry owns an equal share of the span,
+// so an entry repeated k times is picked k / n of the time.
+uint32_t entryAt(uint32_t pos, uint32_t n) {
+  return static_cast<uint32_t>((static_cast<uint64_t>(pos) * n) >> 32);
+}
+
+bool sameBytes(const RGBW& a, const RGBW& b) {
+  return a.r == b.r && a.g == b.g && a.b == b.b && a.w == b.w;
+}
+
+void setSurface(ColorTuple& t, size_t i, const RGBW& c) {
+  t.r[i] = c.r;
+  t.g[i] = c.g;
+  t.b[i] = c.b;
+  t.w[i] = c.w;
+}
+
+// Base at posA over the palette as given; shade at posB over the entries
+// whose bytes differ from the base, or the base when none do.
+ColorTuple sampleSwatches(const std::vector<RGBW>& colors, uint32_t posA,
+                          uint32_t posB) {
+  ColorTuple out;
+  if (colors.empty()) return out;
+  const RGBW base = colors[entryAt(posA, static_cast<uint32_t>(colors.size()))];
+  size_t others = 0;
+  for (const RGBW& c : colors) {
+    if (!sameBytes(c, base)) ++others;
+  }
+  RGBW shade = base;
+  if (others > 0) {
+    size_t k = entryAt(posB, static_cast<uint32_t>(others));
+    for (const RGBW& c : colors) {
+      if (sameBytes(c, base)) continue;
+      if (k == 0) { shade = c; break; }
+      --k;
+    }
+  }
+  setSurface(out, 0, base);
+  setSurface(out, 1, shade);
+  return out;
+}
+
 }  // namespace
 
 ColorTuple sampleTupleAtPositions(const std::vector<RGBW>& colors,
-                                  uint32_t posA, uint32_t posB) {
+                                  uint32_t posA, uint32_t posB,
+                                  PaletteStyle style) {
+  if (style == PaletteStyle::Swatches) {
+    return sampleSwatches(colors, posA, posB);
+  }
   ColorTuple out;
   auto stops = dedupe(colors);
   if (stops.empty()) return out;
@@ -102,15 +148,18 @@ ColorTuple sampleTupleAtPositions(const std::vector<RGBW>& colors,
   return out;
 }
 
-ColorTuple sampleTupleForMac(const CurrentPalette& palette,
+ColorTuple sampleTupleForMac(const std::vector<RGBW>& colors,
                              const uint8_t mac[6],
-                             uint32_t shuffleSeed) {
+                             uint32_t shuffleSeed,
+                             PaletteStyle style) {
   ColorTuple out;
   if (!mac) return out;
 
   const uint32_t posA = hashMac(mac, 0u      ^ shuffleSeed);
   const uint32_t posB = hashMac(mac, kGolden ^ shuffleSeed);
-  out = sampleTupleAtPositions(palette.colors(), posA, posB);
+  out = sampleTupleAtPositions(colors, posA, posB, style);
+  // Swatches never swap, so base keeps the weight repetition gives it.
+  if (style == PaletteStyle::Swatches) return out;
 
   // Swap picks which position lands on base vs shade. Applied after gap
   // enforcement so the pair stays byte-identical to the app's predictTuple.

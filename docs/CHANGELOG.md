@@ -12,6 +12,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   sighting, each connect attempt, service discovery and the first read, one
   `ble_timing` line each in the Android log
   (`adb logcat -s flutter | grep ble_timing`). Connect behaviour is unchanged.
+- **The wisp reports the address an OSC sender should send to.** Its settings
+  now carry its Ethernet or WiFi address (never its own hotspot's), ready for
+  the app to show under the OSC source. Needs the wisp reflashed.
+- **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
+  lamp two of the palette's own colours exactly, and a colour listed more
+  often goes to more lamps. Set it with `paint:swatches on|off` on the wisp's
+  console. Needs the wisp reflashed.
 
 ### Fixed
 - **A lamp updated straight from the original firmware keeps its look.** Its

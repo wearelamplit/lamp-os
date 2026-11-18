@@ -45,8 +45,8 @@ inline constexpr size_t kPendingJsonOp =
         : lamp_protocol::CONTROL_MAX_PAYLOAD + 1;
 static_assert(kPendingJsonOp >= lamp_protocol::CONTROL_MAX_PAYLOAD + 1,
               "control-op ingest slot must fit the max control-op payload");
-// A wispConfig payload is a fixed field set (worst case 148 B, pinned by the
-// wisp's test_status_json); a larger one is dropped at post.
+// A wispConfig payload is a fixed field set whose worst case the wisp's
+// test_status_json pins under this size; a larger one is dropped at post.
 inline constexpr size_t kPendingWispConfig = 256;
 // Full settings save: two LED roles' segments/colors/byteOrder/px plus a
 // knockout array reaches ~1 KB decoded JSON.

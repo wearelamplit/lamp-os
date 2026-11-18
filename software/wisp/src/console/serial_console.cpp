@@ -20,14 +20,14 @@ namespace wisp {
 SerialConsole::SerialConsole(PaintDistributor& paint, WispConfig& config,
                              StageBeacon& stage, WifiLink& wifi,
                              StatusEmitter& status, LampInventory& inventory,
-                             SourceTransitionFn onSourceTransition)
+                             ApplyFn apply)
     : paint_(paint),
       config_(config),
       stage_(stage),
       wifi_(wifi),
       status_(status),
       inventory_(inventory),
-      onSourceTransition_(std::move(onSourceTransition)) {}
+      apply_(std::move(apply)) {}
 
 void SerialConsole::pump() {
   slip_.retire(millis());
@@ -97,8 +97,7 @@ void SerialConsole::handleCommand(const String& cmd) {
       : cmd.endsWith("manual") ? WispSourceMode::Manual
                                : WispSourceMode::Osc;
     config_.setSourceMode(m);
-    onSourceTransition_(m);
-    status_.triggerOnChange();
+    apply_(DispatchResult::AppliedSourceChange);
     Serial.printf("[wisp.cmd] source mode = %s\n", cmd.c_str() + 4);
   } else if (cmd.startsWith("osc:role ")) {
     OscRole role = OscRole::Primary;
@@ -108,9 +107,16 @@ void SerialConsole::handleCommand(const String& cmd) {
       return;
     }
     config_.setOscRole(role);
-    status_.triggerOnChange();
+    apply_(DispatchResult::AppliedOscRole);
     Serial.printf("[wisp.cmd] osc role = %s (%s)\n", oscRoleName(role),
                   oscPaletteAddress(role));
+  } else if (cmd == "paint:swatches on" || cmd == "paint:swatches off") {
+    const bool on = cmd.endsWith("on");
+    config_.setPaletteStyle(on ? PaletteStyle::Swatches
+                               : PaletteStyle::Gradient);
+    apply_(DispatchResult::AppliedSwatches);
+    Serial.printf("[wisp.cmd] palette style = %s\n",
+                  on ? "swatches" : "gradient");
   } else if (cmd == "stage:on") {
     stage_.refreshAdvert();
   } else if (cmd == "stage:off") {

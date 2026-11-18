@@ -8,6 +8,7 @@
 #include "config/wisp_config.hpp"
 #include "core/wisp_controller.hpp"
 #include "osc/osc_message.hpp"
+#include "paint/current_palette.hpp"
 
 namespace wisp {
 
@@ -66,11 +67,10 @@ void OscListener::poll(bool active, uint32_t nowMs) {
 
 void OscListener::handlePacket(const uint8_t* data, size_t len,
                                const char* via) {
-  float rgb[WispController::kOscMaxColors * 3];
   size_t n = 0;
   switch (oscClassifyFeedPacket(data, len, oscPaletteAddress(config_.oscRole()),
-                                kStraylightAddressPrefix, rgb,
-                                WispController::kOscMaxColors * 3, n)) {
+                                kStraylightAddressPrefix, rgb_,
+                                kOscPaletteMaxColors * 3, n)) {
     case OscFeedPacket::Palette:
       break;
     case OscFeedPacket::Feed:
@@ -80,7 +80,14 @@ void OscListener::handlePacket(const uint8_t* data, size_t len,
       return;
   }
   if (n == 0 || n % 3 != 0) return;
-  controller_.onOscPalette(rgb, n / 3, via, millis());
+  const size_t count = n / 3;
+  PaletteColor colours[kOscPaletteMaxColors];
+  for (size_t i = 0; i < count; ++i) {
+    colours[i].r = rgb_[i * 3 + 0];
+    colours[i].g = rgb_[i * 3 + 1];
+    colours[i].b = rgb_[i * 3 + 2];
+  }
+  controller_.onOscPalette(colours, count, via, millis());
 }
 
 }  // namespace wisp

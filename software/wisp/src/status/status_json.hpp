@@ -33,7 +33,15 @@ struct WispConfigFields {
   uint8_t      driftFadePct = 50;
   uint8_t      shuffleSeed = 0;
   uint32_t     opSeq = 0;
+  char         ip[16] = "";  // where an OSC sender reaches the wisp; "" for none
+  bool         swatches = false;
 };
+
+// The OSC send-to address into `out`: `ethIp` when set, else `staIp` while
+// `staConnected`, else "". The caller never passes the softAP address, which
+// is the pre-mesh lamps' network.
+void pickOscSendToIp(const char* ethIp, bool staConnected, const char* staIp,
+                     char* out, size_t outCap);
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed
 // core, `"configSplit":true` among it, is always written, whatever `cap`;
