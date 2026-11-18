@@ -106,6 +106,11 @@ class ShiftyExpression : public Expression {
   uint32_t shiftDurationMinMs = 300000;  // 5 min default
   uint32_t shiftDurationMaxMs = 600000;  // 10 min default
   uint32_t fadeDurationMs = 60000;
+  // A transient fades back over `durationMax` seconds when set, so a one-shot
+  // tint can linger after a short fade in; 0, or a configured instance, fades
+  // back over fadeDuration.
+  uint32_t transientFadeBackMs_ = 0;
+  uint32_t phaseFadeMs() const;
 
   // Runtime state
   // Phase starts on lamp::uptimeMs(), since home mode can freeze a shift for
