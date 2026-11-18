@@ -808,6 +808,12 @@ void test_set_osc_sealed_bumps_op_seq() {
         (int)d.dispatch(sealed.data(), sealed.size()));
     TEST_ASSERT_EQUAL_UINT8(9, cfg.oscSlot());
     TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+    cfg.setSourceMode(wisp::WispSourceMode::Osc);
+    const auto retarget = sealWispOp("testpass", 0x06,
+        R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":2})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)d.dispatch(retarget.data(), retarget.size()));
+    TEST_ASSERT_EQUAL_UINT32(2, cfg.opSeq());
 }
 
 void test_zone_ops_unknown() {
