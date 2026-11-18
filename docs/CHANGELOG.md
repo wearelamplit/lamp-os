@@ -22,6 +22,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   palette when it goes quiet. Needs the wisp reflashed.
 
 ### Changed
+- **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
+  app's Test with colours, or sent by another lamp or a mushroom, fades back
+  and stops; a configured Shifty still chains into Glitchy.
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
   status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told

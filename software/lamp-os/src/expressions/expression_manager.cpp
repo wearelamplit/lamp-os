@@ -236,6 +236,13 @@ void ExpressionManager::retireStale(uint32_t nowMs) {
   recentPlays_.retire(nowMs);
 }
 
+bool ExpressionManager::remoteTransientPlaying(const char* type) const {
+  for (const auto& t : transientExpressions_) {
+    if (t.source == TransientSource::Remote && t.type == type) return true;
+  }
+  return false;
+}
+
 bool ExpressionManager::playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const {
   return recentPlays_.playedWithin(registry_.find(type), windowMs, nowMs);
 }
