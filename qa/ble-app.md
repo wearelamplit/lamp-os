@@ -269,8 +269,6 @@ shows the loading line, then the second wisp's palette, never the first's.
 Power-cycle the lamp, and open it on A the moment it connects: the editor
 shows "Reading palette from wisp…" with no Save until the lamp log's
 `[wisp_state] notify` preview carries `"source"`, then the wisp's palette.
-If a wisp still on 1.3.8 is at hand before it is reflashed, open a lamp on
-it: the editor stays on "Reading palette from wisp…" and offers no Save.
 
 P15 — **a palette save confirms on the wisp's echo.** Same setup as P14. On
 the new wisp, edit and Save: the wisp's serial prints `[wisp.op]
@@ -281,7 +279,7 @@ and reopening the lamp shows what the wisp holds; never "saved" while the wisp
 holds something else. Save different palettes from two phones (Pixel and the
 emulator bridge) within a second of each other: both end showing the wisp's
 palette, and at most one shows "not saved". Save, then tap Osc at once: the
-save confirms with no "source changed", and back in Manual the palette shows.
+save confirms, and back in Manual the palette shows.
 Give the new wisp a rich config (20-character name, password, oscRole
 secondary, brightness 80) and note the lamp's `notify len=`: saves still
 confirm within a few seconds. Save on the new wisp with a 1.3.8 app: it

@@ -71,8 +71,8 @@ void main() {
 
   // A wisp in Off, on a lamp serving the sections, with a `wispconfig` read
   // held in flight. setSource(manual) then leaves the held state saying
-  // Manual with no palette prefix, which is the app's own optimism. The wisp
-  // has said neither.
+  // Manual, which is the app's own optimism. The wisp has said neither that
+  // nor the save's echo.
   test('a config read completing during an empty save confirms neither the '
       'save nor the pending setSource', () async {
     WispNotifier.debugSeqStart = () => 5;
