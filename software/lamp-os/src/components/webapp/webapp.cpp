@@ -422,7 +422,6 @@ static void startServer() {
   // Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
   // silently wiped. A genuinely blank/corrupt partition just yields no UI
   // (BLE still works); production USB flash always lays down a valid image.
-  // Coexists with fs_ota's own mount; SPIFFS.begin is a no-op when mounted.
   SPIFFS.begin(/*formatOnFail=*/false);
 
   buildSettingsSnapshot();
@@ -610,6 +609,8 @@ void tick() {
 bool isActive() { return s_ap.up(); }
 
 bool hasClient() { return s_ap.up() && WiFi.softAPgetStationNum() > 0; }
+
+bool serverUp() { return s_serverUp; }
 
 void shutdownForOta() {
   std::lock_guard<std::mutex> lock(s_otaApMu);

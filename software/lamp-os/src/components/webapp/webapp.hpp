@@ -16,6 +16,10 @@ bool isActive();
 // AP is actively transmitting rather than just beaconing.
 bool hasClient();
 
+// True once the config web server is up. From then until the reboot that ends
+// the session it serves the web UI files from SPIFFS, which must stay mounted.
+bool serverUp();
+
 // Takes the softAP down for an OTA radio pause, so its beacons leave the
 // airtime to the chunk stream. ota_quiet_mode calls it after each pause,
 // outside its transition lock, on the pausing task. Waits for any AP work a
