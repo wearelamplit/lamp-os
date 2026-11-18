@@ -1200,8 +1200,8 @@ class WispNotifier extends _$WispNotifier {
     return _sendStyle(style, mac == null ? null : _mintSeq(_swatchesSeqs[mac]));
   }
 
-  // A status from the picked wisp echoes the seq of a pick this phone
-  // superseded: that copy landed after the pick shown, so send it again.
+  // The picked wisp applied the pick, then echoed the seq of a pick this phone
+  // superseded, so a late copy of that pick landed after it. Send it again.
   Future<void> _reassertStyle() async {
     final style = _stylePick.value;
     if (style == null || state.value?.wispMac != _stylePick.mac) return;
@@ -1253,8 +1253,8 @@ class WispNotifier extends _$WispNotifier {
   /// the lamp cached after the send that [shows] it from this wisp confirms
   /// it too. A read of a config cached before the send never confirms, since
   /// an earlier pick may still land after it. A pick the wisp's held config
-  /// already [shows] at the send never confirms on a config: no config of its
-  /// own need follow, so without its echo it resends for the whole budget,
+  /// already [shows] at the send never confirms on a config, since no config
+  /// of its own need follow. Without its echo it resends for the whole budget,
   /// covering a late earlier pick, and then stands if the held config still
   /// shows it. A pick whose attempts all go unconfirmed stands if the held
   /// config shows it by then, else rolls back to the held setting and throws.
@@ -1308,6 +1308,7 @@ class WispNotifier extends _$WispNotifier {
     );
     if (_disposed || pick.epoch != epoch) return;
     pick.confirming = false;
+    pick.landed = landed;
     final held = _configMac == mac ? _config : null;
     final now = state.value;
     if (now != null) state = AsyncData(_withHeldConfig(now));
@@ -1661,6 +1662,9 @@ class _ConfigPick<T extends Object> {
   String? mac;
   int? seq;
   bool confirming = false;
+  // Whether the wisp confirmed the pick, so a later echo of an earlier seq
+  // can only mean that earlier pick landed after it.
+  bool landed = false;
   int epoch = 0;
   // The seqs of this phone's earlier picks.
   final Set<int> _superseded = {};
@@ -1672,6 +1676,7 @@ class _ConfigPick<T extends Object> {
     this.mac = mac;
     this.seq = seq;
     confirming = true;
+    landed = false;
   }
 
   T? heldFor(String? wispMac, [int echoedSeq = 0]) =>
@@ -1684,7 +1689,7 @@ class _ConfigPick<T extends Object> {
   /// Whether [echoedSeq], from [wispMac]'s status, names an earlier pick that
   /// landed over the confirmed one.
   bool overriddenBy(String? wispMac, int echoedSeq) =>
-      !confirming &&
+      landed &&
       seq != null &&
       wispMac == mac &&
       _superseded.contains(echoedSeq);
@@ -1694,6 +1699,7 @@ class _ConfigPick<T extends Object> {
     mac = null;
     seq = null;
     confirming = false;
+    landed = false;
     _superseded.clear();
   }
 }

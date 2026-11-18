@@ -360,6 +360,7 @@ void main() {
         wispOn(ble, true, 300, 100);
         await pumpEventQueue();
         expect(shown(c), PaletteStyle.gradient);
+        expect(_swatchSends(ble), hasLength(3));
         expect(_swatchSends(ble).last, (false, 101), reason: 'B sent again');
 
         wispOn(ble, false, 400, 101);
@@ -368,6 +369,76 @@ void main() {
         await pumpEventQueue();
         expect(shown(c), PaletteStyle.gradient);
         expect(_swatchSends(ble), hasLength(3), reason: 'B stands on its echo');
+      });
+
+      test('a pick that never landed is not sent again on an earlier echo',
+          () async {
+        final (ble, c, n) = await open(echo: 7);
+
+        final a = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        wispOn(ble, true, 200, 100);
+        await a;
+
+        Object? error;
+        await n
+            .setPaletteStyle(PaletteStyle.gradient)
+            .catchError((Object e) => error = e);
+        expect(error, isNotNull);
+        expect(_swatchSends(ble), hasLength(5));
+
+        _notify(ble, _status(seen: 200, echo: 100));
+        await pumpEventQueue();
+        expect(_swatchSends(ble), hasLength(5));
+        expect(shown(c), PaletteStyle.swatches);
+      });
+
+      test("another wisp echoing an earlier pick's seq sends nothing",
+          () async {
+        final (ble, _, n) = await open();
+
+        final a = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        final b = n.setPaletteStyle(PaletteStyle.gradient);
+        await pumpEventQueue();
+        wispOn(ble, false, 200, 101);
+        await Future.wait([a, b]);
+
+        _notify(
+          ble,
+          jsonEncode({
+            'wispMac': '11:22:33:44:55:66',
+            'configSplit': true,
+            'source': 'manual',
+            'configLastSeenMs': 300,
+            'swatchesSeq': 100,
+          }),
+        );
+        await pumpEventQueue();
+        expect(_swatchSends(ble), hasLength(2));
+      });
+
+      // The lamp's hello-only merge carries no swatchesSeq of the wisp's.
+      test('a status the wisp did not send keeps its echo', () async {
+        final (ble, _, n) = await open(echo: 7);
+
+        final done = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: true)));
+        _notify(
+          ble,
+          jsonEncode({
+            'wispMac': _mac,
+            'source': 'manual',
+            'configLastSeenMs': 200,
+          }),
+        );
+        await _wait(WispNotifier.debugConfigConfirmWindow * 1.5);
+        expect(_swatchSends(ble).length, greaterThan(1),
+            reason: 'its config confirmed nothing');
+
+        wispOn(ble, true, 300, 100);
+        await done;
       });
 
       test('a stale echo of the last seq does not confirm a new pick',
