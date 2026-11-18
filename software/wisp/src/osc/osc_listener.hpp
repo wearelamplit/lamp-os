@@ -1,13 +1,15 @@
 // OscListener feeds OSC packets from USB serial (SLIP frames, handed in by
 // SerialConsole) and UDP into WispController's OSC palette input, reading
-// the address for the configured role. Loop task only. The UDP socket is
-// bound on every interface (softAP and STA) while `poll(true)` and closed on
-// `poll(false)`.
+// the address of the stored target (WispConfig::oscTarget). Loop task only.
+// The UDP socket is bound on every interface (softAP and STA) while
+// `poll(true)` and closed on `poll(false)`.
 
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
+
+#include "paint/current_palette.hpp"  // PaletteColor
 
 namespace wisp {
 
@@ -32,16 +34,20 @@ class OscListener {
  private:
   void open(uint32_t nowMs);
   void close();
+  void handleStraylight(const uint8_t* data, size_t len, const char* via);
 
   WispController& controller_;
   const WispConfig& config_;
   int fd_ = -1;
   uint32_t lastOpenAttemptMs_ = 0;
   bool attempted_ = false;
+  uint32_t lastRefusedLogMs_ = 0;
+  bool refusedLogged_ = false;
   uint8_t rx_[1500];
   // Held off the 8 KB loop stack, since the palette path under handlePacket
   // runs deep.
   float rgb_[kOscPaletteMaxColors * 3];
+  PaletteColor colours_[kOscPaletteMaxColors];
 };
 
 }  // namespace wisp

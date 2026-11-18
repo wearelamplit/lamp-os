@@ -706,6 +706,92 @@ void test_set_swatches_sealed_bumps_op_seq() {
     TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
 }
 
+void test_set_osc_maestro_applies_and_reloads() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":3})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(3, cfg.oscSlot());
+    wisp::WispConfig reload;
+    reload.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)reload.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(3, reload.oscSlot());
+}
+
+// A setOsc with no slot keeps the stored one, so switching sub-mode never
+// moves the Maestro slot.
+void test_set_osc_without_slot_keeps_slot() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Maestro, 8);
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"straylight"})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(8, cfg.oscSlot());
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":null})"));
+    TEST_ASSERT_EQUAL_UINT8(8, cfg.oscSlot());
+}
+
+// Any invalid field makes the whole op Malformed and changes nothing.
+void test_set_osc_invalid_changes_nothing() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Maestro, 4);
+    wisp::WispOpDispatcher d(cfg);
+    const char* bad[] = {
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":0})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":11})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":-1})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":"3"})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":2.5})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":true})",
+        R"({"char":"wispOp","op":"setOsc","mode":"aurora","slot":2})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","slot":2})",
+        R"({"char":"wispOp","op":"setOsc","mode":1,"slot":2})",
+        R"({"char":"wispOp","op":"setOsc","slot":2})",
+    };
+    for (const char* op : bad) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::Malformed,
+                                      (int)dispatchStr(d, op), op);
+        TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+        TEST_ASSERT_EQUAL_UINT8(4, cfg.oscSlot());
+    }
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":10})"));
+    TEST_ASSERT_EQUAL_UINT8(10, cfg.oscSlot());
+}
+
+// setOsc is config like any other: sealed once a password is set.
+void test_set_osc_plaintext_rejected_with_password() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Rejected,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":3})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+}
+
+// A sealed setOsc counts as applied, so opSeq confirms it for the app.
+void test_set_osc_sealed_bumps_op_seq() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    wisp::crypto::RecentNonces nonces;
+    d.setNonces(&nonces);
+    const auto sealed = sealWispOp("testpass", 0x05,
+        R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":9})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)d.dispatch(sealed.data(), sealed.size()));
+    TEST_ASSERT_EQUAL_UINT8(9, cfg.oscSlot());
+    TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+}
+
 void test_zone_ops_unknown() {
     wisp::WispConfig cfg;
     cfg.begin();
@@ -789,5 +875,10 @@ int main(int, char**) {
     RUN_TEST(test_set_swatches_needs_a_bool);
     RUN_TEST(test_set_swatches_plaintext_rejected_with_password);
     RUN_TEST(test_set_swatches_sealed_bumps_op_seq);
+    RUN_TEST(test_set_osc_maestro_applies_and_reloads);
+    RUN_TEST(test_set_osc_without_slot_keeps_slot);
+    RUN_TEST(test_set_osc_invalid_changes_nothing);
+    RUN_TEST(test_set_osc_plaintext_rejected_with_password);
+    RUN_TEST(test_set_osc_sealed_bumps_op_seq);
     return UNITY_END();
 }

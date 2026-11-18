@@ -160,6 +160,115 @@ bool oscFindFloats(const uint8_t* data, size_t len, const char* address,
   return ok && ctx.found;
 }
 
+namespace {
+
+float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+// The 4-byte numeric argument at `pos` as a float, `i` converted. False on a
+// NaN or infinite float.
+bool readNumber(const OscMessage& msg, char tag, size_t pos, float& out) {
+  const uint32_t raw = readU32(msg.args + pos);
+  if (tag == 'i') {
+    out = static_cast<float>(static_cast<int32_t>(raw));
+    return true;
+  }
+  std::memcpy(&out, &raw, sizeof out);
+  return std::isfinite(out);
+}
+
+void readHex(const OscMessage& msg, size_t n, PaletteColor* out) {
+  for (size_t i = 0; i < n; ++i) {
+    const uint32_t v = readU32(msg.args + i * 4);
+    out[i].r = static_cast<float>((v >> 16) & 0xFF) / 255.0f;
+    out[i].g = static_cast<float>((v >> 8) & 0xFF) / 255.0f;
+    out[i].b = static_cast<float>(v & 0xFF) / 255.0f;
+    out[i].w = 0.0f;
+  }
+}
+
+bool readRgb(const OscMessage& msg, size_t colours, PaletteColor* out) {
+  for (size_t i = 0; i < colours; ++i) {
+    float ch[3];
+    for (size_t k = 0; k < 3; ++k) {
+      const size_t arg = i * 3 + k;
+      if (!readNumber(msg, msg.tags[arg], arg * 4, ch[k])) return false;
+    }
+    out[i].r = clamp01(ch[0]);
+    out[i].g = clamp01(ch[1]);
+    out[i].b = clamp01(ch[2]);
+    out[i].w = 0.0f;
+  }
+  return true;
+}
+
+}  // namespace
+
+bool oscReadColours(const OscMessage& msg, PaletteColor* out, size_t cap,
+                    size_t& count) {
+  count = 0;
+  if (!msg.tags || !out) return false;
+  size_t n = 0;
+  bool allInt = true;
+  for (const char* t = msg.tags; *t; ++t, ++n) {
+    if (*t != 'f' && *t != 'i') return false;
+    allInt = allInt && *t == 'i';
+  }
+  if (n == 0 || msg.argsLen != n * 4) return false;
+  const size_t colours = allInt ? n : n / 3;
+  if (!allInt && n % 3 != 0) return false;
+  if (colours > cap) return false;
+  if (allInt) {
+    readHex(msg, n, out);
+  } else if (!readRgb(msg, colours, out)) {
+    return false;
+  }
+  count = colours;
+  return true;
+}
+
+namespace {
+
+struct ColoursCtx {
+  const char* address;
+  PaletteColor* out;
+  size_t cap;
+  size_t count;
+  OscColours result;
+  const char* refusedTags;
+};
+
+void findColours(const OscMessage& m, void* raw) {
+  auto* ctx = static_cast<ColoursCtx*>(raw);
+  if (ctx->result == OscColours::Read ||
+      std::strcmp(m.address, ctx->address) != 0) {
+    return;
+  }
+  size_t n = 0;
+  if (oscReadColours(m, ctx->out, ctx->cap, n)) {
+    ctx->count = n;
+    ctx->result = OscColours::Read;
+  } else {
+    ctx->result = OscColours::Refused;
+    ctx->refusedTags = m.tags;
+  }
+}
+
+}  // namespace
+
+OscColours oscFindColours(const uint8_t* data, size_t len, const char* address,
+                          PaletteColor* out, size_t cap, size_t& count,
+                          const char*& refusedTags) {
+  ColoursCtx ctx{address, out, cap, 0, OscColours::Absent, nullptr};
+  count = 0;
+  refusedTags = nullptr;
+  if (!address || !oscForEachMessage(data, len, findColours, &ctx)) {
+    return OscColours::Absent;
+  }
+  count = ctx.count;
+  refusedTags = ctx.refusedTags;
+  return ctx.result;
+}
+
 OscFeedPacket oscClassifyFeedPacket(const uint8_t* data, size_t len,
                                     const char* address,
                                     const char* feedPrefix, float* out,

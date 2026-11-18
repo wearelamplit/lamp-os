@@ -22,6 +22,7 @@ static bool isApplied(DispatchResult r) {
     case DispatchResult::AppliedWifiChange:
     case DispatchResult::AppliedSourceChange:
     case DispatchResult::AppliedOscRole:
+    case DispatchResult::AppliedOscSettings:
     case DispatchResult::AppliedManualPalette:
     case DispatchResult::AppliedOffColor:
     case DispatchResult::AppliedShuffle:
@@ -165,6 +166,27 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     Serial.printf("[wisp.op] setOscRole role=%s\n", oscRoleName(role));
     config_.setOscRole(role);
     return DispatchResult::AppliedOscRole;
+  }
+
+  if (strcmp(op, "setOsc") == 0) {
+    OscMode mode = OscMode::Straylight;
+    if (!oscModeFromName(doc["mode"].as<const char*>(), mode)) {
+      Serial.println("[wisp.op] setOsc missing/invalid 'mode'");
+      return DispatchResult::Malformed;
+    }
+    uint8_t slot = config_.oscSlot();
+    JsonVariantConst slotVar = doc["slot"];
+    if (!slotVar.isNull()) {
+      if (!slotVar.is<int>() || !maestroSlotValid(slotVar.as<int>())) {
+        Serial.println("[wisp.op] setOsc invalid 'slot'");
+        return DispatchResult::Malformed;
+      }
+      slot = static_cast<uint8_t>(slotVar.as<int>());
+    }
+    Serial.printf("[wisp.op] setOsc mode=%s slot=%u\n", oscModeName(mode),
+                  (unsigned)slot);
+    config_.setOsc(mode, slot);
+    return DispatchResult::AppliedOscSettings;
   }
 
   if (strcmp(op, "setOffColor") == 0) {

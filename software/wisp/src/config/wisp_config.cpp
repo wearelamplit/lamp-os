@@ -35,6 +35,8 @@ constexpr const char* kKeySsid        = "wifiSsid";
 constexpr const char* kKeyPw          = "wifiPw";
 constexpr const char* kKeySourceMode  = "srcMode";
 constexpr const char* kKeyOscRole     = "oscRole";
+constexpr const char* kKeyOscMode     = "oscMode";
+constexpr const char* kKeyOscSlot     = "oscSlot";
 // Legacy packed RGB blob (3 bytes/color), read-only for migration.
 constexpr const char* kKeyManualPaletteRgb = "manualPal";
 // Packed RGBW blob (4 bytes/color). A separate key because length parity
@@ -91,6 +93,8 @@ void WispConfig::begin() {
       prefs_.getInt(kKeySourceMode,
                     static_cast<int>(WispSourceMode::Off)));
   oscRole_      = coerceOscRole(prefs_.getUChar(kKeyOscRole, 0));
+  oscMode_      = coerceOscMode(prefs_.getUChar(kKeyOscMode, 0));
+  oscSlot_      = coerceMaestroSlot(prefs_.getUChar(kKeyOscSlot, kMaestroSlotMin));
 
   manualPalette_.clear();
   const size_t paletteLen = prefs_.getBytesLength(kKeyManualPalette);
@@ -183,12 +187,14 @@ void WispConfig::begin() {
   }
 
   Serial.printf("[wisp.cfg] loaded ssid='%s' pw=%s "
-                "srcMode=%d oscRole=%s manualColors=%u offColor=%u,%u,%u "
+                "srcMode=%d oscRole=%s oscMode=%s oscSlot=%u "
+                "manualColors=%u offColor=%u,%u,%u "
                 "shuffleSeed=%u swatches=%d "
                 "driftIntv=%u ms driftFade=%u%% name='%s' hasPassword=%d\n",
                 wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
                 static_cast<int>(sourceMode_), oscRoleName(oscRole_),
+                oscModeName(oscMode_), (unsigned)oscSlot_,
                 (unsigned)manualPalette_.size(),
                 offColor_.r, offColor_.g, offColor_.b,
                 (unsigned)shuffleSeed_,
@@ -233,6 +239,17 @@ void WispConfig::setOscRole(OscRole role) {
     prefs_.putUChar(kKeyOscRole, static_cast<uint8_t>(role));
   }
   Serial.printf("[wisp.cfg] oscRole <= %s\n", oscRoleName(role));
+}
+
+void WispConfig::setOsc(OscMode mode, uint8_t slot) {
+  oscMode_ = mode;
+  oscSlot_ = slot;
+  if (opened_) {
+    prefs_.putUChar(kKeyOscMode, static_cast<uint8_t>(mode));
+    prefs_.putUChar(kKeyOscSlot, slot);
+  }
+  Serial.printf("[wisp.cfg] osc <= %s slot %u\n", oscModeName(mode),
+                (unsigned)slot);
 }
 
 void WispConfig::setManualPalette(

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "osc/osc_target.hpp"
 #include "util/uptime.hpp"
 
 namespace wisp {
@@ -104,6 +105,9 @@ size_t buildWispConfigJson(const WispConfigFields& f, char* out,
   doc["opSeq"]           = f.opSeq;
   doc["ip"]              = f.ip;
   doc["swatches"]        = f.swatches;
+  doc["oscMode"]         = f.oscMode ? f.oscMode
+                                     : oscModeName(OscMode::Straylight);
+  doc["oscSlot"]         = f.oscSlot;
   if (measureJson(doc) >= outCap) return 0;
   return serializeJson(doc, out, outCap);
 }

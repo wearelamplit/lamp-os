@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "paint/current_palette.hpp"  // PaletteColor
+
 namespace wisp {
 
 inline constexpr int kOscMaxBundleDepth = 4;
@@ -60,5 +62,26 @@ OscFeedPacket oscClassifyFeedPacket(const uint8_t* data, size_t len,
                                     const char* address,
                                     const char* feedPrefix, float* out,
                                     size_t cap, size_t& count);
+
+// A palette message's colours, the format told by its type tags. Every tag
+// `i`: one 0xRRGGBB per int. Every tag `f` or `i` otherwise: RGB in threes.
+// Channels land clamped to 0..1, white 0. False, with nothing to use in
+// `out`, on any other tags, a NaN or infinite float, arguments that end
+// early or run past the tags, no colour, or more than `cap` colours.
+bool oscReadColours(const OscMessage& msg, PaletteColor* out, size_t cap,
+                    size_t& count);
+
+enum class OscColours : uint8_t {
+  Absent,   // no message addressed exactly `address`, or a malformed packet
+  Read,     // out/count hold the first such message's colours
+  Refused,  // such messages came and none read whole
+};
+
+// The colours of the first message in the packet addressed exactly
+// `address` that oscReadColours reads. On Refused, `refusedTags` points at
+// the last refused message's type tags, inside the packet.
+OscColours oscFindColours(const uint8_t* data, size_t len, const char* address,
+                          PaletteColor* out, size_t cap, size_t& count,
+                          const char*& refusedTags);
 
 }  // namespace wisp

@@ -7,6 +7,7 @@
 
 #include <cstring>
 #include <limits>
+#include <string>
 #include <vector>
 
 #include "osc/osc_listener.hpp"
@@ -89,6 +90,55 @@ std::vector<uint8_t> floatMessage(const char* address, size_t floats) {
     values[i] = static_cast<float>(i) / static_cast<float>(floats);
   }
   return floatsMessage(address, values);
+}
+
+// One OSC message to `address` with type tags `tags` (after the ','),
+// each `i` taking the next of `ints` and each `f` the next of `floats`.
+std::vector<uint8_t> typedMessage(const char* address, const char* tags,
+                                  const std::vector<int32_t>& ints,
+                                  const std::vector<float>& floats) {
+  std::vector<uint8_t> out(address, address + std::strlen(address));
+  do out.push_back(0); while (out.size() % 4 != 0);
+  out.push_back(',');
+  for (const char* t = tags; *t; ++t) out.push_back(static_cast<uint8_t>(*t));
+  do out.push_back(0); while (out.size() % 4 != 0);
+  size_t ii = 0, fi = 0;
+  for (const char* t = tags; *t; ++t) {
+    uint32_t bits = 0;
+    if (*t == 'i') {
+      bits = static_cast<uint32_t>(ints[ii++]);
+    } else if (*t == 'f') {
+      std::memcpy(&bits, &floats[fi++], sizeof bits);
+    } else {
+      continue;
+    }
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      out.push_back(static_cast<uint8_t>(bits >> shift));
+    }
+  }
+  return out;
+}
+
+std::vector<uint8_t> hexMessage(const char* address,
+                                const std::vector<int32_t>& ints) {
+  return typedMessage(address, std::string(ints.size(), 'i').c_str(), ints,
+                      {});
+}
+
+wisp::OscColours findColours(const std::vector<uint8_t>& d,
+                             const char* address, wisp::PaletteColor* out,
+                             size_t& n) {
+  const char* tags = nullptr;
+  return wisp::oscFindColours(d.data(), d.size(), address, out,
+                              wisp::kOscPaletteMaxColors, n, tags);
+}
+
+void assertColour(float r, float g, float b, float w,
+                  const wisp::PaletteColor& c) {
+  TEST_ASSERT_EQUAL_FLOAT(r, c.r);
+  TEST_ASSERT_EQUAL_FLOAT(g, c.g);
+  TEST_ASSERT_EQUAL_FLOAT(b, c.b);
+  TEST_ASSERT_EQUAL_FLOAT(w, c.w);
 }
 
 struct Seen {
@@ -262,6 +312,132 @@ void test_non_finite_float_refuses_whole_message(void) {
   TEST_ASSERT_EQUAL_UINT(6, n);
 }
 
+// Limbic hex: one 0xRRGGBB per int, each byte over 255, white 0.
+void test_hex_ints_read_one_colour_each(void) {
+  const char* addr = "/palette/live/3";
+  const auto d = hexMessage(addr, {0xFF0000, 0x00FF00, 0x0000FF, 0x336699});
+  wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+  size_t n = 0;
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(d, addr, c, n));
+  TEST_ASSERT_EQUAL_UINT(4, n);
+  assertColour(1, 0, 0, 0, c[0]);
+  assertColour(0, 1, 0, 0, c[1]);
+  assertColour(0, 0, 1, 0, c[2]);
+  assertColour(0x33 / 255.0f, 0x66 / 255.0f, 0x99 / 255.0f, 0, c[3]);
+}
+
+// Only the low 24 bits carry the colour, whatever sits above them.
+void test_hex_ignores_the_top_byte(void) {
+  const char* addr = "/palette/live/1";
+  const auto d = hexMessage(addr, {static_cast<int32_t>(0xFF102030u), -1});
+  wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+  size_t n = 0;
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(d, addr, c, n));
+  TEST_ASSERT_EQUAL_UINT(2, n);
+  assertColour(0x10 / 255.0f, 0x20 / 255.0f, 0x30 / 255.0f, 0, c[0]);
+  assertColour(1, 1, 1, 0, c[1]);
+}
+
+// Floats, or floats mixed with ints, read as RGB in threes, clamped to 0..1.
+void test_rgb_floats_read_in_threes(void) {
+  const char* addr = "/palette/live/2";
+  const auto d = typedMessage(addr, "fffiff", {1},
+                              {0.25f, 0.5f, 0.75f, 2.0f, -1.0f});
+  wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+  size_t n = 0;
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(d, addr, c, n));
+  TEST_ASSERT_EQUAL_UINT(2, n);
+  assertColour(0.25f, 0.5f, 0.75f, 0, c[0]);
+  assertColour(1, 1, 0, 0, c[1]);
+}
+
+// The address matches exactly: slot 1 never takes slot 10 or a longer path.
+void test_colours_match_the_address_exactly(void) {
+  wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+  size_t n = 0;
+  for (const char* other :
+       {"/palette/live/10", "/palette/live/1/x", "/palette/live/", "/palette/live/01"}) {
+    const auto d = hexMessage(other, {0xFF0000});
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Absent,
+                          (int)findColours(d, "/palette/live/1", c, n));
+  }
+  const auto d = hexMessage("/palette/live/10", {0xFF0000});
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(d, "/palette/live/10", c, n));
+}
+
+// A message the decoder cannot read whole is refused and fills nothing.
+void test_unreadable_colours_refused(void) {
+  const char* addr = "/palette/live/4";
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+  std::vector<std::vector<uint8_t>> bad = {
+      typedMessage(addr, "fff", {}, {nan, 0, 0}),
+      typedMessage(addr, "fffifff", {1}, {0, 0, 0, 0, 0, inf}),
+      typedMessage(addr, "ifs", {1}, {0.5f}),
+      typedMessage(addr, "ffff", {}, {0, 0, 0, 0}),
+      typedMessage(addr, "", {}, {}),
+      hexMessage(addr, std::vector<int32_t>(wisp::kOscPaletteMaxColors + 1,
+                                            0x112233)),
+      typedMessage(addr, "fT", {}, {0.5f}),
+  };
+  // Arguments that run past the type tags.
+  auto trailing = hexMessage(addr, {0x112233});
+  for (int i = 0; i < 4; ++i) trailing.push_back(0);
+  bad.push_back(trailing);
+  // Arguments that end before the tags do.
+  auto shortArgs = hexMessage(addr, {0x112233, 0x445566});
+  shortArgs.resize(shortArgs.size() - 4);
+  bad.push_back(shortArgs);
+  for (const auto& d : bad) {
+    wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+    size_t n = 99;
+    const char* tags = nullptr;
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Refused,
+        (int)wisp::oscFindColours(d.data(), d.size(), addr, c,
+                                  wisp::kOscPaletteMaxColors, n, tags));
+    TEST_ASSERT_EQUAL_UINT(0, n);
+    TEST_ASSERT_NOT_NULL(tags);
+  }
+}
+
+// The OSC cap holds on the hex path too: 50 ints read, 51 refuse.
+void test_hex_cap_is_50_colours(void) {
+  const char* addr = "/palette/live/5";
+  wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+  size_t n = 0;
+  const auto fifty =
+      hexMessage(addr, std::vector<int32_t>(wisp::kOscPaletteMaxColors, 0x0A0B0C));
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(fifty, addr, c, n));
+  TEST_ASSERT_EQUAL_UINT(wisp::kOscPaletteMaxColors, n);
+}
+
+// In a bundle the first readable message on the address wins; a refused one
+// before it does not stop the read.
+void test_bundle_takes_first_readable_colours(void) {
+  const char* addr = "/palette/live/6";
+  const auto bad = typedMessage(addr, "ff", {}, {0.5f, 0.5f});
+  const auto good = hexMessage(addr, {0x00FF00});
+  std::vector<uint8_t> b = {'#', 'b', 'u', 'n', 'd', 'l', 'e', 0,
+                            0, 0, 0, 0, 0, 0, 0, 1};
+  for (const auto* m : {&bad, &good}) {
+    const uint32_t sz = static_cast<uint32_t>(m->size());
+    b.push_back(sz >> 24); b.push_back(sz >> 16);
+    b.push_back(sz >> 8);  b.push_back(sz);
+    b.insert(b.end(), m->begin(), m->end());
+  }
+  wisp::PaletteColor c[wisp::kOscPaletteMaxColors];
+  size_t n = 0;
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(b, addr, c, n));
+  TEST_ASSERT_EQUAL_UINT(1, n);
+  assertColour(0, 1, 0, 0, c[0]);
+}
+
 void test_slip_frame_with_escapes(void) {
   static SlipDecoder slip;
   const uint8_t payload[] = {0x01, 0xC0, 0x02, 0xDB, 0x03};
@@ -377,6 +553,13 @@ int main(int, char**) {
   RUN_TEST(test_classify_feed_packet);
   RUN_TEST(test_osc_cap_is_50_colours);
   RUN_TEST(test_non_finite_float_refuses_whole_message);
+  RUN_TEST(test_hex_ints_read_one_colour_each);
+  RUN_TEST(test_hex_ignores_the_top_byte);
+  RUN_TEST(test_rgb_floats_read_in_threes);
+  RUN_TEST(test_colours_match_the_address_exactly);
+  RUN_TEST(test_unreadable_colours_refused);
+  RUN_TEST(test_hex_cap_is_50_colours);
+  RUN_TEST(test_bundle_takes_first_readable_colours);
   RUN_TEST(test_slip_frame_with_escapes);
   RUN_TEST(test_slip_back_to_back_and_oversize);
   RUN_TEST(test_slip_carries_straylight_bundle);

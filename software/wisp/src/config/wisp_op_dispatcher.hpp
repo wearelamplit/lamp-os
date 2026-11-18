@@ -20,6 +20,7 @@ enum class DispatchResult {
   AppliedWifiChange,   // setWifi persisted + WifiLink/StageBeacon kicked
   AppliedSourceChange, // setSource applied (Off/Manual/Osc)
   AppliedOscRole,      // setOscRole applied
+  AppliedOscSettings,  // setOsc stored (sub-mode + Maestro slot)
   AppliedManualPalette,// setManualPalette stored
   AppliedOffColor,     // setOffColor stored (Off-mode wisp-ring color)
   AppliedShuffle,      // shuffle: bumped shuffleSeed, re-roll queued

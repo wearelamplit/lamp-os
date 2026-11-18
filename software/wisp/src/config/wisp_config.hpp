@@ -14,6 +14,7 @@
 #include "config/manual_palette_color.hpp"
 #include "paint/palette_style.hpp"
 #include "osc/osc_role.hpp"
+#include "osc/osc_target.hpp"
 
 namespace wisp {
 
@@ -59,6 +60,12 @@ class WispConfig {
   // Straylight palette role followed in Osc mode.
   OscRole oscRole() const { return oscRole_; }
   void setOscRole(OscRole role);
+
+  // The OSC sub-mode and Maestro slot. `slot` must pass maestroSlotValid.
+  OscMode oscMode() const { return oscMode_; }
+  uint8_t oscSlot() const { return oscSlot_; }
+  void setOsc(OscMode mode, uint8_t slot);
+  OscTarget oscTarget() const { return {oscMode_, oscRole_, oscSlot_}; }
 
   // Replace-only; empty is valid (lamps revert to their own behavior).
   const std::vector<ManualPaletteColor>& manualPalette() const {
@@ -132,6 +139,8 @@ class WispConfig {
   String wifiPw_;
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   OscRole oscRole_ = OscRole::Primary;
+  OscMode oscMode_ = OscMode::Straylight;
+  uint8_t oscSlot_ = kMaestroSlotMin;
   std::vector<ManualPaletteColor> manualPalette_;
   uint16_t manualSeq_ = 0;
   ManualPaletteColor offColor_ = {255, 150, 50, 0};

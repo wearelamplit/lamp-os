@@ -140,6 +140,28 @@ void test_memo_refuses_an_oversized_palette() {
   TEST_ASSERT_FALSE(memo.hold(one, 1, wisp::OscRole::Primary));
 }
 
+// A zero window (Maestro) holds the last palette however long the sender
+// stays quiet, and reset still drops it.
+void test_zero_window_never_stales() {
+  OscFreshness f;
+  f.setStaleMs(0);
+  f.onPalette(1000);
+  TEST_ASSERT_FALSE(f.tick(1000 + 3600000u));
+  TEST_ASSERT_FALSE(f.tick(1000 + 0x7FFFFFFFu));
+  TEST_ASSERT_TRUE(f.live());
+  f.reset();
+  TEST_ASSERT_FALSE(f.live());
+}
+
+// The window set is the one in force, wider or narrower than the default.
+void test_window_is_settable() {
+  OscFreshness f;
+  f.setStaleMs(5000);
+  f.onPalette(0);
+  TEST_ASSERT_FALSE(f.tick(4999));
+  TEST_ASSERT_TRUE(f.tick(5000));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_first_palette_is_live_edge);
@@ -155,5 +177,7 @@ int main(int, char**) {
   RUN_TEST(test_memo_refuses_an_oversized_palette);
   RUN_TEST(test_feed_keeps_held_palette_live);
   RUN_TEST(test_feed_does_not_make_stale_live);
+  RUN_TEST(test_zero_window_never_stales);
+  RUN_TEST(test_window_is_settable);
   return UNITY_END();
 }
