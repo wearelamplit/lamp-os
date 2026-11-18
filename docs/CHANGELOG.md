@@ -28,9 +28,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   from wisp…"** until the wisp's own status arrives, so Save can't write the
   lamp's empty palette over the wisp's.
 - **A wisp palette Save never writes over a palette the app hasn't read.**
-  While the editor shows "Reading palette from wisp…" (after a reconnect, a
-  new display wisp, or choosing Manual before the palette arrives) Save sends
-  nothing, and a save already resending stops; a palette sheet left open then
+  While the editor shows "Reading palette from wisp…" (after a reconnect, or
+  a new display wisp, until the wisp's next status) Save sends nothing, and a
+  save already resending stops; a palette sheet left open then
   shows "not saved" once the palette is read. The wisp screen also redraws
   when only the palette's state changes, so the loading line shows without
   another tap.
@@ -43,6 +43,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   palette carries (the editor held 10). A wisp holding a longer palette keeps
   its first 16, and the editor says when it shows only the first 16 of one.
   Needs the wisp reflashed.
+- **The wisp palette editor needs the wisp reflashed.** A wisp on 1.3.8 or
+  older doesn't say which palette it stores, so the editor shows "Reading
+  palette from wisp…" for it and Save sends nothing.
 - **A wrong current password on a wisp takes up to 10 s to report.** The app
   waits that long for the wisp to confirm a password change.
 - **The wisp's status no longer repeats its settings**, which keeps it inside

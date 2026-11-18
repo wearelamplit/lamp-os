@@ -252,8 +252,9 @@ there. Open the lamp a few times on a wisp whose Manual palette is empty:
 "Reading palette from wisp…" never stays past a few seconds.
 
 P14 — **the palette editor shows the palette the wisp states.** Needs a wisp
-flashed from this branch (`npm run wisp:flash`), a second wisp on 1.3.8, two
-phones, and `npm run lamp:tap` on the lamp, opened once. With the new wisp in
+flashed from this branch (`npm run wisp:flash`), two phones, and
+`npm run lamp:tap` on the lamp, opened once; the display-switch steps need a
+second wisp flashed from this branch. With the new wisp in
 Manual and its palette empty, open the lamp: the editor shows empty within a
 second or two, and the lamp log's `[wisp_state] notify` preview carries
 `"manualId":""`. Put the new wisp in Osc with Straylight changing palettes and
@@ -263,12 +264,13 @@ while phone A is off the lamp, then open it on A: empty. Power-cycle the lamp
 while A has it open, and change the palette from B meanwhile: after A
 reconnects it shows "Reading palette from wisp…" until the wisp's next status
 (up to 30 s when idle), then B's palette, and never offers Save over the old
-one. Move the lamp from the new wisp's zone to the 1.3.8 wisp's: the editor
-shows the loading line, then the 1.3.8 wisp's palette, never the new wisp's.
-Power-cycle the lamp, and open it on A the moment it connects, on the new
-wisp and again on the 1.3.8 one: the editor shows "Reading palette from
-wisp…" with no Save until the lamp log's `[wisp_state] notify` preview
-carries `"source"`, then the wisp's palette.
+one. Move the lamp from the first wisp's zone to the second's: the editor
+shows the loading line, then the second wisp's palette, never the first's.
+Power-cycle the lamp, and open it on A the moment it connects: the editor
+shows "Reading palette from wisp…" with no Save until the lamp log's
+`[wisp_state] notify` preview carries `"source"`, then the wisp's palette.
+If a wisp still on 1.3.8 is at hand before it is reflashed, open a lamp on
+it: the editor stays on "Reading palette from wisp…" and offers no Save.
 
 P15 — **a palette save confirms on the wisp's echo.** Same setup as P14. On
 the new wisp, edit and Save: the wisp's serial prints `[wisp.op]
@@ -282,8 +284,8 @@ palette, and at most one shows "not saved". Save, then tap Osc at once: the
 save confirms with no "source changed", and back in Manual the palette shows.
 Give the new wisp a rich config (20-character name, password, oscRole
 secondary, brightness 80) and note the lamp's `notify len=`: saves still
-confirm within a few seconds. Save on the 1.3.8 wisp with this app, and on
-the new wisp with a 1.3.8 app: both behave as on 1.3.8.
+confirm within a few seconds. Save on the new wisp with a 1.3.8 app: it
+behaves as on 1.3.8.
 
 P16 — **a Manual palette holds 16 colours.** Same setup as P14. In the
 editor add colours: the `+` stops at 16. Save 16 colours with white on each:
@@ -305,7 +307,7 @@ the new wisp, open the palette sheet, edit a swatch, power-cycle the lamp, and
 tap Save in the open sheet once the app reconnects: the wisp's serial prints
 no `setManualPalette`, and the editor shows "Reading palette from wisp…", then
 "not saved" once the palette is read. Repeat with the sheet open while the
-lamp moves from the 1.3.8 wisp's zone to the new wisp's. Tap Manual from Osc
+lamp moves from one wisp's zone to the other's. Tap Manual from Osc
 with the palette shown, and within 20 s move the lamp to the other wisp's
 zone: the editor turns to "Reading palette from wisp…" with no tap.
 
