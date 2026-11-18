@@ -364,8 +364,10 @@ void main() {
 
         wispOn(ble, false, 400, 101);
         await _wait(WispNotifier.debugConfigConfirmWindow * 2);
+        _notify(ble, _status(seen: 400, echo: 101));
+        await pumpEventQueue();
         expect(shown(c), PaletteStyle.gradient);
-        expect(_swatchSends(ble), hasLength(3));
+        expect(_swatchSends(ble), hasLength(3), reason: 'B stands on its echo');
       });
 
       test('a stale echo of the last seq does not confirm a new pick',
