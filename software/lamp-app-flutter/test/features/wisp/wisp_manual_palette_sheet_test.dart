@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,10 +67,13 @@ void main() {
       .enabled;
 
   testWidgets('an open sheet greys Save with a note while the palette is '
-      'unread, and gives it back when the read lands', (tester) async {
+      'unread, and gives it back with the edit kept when the read lands',
+      (tester) async {
     await openSheet(tester);
     expect(saveEnabled(tester), isTrue);
     expect(inSheet(find.text('Reading palette from wisp…')), findsNothing);
+    await tester.tap(inSheet(find.text('Add Color')));
+    await tester.pumpAndSettle();
 
     await tester.runAsync(() async {
       await ble.disconnect(_lampId);
@@ -95,5 +100,17 @@ void main() {
     expect(find.byType(ColorStopsSheet), findsOneWidget);
     expect(saveEnabled(tester), isTrue);
     expect(inSheet(find.text('Reading palette from wisp…')), findsNothing);
+
+    await tester.tap(inSheet(find.widgetWithText(FilledButton, 'Save')));
+    await settle(tester);
+    final op = jsonDecode(utf8.decode(ble.paletteWrites.single))
+        as Map<String, dynamic>;
+    expect(op['colors'], hasLength(_p.length + 1));
+
+    await tester.runAsync(() async {
+      ble.notifyStatus(echoOfLastPaletteSave(ble, _lampId));
+    });
+    await settle(tester);
+    expect(n.manualPaletteDirty, isFalse);
   });
 }

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/widgets/app_sheet.dart';
 import '../../../../core/widgets/lamp_card.dart';
 import '../../../../core/widgets/settings_row.dart';
 import '../../../control/domain/lamp_color.dart';
@@ -41,12 +40,10 @@ class ManualPaletteEditor extends ConsumerWidget {
         LampCard(
           child: ColorBlocksBar(
             colors: draft,
-            onTap: () => showAppSheet<void>(
+            onTap: () => showFixedColorSheet(
               context,
-              builder: (_) => FractionallySizedBox(
-                heightFactor: 0.6,
-                child: _ManualPaletteSheet(lampId: lampId, initial: draft),
-              ),
+              builder: (_) =>
+                  _ManualPaletteSheet(lampId: lampId, initial: draft),
             ),
           ),
         ),

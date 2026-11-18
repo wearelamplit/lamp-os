@@ -405,6 +405,18 @@ class ColorSheetHeight extends StatelessWidget {
       );
 }
 
+/// Opens the colour sheet [builder] makes as a modal bottom sheet, a fixed
+/// 0.6 of the available height.
+Future<void> showFixedColorSheet(
+  BuildContext context, {
+  required WidgetBuilder builder,
+}) =>
+    showAppSheet<void>(
+      context,
+      builder: (ctx) =>
+          FractionallySizedBox(heightFactor: 0.6, child: builder(ctx)),
+    );
+
 /// Opens [ColorStopsSheet] as a modal bottom sheet. Mirrors
 /// [showColorPickerSheet].
 Future<void> showColorStopsSheet(
@@ -419,21 +431,18 @@ Future<void> showColorStopsSheet(
   int bpp = 4,
   ValueChanged<List<LampColor>>? onChanged,
 }) {
-  return showAppSheet<void>(
+  return showFixedColorSheet(
     context,
-    builder: (ctx) => FractionallySizedBox(
-      heightFactor: 0.6,
-      child: ColorStopsSheet(
-        initial: initial,
-        title: title,
-        max: max,
-        onSave: onSave,
-        description: description,
-        allowEmpty: allowEmpty,
-        reorderable: reorderable,
-        bpp: bpp,
-        onChanged: onChanged,
-      ),
+    builder: (ctx) => ColorStopsSheet(
+      initial: initial,
+      title: title,
+      max: max,
+      onSave: onSave,
+      description: description,
+      allowEmpty: allowEmpty,
+      reorderable: reorderable,
+      bpp: bpp,
+      onChanged: onChanged,
     ),
   );
 }
