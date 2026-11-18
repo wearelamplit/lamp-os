@@ -10,6 +10,9 @@ import 'wisp_source_mode.dart';
 /// it.
 const LampColor _defaultOffColor = LampColor(r: 255, g: 150, b: 50, w: 0);
 
+// Marks a nullable `_copy` argument left out, so null can replace a value.
+const Object _keep = Object();
+
 /// Parsed `CHAR_WISP_STATUS` payload. The lamp serves a merged JSON
 /// combining the last `wispStatus` MSG_CONTROL_OP broadcast (from the
 /// wisp) with the last MSG_WISP_HELLO data. When no wisp has been seen
@@ -54,6 +57,7 @@ class WispStatus {
     this.configLastSeenMs,
     this.manualId,
     this.manualSeq = 0,
+    this.ip,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -197,6 +201,26 @@ class WispStatus {
   /// rebooted since, or the status does not carry it. Equality only.
   final int manualSeq;
 
+  /// The wisp's OSC send-to address from its `wispConfig`: `""` while it has
+  /// none, null until a config carrying it is merged (a wisp that predates
+  /// it never sends one).
+  final String? ip;
+
+  /// The address an OSC sender should target, from the wisp's own reports:
+  /// [ip], or [ethIp] while [ip] has none. Empty when neither has one.
+  String get oscSendTo => (ip ?? '').isNotEmpty ? ip! : ethIp;
+
+  /// True when the wisp sent this status and its link state contradicts the
+  /// held [ip]: a link up with no address, or an address with no link. A
+  /// config frame lost after a link edge leaves them apart until the next
+  /// config read.
+  bool get ipDisagreesWithLink {
+    final held = ip;
+    if (!fromWisp || !configKnown || held == null) return false;
+    final linked = wifiConnected || ethIp.isNotEmpty;
+    return linked == held.isEmpty;
+  }
+
   /// True when the wisp sent this status. False for the lamp's hello-only
   /// merge, which it serves while it holds no status from the wisp.
   bool get fromWisp => configSplit;
@@ -328,6 +352,7 @@ class WispStatus {
       shuffleSeed: config.shuffleSeed,
       opSeq: config.opSeq,
       configKnown: true,
+      ip: config.ip,
     );
   }
 
@@ -371,6 +396,7 @@ class WispStatus {
     int? shuffleSeed,
     int? opSeq,
     bool? configKnown,
+    Object? ip = _keep,
   }) {
     return WispStatus(
       wifiConnected: wifiConnected,
@@ -407,6 +433,7 @@ class WispStatus {
       configLastSeenMs: configLastSeenMs,
       manualId: manualId,
       manualSeq: manualSeq,
+      ip: identical(ip, _keep) ? this.ip : ip as String?,
     );
   }
 
@@ -447,7 +474,8 @@ class WispStatus {
           configSplit == other.configSplit &&
           configLastSeenMs == other.configLastSeenMs &&
           manualId == other.manualId &&
-          manualSeq == other.manualSeq;
+          manualSeq == other.manualSeq &&
+          ip == other.ip;
 
   @override
   int get hashCode => Object.hash(
@@ -475,7 +503,7 @@ class WispStatus {
           opSeq,
           brightness,
           configKnown,
-          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq),
+          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq, ip),
         ),
       );
 }

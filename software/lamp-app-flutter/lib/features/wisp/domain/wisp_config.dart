@@ -4,7 +4,8 @@ import 'dart:typed_data';
 /// The wisp's settings as its `wispConfig` broadcast carries them, read from
 /// the lamp's `wispconfig` page section. The wisp sends every field every
 /// time, so a parsed [WispConfig] is complete: nothing here is a default
-/// standing in for a missing value.
+/// standing in for a missing value. A field a newer wisp added is nullable,
+/// and null means the wisp predates it.
 class WispConfig {
   const WispConfig({
     required this.ledType,
@@ -14,6 +15,7 @@ class WispConfig {
     required this.driftFadePct,
     required this.shuffleSeed,
     required this.opSeq,
+    this.ip,
   });
 
   final String ledType;
@@ -23,6 +25,12 @@ class WispConfig {
   final int driftFadePct;
   final int shuffleSeed;
   final int opSeq;
+
+  /// Where an OSC sender reaches the wisp on UDP [kOscPort]: `""` while it
+  /// has no network address.
+  final String? ip;
+
+  static const int kOscPort = 9000;
 
   /// Parse the section bytes. Null for an empty read (a lamp that predates
   /// the section), `"{}"` (no config cached yet), a payload that is not a
@@ -44,6 +52,7 @@ class WispConfig {
     final driftFadePct = decoded['driftFadePct'];
     final shuffleSeed = decoded['shuffleSeed'];
     final opSeq = decoded['opSeq'];
+    final ip = decoded['ip'];
     if (ledType is! String ||
         px is! int ||
         brightness is! int ||
@@ -61,6 +70,7 @@ class WispConfig {
       driftFadePct: driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
+      ip: ip is String ? ip : null,
     );
   }
 
@@ -79,6 +89,7 @@ class WispConfig {
       driftFadePct: driftFadePct ?? this.driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
+      ip: ip,
     );
   }
 }

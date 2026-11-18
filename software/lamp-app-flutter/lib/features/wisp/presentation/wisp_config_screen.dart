@@ -230,6 +230,12 @@ class _SourcesTabState extends State<_SourcesTab> {
             current: status.oscRole,
             onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
           ),
+          const SizedBox(height: AppSpace.xl),
+          OscSendTo(
+            lampId: lampId,
+            status: status,
+            onLinkDisagrees: () => unawaited(notifier.pollConfig()),
+          ),
         ],
       ],
     );

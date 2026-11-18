@@ -115,7 +115,8 @@ void main() {
       // SourcePicker pills visible without any tab tap.
       expect(find.text('Manual'), findsOneWidget);
       expect(find.text('Off'), findsOneWidget);
-      expect(find.text('Straylight'), findsOneWidget);
+      expect(find.text('OSC'), findsOneWidget);
+      expect(find.text('Straylight'), findsNothing);
     });
 
     testWidgets('Palette tab shows per-mode widget (manual palette editor)',
@@ -128,7 +129,7 @@ void main() {
       expect(find.text('MANUAL PALETTE'), findsOneWidget);
     });
 
-    testWidgets('Straylight source shows role picker and waiting notice',
+    testWidgets('OSC source shows the Straylight role picker and waiting notice',
         (tester) async {
       final c = await _makeContainer(
         wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
@@ -203,7 +204,7 @@ void main() {
       // Source picker pills should not appear on the Settings tab.
       expect(find.text('Manual'), findsNothing);
       expect(find.text('Off'), findsNothing);
-      expect(find.text('Straylight'), findsNothing);
+      expect(find.text('OSC'), findsNothing);
     });
 
     testWidgets('DriftControls does NOT appear on Palette or Lamps tabs',

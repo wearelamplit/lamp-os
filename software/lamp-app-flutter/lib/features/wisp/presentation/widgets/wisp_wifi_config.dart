@@ -33,15 +33,15 @@ class _WifiConfigRowState extends ConsumerState<WifiConfigRow> {
     // On Ethernet the WiFi join is off, so a held mismatch flag is stale; the
     // wisp clears it once the join is wanted again.
     final mismatch = widget.status.wifiChannelMismatch && ethIp.isEmpty;
-    // The wisp joins WiFi only while following Straylight, so outside that
-    // mode "not connected" says nothing about the saved network.
-    final followsStraylight = widget.status.source == WispSourceMode.osc;
+    // The wisp joins WiFi only while its source is OSC, so outside that mode
+    // "not connected" says nothing about the saved network.
+    final sourceIsOsc = widget.status.source == WispSourceMode.osc;
     final subtitle = _busy
         ? 'Sending credentials to wisp…'
         : mismatch
             ? 'Wi-Fi channel conflict. Tap to change network.'
-            : !followsStraylight
-                ? 'Joins only while following Straylight. Tap to configure.'
+            : !sourceIsOsc
+                ? 'Joins only while the source is OSC. Tap to configure.'
                 : ethIp.isNotEmpty
                     ? 'Off while on Ethernet ($ethIp). Tap to configure.'
                     : (widget.status.wifiConnected
