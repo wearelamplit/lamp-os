@@ -6,6 +6,7 @@
 #include <unity.h>
 
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "osc/osc_listener.hpp"
@@ -227,6 +228,49 @@ void test_osc_cap_is_50_colours(void) {
                                        "/straylight/", f.data(), f.size(), n));
 }
 
+std::vector<uint8_t> floatsMessage(const char* address,
+                                   const std::vector<float>& values) {
+  std::vector<uint8_t> out(address, address + std::strlen(address));
+  do out.push_back(0); while (out.size() % 4 != 0);
+  out.push_back(',');
+  for (size_t i = 0; i < values.size(); ++i) out.push_back('f');
+  do out.push_back(0); while (out.size() % 4 != 0);
+  for (float v : values) {
+    uint32_t bits;
+    std::memcpy(&bits, &v, sizeof bits);
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      out.push_back(static_cast<uint8_t>(bits >> shift));
+    }
+  }
+  return out;
+}
+
+// One NaN or infinity anywhere refuses the whole message.
+void test_non_finite_float_refuses_whole_message(void) {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+  const std::vector<std::vector<float>> bad = {
+      {nan, 1, 0},          {1, 0, 0, 0, nan, 0}, {inf, 0, 0},
+      {1, 0, 0, 0, inf, 0}, {-inf, 1, 0},         {1, 0, 0, 0, 1, -inf},
+  };
+  for (const auto& values : bad) {
+    const auto d = floatsMessage(kPaletteAddr, values);
+    float f[150];
+    size_t n = 99;
+    TEST_ASSERT_FALSE(
+        wisp::oscFindFloats(d.data(), d.size(), kPaletteAddr, f, 150, n));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscFeedPacket::Other,
+        (int)wisp::oscClassifyFeedPacket(d.data(), d.size(), kPaletteAddr,
+                                         "/straylight/", f, 150, n));
+  }
+  const auto ok = floatsMessage(kPaletteAddr, {1, 0, 0, 0, 1, 0});
+  float f[150];
+  size_t n = 0;
+  TEST_ASSERT_TRUE(
+      wisp::oscFindFloats(ok.data(), ok.size(), kPaletteAddr, f, 150, n));
+  TEST_ASSERT_EQUAL_UINT(6, n);
+}
+
 void test_slip_frame_with_escapes(void) {
   static SlipDecoder slip;
   const uint8_t payload[] = {0x01, 0xC0, 0x02, 0xDB, 0x03};
@@ -341,6 +385,7 @@ int main(int, char**) {
   RUN_TEST(test_address_prefix_found_in_bundle);
   RUN_TEST(test_classify_feed_packet);
   RUN_TEST(test_osc_cap_is_50_colours);
+  RUN_TEST(test_non_finite_float_refuses_whole_message);
   RUN_TEST(test_slip_frame_with_escapes);
   RUN_TEST(test_slip_back_to_back_and_oversize);
   RUN_TEST(test_slip_carries_straylight_bundle);

@@ -33,7 +33,8 @@ bool oscForEachMessage(const uint8_t* data, size_t len, OscMessageFn fn,
                        void* ctx);
 
 // Reads every numeric argument as a float (`i` converts), skipping `s`.
-// False on an unknown type tag, truncated arguments, or more than `cap`.
+// False on an unknown type tag, truncated arguments, more than `cap`, or a
+// NaN or infinite float.
 bool oscFloatArgs(const OscMessage& msg, float* out, size_t cap,
                   size_t& count);
 

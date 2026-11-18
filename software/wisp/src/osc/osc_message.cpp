@@ -1,5 +1,6 @@
 #include "osc/osc_message.hpp"
 
+#include <cmath>
 #include <cstring>
 
 namespace wisp {
@@ -84,6 +85,7 @@ bool oscFloatArgs(const OscMessage& msg, float* out, size_t cap,
         float v;
         if (*t == 'f') {
           std::memcpy(&v, &raw, sizeof v);
+          if (!std::isfinite(v)) return false;
         } else {
           v = static_cast<float>(static_cast<int32_t>(raw));
         }

@@ -21,6 +21,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   console. Needs the wisp reflashed.
 
 ### Fixed
+- **A Straylight palette with a NaN or infinite value is refused.** The wisp
+  applied it as a palette; now the whole message is ignored and the held
+  palette stays.
 - **A lamp updated straight from the original firmware keeps its look.** Its
   colours, base gradient direction, base knockout and Home Mode carry over,
   and the shade keeps all its pixels lit. A lamp that already updated to an
