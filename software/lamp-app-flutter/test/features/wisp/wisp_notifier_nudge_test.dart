@@ -32,12 +32,16 @@ void main() {
 
   test('a palette read landing reaches the screen', () async {
     final ble = PaletteBle(_lampId)..seedPalette(_p);
-    final (_, n) = await openWisp(ble, legacyStatus(wispA, _p), onEmit: onEmit);
+    final (_, n) = await openWisp(
+      ble,
+      statingStatus(wispA, _p),
+      onEmit: onEmit,
+    );
 
     ble
       ..seedPalette(_q)
       ..holdPalette = Completer<void>()
-      ..notifyStatus(legacyStatus(wispA, _q));
+      ..notifyStatus(statingStatus(wispA, _q));
     await pumpEventQueue();
     final before = emits;
     ble.holdPalette!.complete();
@@ -51,7 +55,7 @@ void main() {
     final ble = PaletteBle(_lampId)
       ..seedPalette(_p)
       ..holdClaims = Completer<void>();
-    await openWisp(ble, legacyStatus(wispA, _p), onEmit: onEmit);
+    await openWisp(ble, statingStatus(wispA, _p), onEmit: onEmit);
 
     final before = emits;
     ble.holdClaims!.complete();
@@ -83,7 +87,11 @@ void main() {
 
   test('a shuffle tap reaches the screen', () async {
     final ble = PaletteBle(_lampId)..seedPalette(_p);
-    final (_, n) = await openWisp(ble, legacyStatus(wispA, _p), onEmit: onEmit);
+    final (_, n) = await openWisp(
+      ble,
+      statingStatus(wispA, _p),
+      onEmit: onEmit,
+    );
 
     final before = emits;
     await n.shuffle();
@@ -94,7 +102,11 @@ void main() {
 
   test('a shuffle hint timing out reaches the screen', () async {
     final ble = PaletteBle(_lampId)..seedPalette(_p);
-    final (_, n) = await openWisp(ble, legacyStatus(wispA, _p), onEmit: onEmit);
+    final (_, n) = await openWisp(
+      ble,
+      statingStatus(wispA, _p),
+      onEmit: onEmit,
+    );
 
     fakeAsync((fa) {
       unawaited(n.shuffle());
@@ -110,7 +122,11 @@ void main() {
 
   test('a refused save reaches the screen', () async {
     final ble = PaletteBle(_lampId)..seedPalette(_p);
-    final (_, n) = await openWisp(ble, legacyStatus(wispA, _p), onEmit: onEmit);
+    final (_, n) = await openWisp(
+      ble,
+      statingStatus(wispA, _p),
+      onEmit: onEmit,
+    );
     n.setManualPaletteDraft(_q);
     ble.notifyStatus(helloOnlyStatus(wispB));
     await pumpEventQueue();
@@ -158,7 +174,7 @@ void main() {
       final ble = PaletteBle(_lampId)..seedPalette(_p);
       final (_, n) = await openWisp(
         ble,
-        legacyStatus(wispA, _p),
+        statingStatus(wispA, _p),
         onEmit: onEmit,
       );
       expect(n.paletteLoading, isFalse);

@@ -135,7 +135,7 @@ void main() {
       notify(
         ble,
         '{"wispMac":"$_mac","configSplit":true,"source":"manual",'
-        '"paletteIdPrefix":"abcdef12","configLastSeenMs":100}',
+        '"manualId":"abcdef12","configLastSeenMs":100}',
       );
       await settle();
       await releaseAndExpect44(ble, c);

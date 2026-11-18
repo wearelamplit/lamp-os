@@ -13,6 +13,7 @@ import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
+import '../../_support/wisp_palette_ble.dart';
 
 const _lampId = 'reconnect-lamp';
 const _mac = 'AA:BB:CC:DD:EE:FF';
@@ -82,7 +83,7 @@ void main() {
         Uint8List.fromList([for (final c in saved) ...[c.r, c.g, c.b, c.w]]));
     await ble.connect(_lampId);
     final manual = '{"wispMac":"$_mac","source":"manual",'
-        '"paletteIdPrefix":"${WispRepository.paletteIdHash(saved)}"}';
+        '"manualId":"${WispRepository.statusManualId(saved)}"}';
     await ble.write(
         _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(manual));
     final c = ProviderContainer(
@@ -102,7 +103,10 @@ void main() {
     await ble.connect(_lampId);
     await pumpEventQueue();
 
-    notify(ble, '{"wispMac":"$_mac","source":"osc"}');
+    notify(
+        ble,
+        '{"wispMac":"$_mac","source":"osc",'
+        '"manualId":"${WispRepository.statusManualId(saved)}"}');
     await pumpEventQueue();
     expect(c.read(wispNotifierProvider(_lampId)).value!.source,
         WispSourceMode.osc);
@@ -116,8 +120,7 @@ void main() {
     Object? err;
     final save = n.setManualPalette().catchError((Object e) => err = e);
     await pumpEventQueue();
-    notify(ble, '{"wispMac":"$_mac","source":"manual",'
-        '"paletteIdPrefix":"${WispRepository.paletteIdHash(edit)}"}');
+    notify(ble, echoOfLastPaletteSave(ble, _lampId, mac: _mac));
     await save;
     expect(err, isNull);
     expect(n.manualPaletteWriteFailed, isFalse);

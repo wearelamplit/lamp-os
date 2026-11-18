@@ -8,12 +8,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
+import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/control/presentation/widgets/lamp_color_swatch.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/social/application/lamp_nearby_peers_notifier.dart';
 import 'package:lamp_app/features/social/domain/lamp_nearby_peer.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
+import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 import 'package:lamp_app/features/wisp/presentation/widgets/wisp_painted_lamps.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_status.dart';
 import 'package:lamp_app/features/wisp/presentation/widgets/drift_controls.dart';
@@ -30,6 +32,11 @@ const _wispMac = 'AA:BB:CC:DD:EE:FF';
 const _claimedMac = '10:20:30:40:50:60';
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
+
+final _paletteId = WispRepository.statusManualId(const [
+  LampColor(r: 255, g: 0, b: 0, w: 0),
+  LampColor(r: 0, g: 0, b: 255, w: 0),
+]);
 
 const _config =
     '{"char":"wispConfig","ledType":"GRBW","px":60,"brightness":80,'
@@ -99,7 +106,8 @@ void main() {
       final c = (await tester.runAsync(
         () => _container(
           status:
-              '{"wispMac":"$_wispMac","configSplit":true,"source":"manual"}',
+              '{"wispMac":"$_wispMac","configSplit":true,"source":"manual",'
+              '"manualId":"$_paletteId"}',
         ),
       ))!;
       addTearDown(c.dispose);
@@ -116,7 +124,7 @@ void main() {
         () => _container(
           status:
               '{"wispMac":"$_wispMac","configSplit":true,"source":"manual",'
-              '"configLastSeenMs":100}',
+              '"manualId":"$_paletteId","configLastSeenMs":100}',
           config: _config,
         ),
       ))!;

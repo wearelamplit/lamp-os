@@ -135,7 +135,8 @@ void main() {
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson:
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"source":"manual"}',
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"source":"manual",'
+          '"manualId":""}',
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
@@ -337,7 +338,7 @@ void main() {
     testWidgets('WiFi row is on Settings tab when source=$mode', (tester) async {
       final c = await _makeContainer(
         wispStatusJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"$mode"}',
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"$mode","manualId":""}',
       );
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);

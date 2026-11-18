@@ -89,7 +89,7 @@ void main() {
       );
       expect(
         WispRepository.manualPaletteId(thirty),
-        isNot(WispRepository.paletteIdHash(thirty)),
+        isNot(WispRepository.sentManualId(thirty)),
       );
     });
   });

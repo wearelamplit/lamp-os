@@ -11,6 +11,7 @@ import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
+import '../../_support/wisp_palette_ble.dart';
 
 const _lampId = 'palette-cap-lamp';
 const _mac = 'AA:BB:CC:DD:EE:FF';
@@ -20,11 +21,11 @@ final _twenty = [
     LampColor(r: i + 1, g: 40 + i, b: 200 - i, w: i.isEven ? 0 : i),
 ];
 
-/// A full status from a wisp that stores [p] and does not state it, as a
-/// wisp from before the cap does.
+/// A full status from a wisp that stores [p] and states all of it.
 String _status(List<LampColor> p, {String source = 'manual'}) => jsonEncode({
   'wispMac': _mac,
   'source': source,
+  'manualId': WispRepository.statusManualId(p),
   if (p.isNotEmpty) 'paletteIdPrefix': WispRepository.manualPaletteId(p),
 });
 
@@ -138,7 +139,7 @@ void main() {
     expect((sent['colors'] as List).length, 16);
 
     ble.simulateNotify(_lampId, BleUuids.controlService, BleUuids.wispStatus,
-        _b(_status(_twenty.take(16).toList())));
+        _b(echoOfLastPaletteSave(ble, _lampId, mac: _mac)));
     await save;
 
     expect(n.savedManualPalette, _twenty.take(16));

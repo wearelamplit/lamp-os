@@ -260,7 +260,7 @@ void main() {
     // The wisp stored the palette, then rebooted before its status went out.
     notify(
       ble,
-      _status(manualId: _id(_y), prefix: WispRepository.paletteIdHash(_y)),
+      _status(manualId: _id(_y), prefix: WispRepository.manualPaletteId(_y)),
     );
     await pumpEventQueue();
     expect(done(), isFalse);
@@ -319,31 +319,6 @@ void main() {
       expect(await result, isNull);
       palette = palette == _y ? _x : _y;
     }
-  });
-
-  test('old wisp op: a save to a wisp that never stated its palette sends no '
-      'seq', () async {
-    final ble = _CountingBle();
-    final n = await open(
-      ble,
-      '{"wispMac":"$_mac","source":"manual",'
-      '"paletteIdPrefix":"${WispRepository.paletteIdHash(_x)}"}',
-    );
-
-    final (_, result) = save(n, _y);
-    await pumpEventQueue();
-    final writes = [
-      for (final w in ble.writesTo(_lampId, BleUuids.wispOp))
-        if (utf8.decode(w).contains('setManualPalette')) utf8.decode(w),
-    ];
-    expect(writes.single, jsonEncode(WispRepository.buildManualPaletteOp(_y)));
-
-    notify(
-      ble,
-      '{"wispMac":"$_mac","source":"manual",'
-      '"paletteIdPrefix":"${WispRepository.paletteIdHash(_y)}"}',
-    );
-    expect(await result, isNull);
   });
 
   test('a palette stated after the echo, before the write\'s ack, is not '

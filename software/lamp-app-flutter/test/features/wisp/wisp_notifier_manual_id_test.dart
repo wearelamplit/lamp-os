@@ -419,27 +419,6 @@ void main() {
     expect(n.savedManualPalette, isEmpty);
   });
 
-  test('a read for a wisp that never stated its palette does not count once '
-      'the lamp relays one that does', () async {
-    final ble = _PaletteBle();
-    final n = await open(ble);
-    seedPalette(ble, _y);
-    ble.holdPalette = Completer<void>();
-    notify(ble, '{"wispMac":"$_bMac","source":"manual",'
-        '"paletteIdPrefix":"${WispRepository.paletteIdHash(_y)}"}');
-    await pumpEventQueue();
-    expect(ble.paletteReads, 1);
-
-    notify(ble, _status(manualId: _id(_x), prefix: _id(_x)));
-    await pumpEventQueue();
-    ble.holdPalette!.complete();
-    ble.holdPalette = null;
-    await pumpEventQueue();
-
-    expect(n.paletteLoading, isTrue);
-    expect(n.savedManualPalette, isEmpty);
-  });
-
   test('choosing Manual keeps a stated empty palette known', () async {
     final ble = _PaletteBle();
     final n = await open(ble, initial: _status(source: 'off', manualId: ''));

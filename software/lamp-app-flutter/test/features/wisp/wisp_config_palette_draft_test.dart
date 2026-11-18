@@ -20,6 +20,7 @@ import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import '../../_support/seed.dart';
+import '../../_support/wisp_palette_ble.dart';
 
 class _FakePeers extends LampNearbyPeersNotifier {
   @override
@@ -60,6 +61,7 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       _b('{"wispMac":"$_mac","source":"manual",'
+          '"manualId":"${WispRepository.statusManualId(held)}",'
           '"paletteIdPrefix":"${WispRepository.manualPaletteId(held)}"}'),
     );
     final c = ProviderContainer(
@@ -131,7 +133,7 @@ void main() {
 
     ble.seedSection(_devId, 'wisppalette', Uint8List(0));
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual"}'));
+        _b(echoOfLastPaletteSave(ble, _devId, mac: _mac)));
     await settle(tester);
     await save;
 
@@ -165,14 +167,15 @@ void main() {
     );
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
         _b('{"wispMac":"$_mac","source":"manual",'
-            '"paletteIdPrefix":"${WispRepository.paletteIdHash(moved)}"}'));
+            '"manualId":"${WispRepository.statusManualId(moved)}",'
+            '"paletteIdPrefix":"${WispRepository.manualPaletteId(moved)}"}'));
     await settle(tester);
     expect(n.savedManualPalette, moved, reason: 'the read landed');
     expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
 
     ble.seedSection(_devId, 'wisppalette', Uint8List(0));
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual"}'));
+        _b(echoOfLastPaletteSave(ble, _devId, mac: _mac)));
     await settle(tester);
     await save;
 

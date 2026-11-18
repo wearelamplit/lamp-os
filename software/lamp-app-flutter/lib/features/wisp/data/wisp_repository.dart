@@ -186,15 +186,6 @@ class WispRepository {
         'seq': ?seq,
       };
 
-  /// Content hash of [palette] as the wisp stores it, over the canonical
-  /// wire bytes the wisp stamps as its palette id: r,g,b per color, plus w
-  /// only when w != 0. Hashes the colors [buildManualPaletteOp] emits, its
-  /// first [kManualPaletteMaxColors]. Returns 8 lowercase hex chars; the
-  /// notifier confirms a palette write by matching this against the wisp's
-  /// `paletteIdPrefix` on the status NOTIFY.
-  static String paletteIdHash(List<LampColor> palette) =>
-      manualPaletteId(_opColors(buildManualPaletteOp(palette)));
-
   /// The wisp's `manualPaletteId` of [colors] exactly as given: 8 lowercase
   /// hex chars.
   static String manualPaletteId(List<LampColor> colors) {

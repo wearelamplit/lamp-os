@@ -20,21 +20,46 @@ const wispB = '11:22:33:44:55:66';
 String helloOnlyStatus(String mac) =>
     '{"wispMac":"$mac","wispVersion":66048,"helloFlags":0}';
 
-/// A full status from a wisp that does not state its palette.
-String legacyStatus(String mac, List<LampColor> p) => jsonEncode({
+/// A full Manual status without `manualId`, as wisp firmware that predates
+/// it sends: the app takes its palette as unknown.
+String unstatedStatus(String mac, List<LampColor> p) => jsonEncode({
   'wispMac': mac,
   'source': 'manual',
-  if (p.isNotEmpty) 'paletteIdPrefix': WispRepository.paletteIdHash(p),
+  if (p.isNotEmpty) 'paletteIdPrefix': WispRepository.manualPaletteId(p),
 });
 
-/// A full status from a wisp that states its palette (`manualId`).
+/// A full Manual status from a wisp stating [p] as its palette (`manualId`),
+/// echoing [seq] when given.
 String statingStatus(String mac, List<LampColor> p, {int? seq}) => jsonEncode({
   'wispMac': mac,
   'source': 'manual',
   'manualId': WispRepository.statusManualId(p),
   'manualSeq': ?seq,
-  if (p.isNotEmpty) 'paletteIdPrefix': WispRepository.paletteIdHash(p),
+  if (p.isNotEmpty) 'paletteIdPrefix': WispRepository.manualPaletteId(p),
 });
+
+/// The status [mac] sends once it stores the last palette op written to
+/// [lampId]: that op's colours as its palette, echoing that op's `seq`.
+String echoOfLastPaletteSave(
+  InMemoryBleClient ble,
+  String lampId, {
+  String mac = wispA,
+}) {
+  final op = ble
+      .writesTo(lampId, BleUuids.wispOp)
+      .map((w) => jsonDecode(utf8.decode(w)) as Map<String, dynamic>)
+      .lastWhere((op) => op['op'] == 'setManualPalette');
+  final colors = [
+    for (final c in op['colors'] as List)
+      LampColor(
+        r: (c as List)[0] as int,
+        g: c[1] as int,
+        b: c[2] as int,
+        w: c.length > 3 ? c[3] as int : 0,
+      ),
+  ];
+  return statingStatus(mac, colors, seq: op['seq'] as int?);
+}
 
 Uint8List _utf8(String s) => Uint8List.fromList(utf8.encode(s));
 Uint8List _bytes(List<LampColor> p) => Uint8List.fromList([

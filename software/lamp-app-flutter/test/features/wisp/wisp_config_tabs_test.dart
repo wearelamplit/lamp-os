@@ -26,7 +26,7 @@ class _FakePeers extends LampNearbyPeersNotifier {
 const _devId = 'lamp-tab-test';
 
 Future<ProviderContainer> _makeContainer({
-  String wispJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}',
+  String wispJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}',
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
@@ -243,7 +243,8 @@ void main() {
         (tester) async {
       final c = await _makeContainer(
         wispJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","hasPassword":true}',
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":"",'
+            '"hasPassword":true}',
       );
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
@@ -275,7 +276,8 @@ void main() {
         (tester) async {
       final c = await _makeContainer(
         wispJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","hasPassword":true}',
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":"",'
+            '"hasPassword":true}',
       );
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
