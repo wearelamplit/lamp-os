@@ -167,7 +167,7 @@ void main() {
     },
   );
 
-  test('N1: an empty read in flight when Manual is tapped leaves the palette '
+  test('an empty read in flight when Manual is tapped leaves the palette '
       'loading until a read returns it', () async {
     final ble = _PaletteBle();
     final n = await open(ble);

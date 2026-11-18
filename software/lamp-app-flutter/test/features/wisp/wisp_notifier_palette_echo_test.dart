@@ -141,7 +141,7 @@ void main() {
   }
 
   test(
-    'R4: an empty save waits for its own echo, not a newer-looking status',
+    'an empty save waits for its own echo, not a newer-looking status',
     () async {
       WispNotifier.debugSeqStart = () => 777;
       final ble = _CountingBle();
@@ -196,6 +196,30 @@ void main() {
     expect(await result, isNull);
     expect(n.savedManualPalette, _y);
     expect(n.paletteLoading, isFalse);
+  });
+
+  test('mac half: an echo from another wisp does not confirm', () async {
+    WispNotifier.debugSeqStart = () => 55;
+    final ble = _CountingBle();
+    final n = await open(ble, _status(manualId: _id(_x), prefix: _id(_x)));
+
+    final (done, result) = save(n, _y);
+    await pumpEventQueue();
+    notify(
+      ble,
+      jsonEncode({
+        'wispMac': '11:22:33:44:55:66',
+        'configSplit': true,
+        'source': 'manual',
+        'manualId': _id(_y),
+        'manualSeq': 55,
+      }),
+    );
+    await pumpEventQueue();
+    expect(done(), isFalse);
+
+    notify(ble, _status(manualId: _id(_y), manualSeq: 55));
+    expect(await result, isNull);
   });
 
   test('no pre-read: an empty save reads no status before it sends', () async {

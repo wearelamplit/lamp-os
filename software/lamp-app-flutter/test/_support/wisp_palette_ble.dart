@@ -20,8 +20,8 @@ const wispB = '11:22:33:44:55:66';
 String helloOnlyStatus(String mac) =>
     '{"wispMac":"$mac","wispVersion":66048,"helloFlags":0}';
 
-/// A full Manual status without `manualId`, as wisp firmware that predates
-/// it sends: the app takes its palette as unknown.
+/// A full Manual status without `manualId`: the app takes its palette as
+/// unknown.
 String unstatedStatus(String mac, List<LampColor> p) => jsonEncode({
   'wispMac': mac,
   'configSplit': true,
