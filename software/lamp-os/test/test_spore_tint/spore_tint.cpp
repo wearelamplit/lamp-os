@@ -281,6 +281,10 @@ void test_a_second_spore_while_a_tint_waits_books_none() {
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
   r.advance(20000);
   TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
+  ExpressionInvocation same;
+  same.type = "shifty";
+  same.target = TARGET_BASE;
+  TEST_ASSERT_FALSE(r.manager.triggerInvocation(same, kMushroom));
 }
 
 // The loop stalls past the tint's start time and a second spore drains on the
