@@ -10,10 +10,12 @@ import '../../domain/wisp_status.dart';
 import 'wisp_settings_pending.dart';
 
 /// Inline notice shown under the OSC source pill while the wisp has
-/// no live palette stream. The wisp holds the lamps at Off meanwhile and
-/// resumes painting on its own when palettes arrive.
-class WaitingForStraylightNotice extends StatelessWidget {
-  const WaitingForStraylightNotice({super.key});
+/// no live palette stream from [sender]. The wisp holds the lamps at Off
+/// meanwhile and resumes painting on its own when palettes arrive.
+class WaitingForOscNotice extends StatelessWidget {
+  const WaitingForOscNotice({super.key, required this.sender});
+
+  final String sender;
 
   @override
   Widget build(BuildContext context) {
@@ -37,13 +39,131 @@ class WaitingForStraylightNotice extends StatelessWidget {
           const SizedBox(width: AppSpace.sm),
           Expanded(
             child: Text(
-              'Waiting for Straylight.\n'
+              'Waiting for $sender.\n'
               'Lamps stay on their own colours until a palette arrives.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Picks which OSC sender the wisp listens to. [current] is
+/// [OscMode.unknown] for a sender this app cannot name: nothing is selected
+/// and a line asks for an app update.
+class OscModeSwitch extends StatelessWidget {
+  const OscModeSwitch({
+    super.key,
+    required this.current,
+    required this.onSelect,
+  });
+
+  final OscMode current;
+  final ValueChanged<OscMode> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('OSC sender'),
+        const SizedBox(height: AppSpace.sm),
+        SegmentedButton<OscMode>(
+          key: const Key('wisp-osc-mode'),
+          style: SegmentedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.card),
+            ),
+          ),
+          segments: const [
+            ButtonSegment(
+              value: OscMode.straylight,
+              label: Text('Straylight'),
+            ),
+            ButtonSegment(value: OscMode.maestro, label: Text('Maestro')),
+          ],
+          selected: {if (current != OscMode.unknown) current},
+          emptySelectionAllowed: current == OscMode.unknown,
+          showSelectedIcon: false,
+          onSelectionChanged: (set) {
+            if (set.isEmpty) return;
+            onSelect(set.first);
+          },
+        ),
+        if (current == OscMode.unknown) ...[
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            "This wisp listens to an OSC sender this app doesn't know. "
+            'Update the app to see it.',
+            key: const Key('wisp-osc-mode-unknown'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Picks the Maestro palette slot the wisp reads, and says what to set on
+/// the Maestro to reach it at [address] (the wisp's send-to address, empty
+/// while it has none).
+class MaestroSlotPicker extends StatelessWidget {
+  const MaestroSlotPicker({
+    super.key,
+    required this.current,
+    required this.address,
+    required this.onSelect,
+  });
+
+  final int? current;
+  final String address;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final slot = current;
+    final target = address.isEmpty ? "the wisp's address" : address;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Maestro palette slot'),
+        const SizedBox(height: AppSpace.sm),
+        InputDecorator(
+          decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpace.md,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadius.card),
+            ),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              key: const Key('wisp-maestro-slot'),
+              isExpanded: true,
+              value: slot,
+              items: [
+                for (var n = kMaestroSlotMin; n <= kMaestroSlotMax; n++)
+                  DropdownMenuItem(value: n, child: Text('Slot $n')),
+              ],
+              onChanged: (n) {
+                if (n != null && n != slot) onSelect(n);
+              },
+            ),
+          ),
+        ),
+        if (slot != null) ...[
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            'On the Maestro, send palette slot $slot to $target, '
+            'port ${WispConfig.kOscPort}.',
+            key: const Key('wisp-maestro-help'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
     );
   }
 }

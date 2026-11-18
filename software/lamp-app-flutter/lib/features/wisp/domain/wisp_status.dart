@@ -60,6 +60,8 @@ class WispStatus {
     this.manualSeq = 0,
     this.ip,
     this.paletteStyle,
+    this.oscMode,
+    this.oscSlot,
     this.heldConfigSeenMs,
   });
 
@@ -213,6 +215,15 @@ class WispStatus {
   /// Null until a config carrying it is merged: a wisp that predates it
   /// paints only gradients.
   final PaletteStyle? paletteStyle;
+
+  /// Which OSC sender the wisp listens to, from its `wispConfig`. Null until
+  /// a config carrying it is merged: a wisp that predates it follows only
+  /// Straylight.
+  final OscMode? oscMode;
+
+  /// The Maestro palette slot the wisp reads, from its `wispConfig`. Null
+  /// until a config carrying it is merged.
+  final int? oscSlot;
 
   /// The lamp's `configLastSeenMs` stamp the merged config was read under,
   /// so the config's age can be told against [statusLastSeenMs]. Null until a
@@ -385,6 +396,8 @@ class WispStatus {
       configKnown: true,
       ip: config.ip,
       paletteStyle: config.paletteStyle,
+      oscMode: config.oscMode,
+      oscSlot: config.oscSlot,
       heldConfigSeenMs: seenMs,
     );
   }
@@ -401,6 +414,8 @@ class WispStatus {
     int? pixelCount,
     int? brightness,
     PaletteStyle? paletteStyle,
+    OscMode? oscMode,
+    int? oscSlot,
   }) {
     return _copy(
       source: source,
@@ -414,6 +429,8 @@ class WispStatus {
       pixelCount: pixelCount,
       brightness: brightness,
       paletteStyle: paletteStyle ?? _keep,
+      oscMode: oscMode ?? _keep,
+      oscSlot: oscSlot ?? _keep,
     );
   }
 
@@ -433,6 +450,8 @@ class WispStatus {
     bool? configKnown,
     Object? ip = _keep,
     Object? paletteStyle = _keep,
+    Object? oscMode = _keep,
+    Object? oscSlot = _keep,
     Object? heldConfigSeenMs = _keep,
   }) {
     return WispStatus(
@@ -474,6 +493,8 @@ class WispStatus {
       paletteStyle: identical(paletteStyle, _keep)
           ? this.paletteStyle
           : paletteStyle as PaletteStyle?,
+      oscMode: identical(oscMode, _keep) ? this.oscMode : oscMode as OscMode?,
+      oscSlot: identical(oscSlot, _keep) ? this.oscSlot : oscSlot as int?,
       heldConfigSeenMs: identical(heldConfigSeenMs, _keep)
           ? this.heldConfigSeenMs
           : heldConfigSeenMs as int?,
@@ -520,6 +541,8 @@ class WispStatus {
           manualSeq == other.manualSeq &&
           ip == other.ip &&
           paletteStyle == other.paletteStyle &&
+          oscMode == other.oscMode &&
+          oscSlot == other.oscSlot &&
           heldConfigSeenMs == other.heldConfigSeenMs;
 
   @override
@@ -549,7 +572,7 @@ class WispStatus {
           brightness,
           configKnown,
           Object.hash(configSplit, configLastSeenMs, manualId, manualSeq, ip,
-              paletteStyle, heldConfigSeenMs),
+              paletteStyle, oscMode, oscSlot, heldConfigSeenMs),
         ),
       );
 }

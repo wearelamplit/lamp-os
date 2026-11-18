@@ -24,6 +24,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   `osc:mode maestro` and `osc:slot <n>` on the wisp's console, then point the
   Maestro at the wisp's address, port 9000. Lamps keep the last Maestro
   palette when it goes quiet. Needs the wisp reflashed.
+- **Maestro under the OSC source, in the app.** A Straylight | Maestro switch
+  picks the sender; Maestro shows a palette slot picker (1 to 10) and says
+  what to set on the Maestro ("send palette slot 3 to 192.168.1.42, port
+  9000"), with the send-to address under both. A change shows at once and
+  goes back with "Couldn't reach the wisp." if the wisp never confirms it.
+  Shows only for a wisp on 1.3.8.
 
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
