@@ -1270,7 +1270,7 @@ void lamp::Lamp::tick() {
   // a remote cascade arrived) whose animations have finished. AFTER tick so
   // the final frame of the animation is drawn before removal.
   expressionManager.gcTransients();
-  sporeTint.tick(expressionManager, millis());
+  sporeTint.tick(expressionManager);
   expressionManager.tickCascade(millis());
   expressionManager.retireStale(millis());
 

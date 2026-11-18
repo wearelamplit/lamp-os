@@ -123,7 +123,7 @@ struct Rig {
   void tick() {
     const size_t tintsBefore = running("shifty");
     const size_t bursts = running("flicker");
-    sporeTint.tick(manager, now);
+    sporeTint.tick(manager);
     if (running("shifty") > tintsBefore) {
       tintStartsMs.push_back(now);
       burstsAtTintStart.push_back(bursts);
@@ -159,11 +159,9 @@ struct Rig {
   }
 };
 
+// The spore's burst length, after which its tint starts.
 uint32_t tintAfterMs(const ExpressionInvocation& burst) {
-  ExpressionInvocation tint;
-  uint32_t afterMs = 0;
-  TEST_ASSERT_TRUE(SporeTint::tintFor(burst, tint, afterMs));
-  return afterMs;
+  return getParam(burst.parameters, "durationMax");
 }
 
 }  // namespace
@@ -173,8 +171,7 @@ void tearDown() {}
 
 void test_the_golden_spore_names_its_tint() {
   ExpressionInvocation tint;
-  uint32_t afterMs = 0;
-  TEST_ASSERT_TRUE(SporeTint::tintFor(parse(kGolden), tint, afterMs));
+  TEST_ASSERT_TRUE(SporeTint::tintFor(parse(kGolden), tint));
   TEST_ASSERT_EQUAL_STRING("shifty", tint.type.c_str());
   TEST_ASSERT_EQUAL_UINT8(TARGET_BASE, tint.target);
   TEST_ASSERT_EQUAL_size_t(1, tint.colors.size());
@@ -184,7 +181,6 @@ void test_the_golden_spore_names_its_tint() {
   TEST_ASSERT_EQUAL_UINT32(SporeTint::kHoldS, getParam(tint.parameters, "shiftDurationMin"));
   TEST_ASSERT_EQUAL_UINT32(SporeTint::kHoldS, getParam(tint.parameters, "shiftDurationMax"));
   TEST_ASSERT_EQUAL_UINT32(SporeTint::kOpacityPct, getParam(tint.parameters, "opacity"));
-  TEST_ASSERT_TRUE(afterMs >= 6000 && afterMs < 7000);
 }
 
 // The fade back follows the spore's fadeDuration up to the cap.
@@ -193,8 +189,7 @@ void test_the_tint_fades_back_over_the_spores_fade_duration() {
     ExpressionInvocation spore = parse(kGolden);
     spore.parameters.set("fadeDuration", asked);
     ExpressionInvocation tint;
-    uint32_t afterMs = 0;
-    TEST_ASSERT_TRUE(SporeTint::tintFor(spore, tint, afterMs));
+    TEST_ASSERT_TRUE(SporeTint::tintFor(spore, tint));
     TEST_ASSERT_EQUAL_UINT32(std::min(asked, SporeTint::kMaxFadeBackS),
                              getParam(tint.parameters, "durationMax"));
   }
@@ -376,25 +371,9 @@ void test_only_a_peers_shifty_holds_off_a_tint() {
 
 void test_a_playing_tint_blocks_a_booking() {
   SporeTint t;
-  TEST_ASSERT_FALSE(t.follow(parse(kGolden), kMushroom, 1000, true));
-  TEST_ASSERT_TRUE(t.follow(parse(kGolden), kMushroom, 1000, false));
-  TEST_ASSERT_FALSE(t.follow(parse(kGolden), kOtherMushroom, 1000, false));
-}
-
-// The tint's start time survives the millis() wrap: it starts once its wait
-// has passed, though the clock wrapped and its due time did not.
-void test_the_tint_start_survives_the_millis_wrap() {
-  Rig r;
-  const uint32_t afterMs = tintAfterMs(parse(kGolden));
-  const uint32_t start = UINT32_MAX - afterMs - 500;
-  r.now = start;
-  set_mock_millis(start);
-  TEST_ASSERT_TRUE(r.play(parse(kGolden), kMushroom));
-  r.advance(afterMs - kStepMs);
-  TEST_ASSERT_EQUAL_size_t(0, r.tintStartsMs.size());
-  r.advance(2000);
-  TEST_ASSERT_TRUE(r.now < start);
-  TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
+  TEST_ASSERT_FALSE(t.follow(parse(kGolden), kMushroom, true));
+  TEST_ASSERT_TRUE(t.follow(parse(kGolden), kMushroom, false));
+  TEST_ASSERT_FALSE(t.follow(parse(kGolden), kOtherMushroom, false));
 }
 
 int main(int, char**) {
@@ -412,6 +391,5 @@ int main(int, char**) {
   RUN_TEST(test_lamp_shaped_commands_book_no_tint);
   RUN_TEST(test_only_a_peers_shifty_holds_off_a_tint);
   RUN_TEST(test_a_playing_tint_blocks_a_booking);
-  RUN_TEST(test_the_tint_start_survives_the_millis_wrap);
   return UNITY_END();
 }
