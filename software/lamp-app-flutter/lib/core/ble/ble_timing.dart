@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart'
     show FlutterBluePlusException;
+import 'ble_client.dart' show BleDisconnectedException;
 
 enum BleTimingPhase { scanSeen, connect, discover, firstRead }
 
@@ -70,19 +72,28 @@ class BleTimingEvent {
 }
 
 /// A single-token reason for a failed phase: `Type:code:description`, with
-/// `-` for a missing code or description. The code and description come from
-/// a [FlutterBluePlusException] (Android status such as 133); any other error
-/// gives its type alone.
+/// `-` for a missing code or description. The code and description come from a
+/// [FlutterBluePlusException] or [PlatformException], looked through a
+/// [BleDisconnectedException]'s cause. The code is flutter_blue_plus's own
+/// error index or the platform's status (Android 133 for a failed link), so
+/// read it with the description. Any other error gives its type alone.
 String bleFailureReason(Object error) {
-  String clean(Object? v) {
+  String clean(Object? v, [int max = 48]) {
     final t = v?.toString().trim().replaceAll(RegExp(r'\s+'), '_') ?? '';
-    return t.isEmpty ? '-' : (t.length > 48 ? t.substring(0, 48) : t);
+    return t.isEmpty ? '-' : (t.length > max ? t.substring(0, max) : t);
   }
 
-  if (error is FlutterBluePlusException) {
-    return 'FlutterBluePlusException:${clean(error.code)}:${clean(error.description)}';
+  final root = error is BleDisconnectedException && error.cause != null
+      ? error.cause!
+      : error;
+  final type = clean(error.runtimeType, 64);
+  if (root is FlutterBluePlusException) {
+    return '$type:${clean(root.code)}:${clean(root.description)}';
   }
-  return error.runtimeType.toString();
+  if (root is PlatformException) {
+    return '$type:${clean(root.code)}:${clean(root.message)}';
+  }
+  return type;
 }
 
 void _debugPrintEvent(BleTimingEvent e) => debugPrint(e.toString());

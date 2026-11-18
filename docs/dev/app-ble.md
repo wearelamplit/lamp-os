@@ -63,9 +63,12 @@ app.
 
 A failed `connect`, `discover` or `firstRead` line ends with
 `reason=<Type>:<code>:<description>` (`bleFailureReason`). Code and description
-come from a `FlutterBluePlusException` (the Android status, e.g. 133, with
-spaces turned to `_`, `-` when absent); any other error gives its type alone,
-e.g. `reason=TimeoutException`. Successful lines carry no `reason`.
+come from a `FlutterBluePlusException` or `PlatformException`, looked through
+a `BleDisconnectedException`'s cause. The code is flutter_blue_plus's own error
+index or the platform status (Android 133 for a failed link), so read it with
+the description. Spaces become `_`, a description is capped at 48 characters
+and `-` stands for an absent part; any other error gives its type alone, e.g.
+`reason=TimeoutException`. Successful lines carry no `reason`.
 
 Every scan start or restart opens a new `scan_session` (counted from 1 per app
 run); a lamp is timed once per session from that session's own start, so a

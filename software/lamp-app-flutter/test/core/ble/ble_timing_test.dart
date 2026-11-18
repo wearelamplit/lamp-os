@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_timing.dart';
@@ -416,6 +417,52 @@ void main() {
         ),
         'FlutterBluePlusException:-:-',
       );
+    });
+
+    test('a PlatformException carries its code and message', () {
+      expect(
+        bleFailureReason(
+          PlatformException(
+            code: 'discoverServices',
+            message: 'device is disconnected',
+          ),
+        ),
+        'PlatformException:discoverServices:device_is_disconnected',
+      );
+    });
+
+    test('a wrapped disconnect keeps the cause code', () {
+      expect(
+        bleFailureReason(
+          BleDisconnectedException(
+            'x',
+            fbp.FlutterBluePlusException(
+              fbp.ErrorPlatform.fbp,
+              'readCharacteristic',
+              6,
+              'device is not connected',
+            ),
+          ),
+        ),
+        'BleDisconnectedException:6:device_is_not_connected',
+      );
+      expect(
+        bleFailureReason(const BleDisconnectedException('x')),
+        'BleDisconnectedException',
+      );
+    });
+
+    test('a long description is capped and a spaced type has no spaces', () {
+      final r = bleFailureReason(
+        fbp.FlutterBluePlusException(
+          fbp.ErrorPlatform.android,
+          'connect',
+          1,
+          'a' * 200,
+        ),
+      );
+      expect(r, 'FlutterBluePlusException:1:${'a' * 48}');
+      expect(bleFailureReason(<String, int>{}), isNot(contains(' ')));
     });
 
     test('a failed discover carries the reason', () async {
