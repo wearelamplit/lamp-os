@@ -64,13 +64,19 @@ class WispConfig {
     );
   }
 
-  WispConfig copyWith({String? ledType, int? pixelCount, int? brightness}) {
+  WispConfig copyWith({
+    String? ledType,
+    int? pixelCount,
+    int? brightness,
+    int? driftIntervalMs,
+    int? driftFadePct,
+  }) {
     return WispConfig(
       ledType: ledType ?? this.ledType,
       pixelCount: pixelCount ?? this.pixelCount,
       brightness: brightness ?? this.brightness,
-      driftIntervalMs: driftIntervalMs,
-      driftFadePct: driftFadePct,
+      driftIntervalMs: driftIntervalMs ?? this.driftIntervalMs,
+      driftFadePct: driftFadePct ?? this.driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
     );

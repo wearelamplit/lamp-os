@@ -6,14 +6,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../_support/in_memory_ble_client.dart';
+import '../../_support/wisp_palette_ble.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/lamp_crypto.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/control/domain/lamp_color.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
-import 'package:lamp_app/features/wisp/data/wisp_repository.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:lamp_app/features/wisp/data/wisp_password_store.dart';
+
+Uint8List configWithOpSeq(int opSeq) => Uint8List.fromList(utf8.encode(
+    '{"char":"wispConfig","ledType":"GRB","px":30,"brightness":100,'
+    '"driftIntervalMs":120000,"driftFadePct":50,"shuffleSeed":0,'
+    '"opSeq":$opSeq}'));
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -98,11 +103,14 @@ void main() {
 
     test('setManualPalette always plaintext even when password is cached', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"$wispMac","source":"manual"}');
+      ble.seedSection(lampId, 'wisppalette', Uint8List(0));
+      await primeStatus(
+          ble, '{"wispMac":"$wispMac","configSplit":true,"source":"manual","manualId":""}');
       final c = makeContainer(ble: ble);
       // Hold the autoDispose provider alive so the save runs to its confirm.
       c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
+      await pumpEventQueue();
       final n = c.read(wispNotifierProvider(lampId).notifier);
 
       await n.cachePassword(wispMac, 'hunter2');
@@ -114,9 +122,8 @@ void main() {
         lampId,
         BleUuids.controlService,
         BleUuids.wispStatus,
-        Uint8List.fromList(utf8.encode(
-            '{"wispMac":"$wispMac","source":"manual",'
-            '"paletteIdPrefix":"${WispRepository.paletteIdHash(committed)}"}')),
+        Uint8List.fromList(
+            utf8.encode(echoOfLastPaletteSave(ble, lampId, mac: wispMac))),
       );
       await save;
 
@@ -165,15 +172,27 @@ void main() {
   });
 
   group('WispNotifier setPassword flow', () {
-    // The sealed op is confirmed by the wisp advancing opSeq in a fresh
-    // status broadcast; feed that back through the notify stream.
+    // A wisp on a lamp that serves the wisp sections, holding [opSeq] in its
+    // config.
+    Future<void> primeSplit(InMemoryBleClient ble, {int opSeq = 0}) async {
+      const status = '{"wispMac":"$wispMac","configSplit":true,'
+          '"source":"osc","hasPassword":true,"configLastSeenMs":1}';
+      await primeStatus(ble, status);
+      ble.seedSection(lampId, 'wispstatus', Uint8List.fromList(utf8.encode(status)));
+      ble.seedSection(lampId, 'wispconfig', configWithOpSeq(opSeq));
+    }
+
+    // The sealed op is confirmed by the wisp advancing opSeq in its config;
+    // the status's new config stamp makes the app read it.
     void confirmOpSeq(InMemoryBleClient ble, {required int opSeq, bool hasPassword = true}) {
+      ble.seedSection(lampId, 'wispconfig', configWithOpSeq(opSeq));
       ble.simulateNotify(
         lampId,
         BleUuids.controlService,
         BleUuids.wispStatus,
         Uint8List.fromList(utf8.encode(
-            '{"wispMac":"$wispMac","hasPassword":$hasPassword,"opSeq":$opSeq}')),
+            '{"wispMac":"$wispMac","configSplit":true,"source":"osc",'
+            '"hasPassword":$hasPassword,"configLastSeenMs":${opSeq + 1}}')),
       );
     }
 
@@ -201,7 +220,7 @@ void main() {
 
     test('setPassword with current password seals under it and persists on opSeq confirm', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"$wispMac","hasPassword":true}');
+      await primeSplit(ble);
       final c = makeContainer(ble: ble);
       await c.read(wispNotifierProvider(lampId).future);
       // Hold the autoDispose provider alive across the confirm awaits.
@@ -251,7 +270,7 @@ void main() {
 
     test('clearPassword seals under current password and clears cache on opSeq confirm', () async {
       final ble = InMemoryBleClient();
-      await primeStatus(ble, '{"wispMac":"$wispMac","hasPassword":true}');
+      await primeSplit(ble);
       final c = makeContainer(ble: ble);
       await c.read(wispNotifierProvider(lampId).future);
       // Hold the autoDispose provider alive across the confirm awaits.

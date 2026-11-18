@@ -66,11 +66,11 @@ void OscListener::poll(bool active, uint32_t nowMs) {
 
 void OscListener::handlePacket(const uint8_t* data, size_t len,
                                const char* via) {
-  float rgb[kManualPaletteMaxColors * 3];
+  float rgb[WispController::kOscMaxColors * 3];
   size_t n = 0;
   switch (oscClassifyFeedPacket(data, len, oscPaletteAddress(config_.oscRole()),
                                 kStraylightAddressPrefix, rgb,
-                                kManualPaletteMaxColors * 3, n)) {
+                                WispController::kOscMaxColors * 3, n)) {
     case OscFeedPacket::Palette:
       break;
     case OscFeedPacket::Feed:

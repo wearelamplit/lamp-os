@@ -19,6 +19,8 @@ struct WispStatusFields {
   bool         wifiChannelMismatch = false;
   int          wifiApChannel = 0;
   const char*  ethIp = nullptr;  // omitted when Ethernet is not up
+  const char*  manualId = "";    // statusManualId of the stored Manual palette
+  uint16_t     manualSeq = 0;    // seq of the save that stored it; 0 = none
 };
 
 // Settings the app edits, plus opSeq, which confirms a sealed op landed.
@@ -34,14 +36,13 @@ struct WispConfigFields {
 };
 
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed
-// core always fits under `cap`; every other field is added only if the
-// document still fits (fields matching the app parser's defaults are
-// omitted). `configCopy`, when given, adds the config fields at the lowest
-// priority for lamps that predate wispConfig. lastSeenMs is the wisp's
+// core, `"configSplit":true` among it, is always written, whatever `cap`;
+// every other field is added only if the document still fits under `cap`
+// (fields matching the app parser's defaults are omitted). The settings
+// never ride it; they go only in wispConfig. lastSeenMs is the wisp's
 // uptime at the call (wisp::uptimeMs()). Never returns 0 when
 // outCap > cap. See docs/dev/networking.md for the field priority order.
-size_t buildWispStatusJson(const WispStatusFields& f,
-                           const WispConfigFields* configCopy, char* out,
+size_t buildWispStatusJson(const WispStatusFields& f, char* out,
                            size_t outCap, size_t cap);
 
 // Serialize a wispConfig JSON into `out`. Every field is always present, so

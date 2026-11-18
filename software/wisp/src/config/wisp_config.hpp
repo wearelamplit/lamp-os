@@ -24,8 +24,16 @@ enum class WispSourceMode : uint8_t {
   Osc    = 3,
 };
 
-// Must not exceed lamp_protocol::kMaxWispPaletteColors; setManualPalette enforces this.
-inline constexpr size_t kManualPaletteMaxColors = 50;
+// The most a Straylight palette carries. Must not exceed
+// lamp_protocol::kMaxWispPaletteColors; setManualPalette and the NVS load
+// keep a longer palette's first colours.
+inline constexpr size_t kManualPaletteMaxColors = 16;
+
+// The stored Manual palette as wispStatus reports it.
+struct ManualPaletteStatus {
+  char id[9];  // statusManualId: "" when empty, else 8 hex chars
+  uint16_t seq;  // the seq of the save that stored it, 0 for none
+};
 
 class WispConfig {
  public:
@@ -55,13 +63,20 @@ class WispConfig {
   const std::vector<ManualPaletteColor>& manualPalette() const {
     return manualPalette_;
   }
-  void setManualPalette(const std::vector<ManualPaletteColor>& colors);
+  // [seq] is the app's save seq (1..65535) echoed in the status until the
+  // next save; 0 for none. RAM-only.
+  void setManualPalette(const std::vector<ManualPaletteColor>& colors,
+                        uint16_t seq = 0);
 
   // Fill `outRgb` (maxColors * 3) and `outW` (maxColors) planes; matches
   // the MSG_WISP_PALETTE wire layout. Lock-guarded: safe to call from the
   // StatusEmitter timer-service task.
   size_t copyManualPalette(uint8_t* outRgb, uint8_t* outW,
                            size_t maxColors) const;
+
+  // The stored Manual palette's status fields, whatever the source mode.
+  // Lock-guarded like copyManualPalette.
+  ManualPaletteStatus manualPaletteStatus() const;
 
   // Ring color in Off mode (PaintDistributor stays idle). Persisted as 4 NVS bytes.
   ManualPaletteColor offColor() const { return offColor_; }
@@ -113,6 +128,7 @@ class WispConfig {
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   OscRole oscRole_ = OscRole::Primary;
   std::vector<ManualPaletteColor> manualPalette_;
+  uint16_t manualSeq_ = 0;
   ManualPaletteColor offColor_ = {255, 150, 50, 0};
   uint8_t shuffleSeed_ = 0;
   uint32_t driftIntervalMs_ = 120000;

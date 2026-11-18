@@ -34,14 +34,15 @@ void main() {
   late InMemoryBleClient ble;
   late ProviderContainer c;
 
-  // The lamp's view of the wisp: its status (prefix of [palette], none when
-  // empty) and its `wisppalette` section.
+  // The lamp's view of the wisp: its status (stating [palette], prefix none
+  // when empty) and its `wisppalette` section.
   Future<void> wispHolds(List<LampColor> palette) async {
     final prefix = palette.isEmpty
         ? ''
-        : ',"paletteIdPrefix":"${WispRepository.paletteIdHash(palette)}"';
+        : ',"paletteIdPrefix":"${WispRepository.manualPaletteId(palette)}"';
     await ble.write(_lampId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual"$prefix}'));
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"manual",'
+            '"manualId":"${WispRepository.statusManualId(palette)}"$prefix}'));
     ble.seedSection(_lampId, 'wisppalette',
         Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
   }

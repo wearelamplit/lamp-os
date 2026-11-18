@@ -228,11 +228,14 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
         continue;
       }
       parsed.push_back(c);
-      if (parsed.size() >= kManualPaletteMaxColors) break;
     }
-    Serial.printf("[wisp.op] setManualPalette colors=%u\n",
-                  (unsigned)parsed.size());
-    config_.setManualPalette(parsed);
+    // Anything but an integer in 1..65535 is no seq, which clears the echo.
+    JsonVariantConst seqField = doc["seq"];
+    const uint16_t seq =
+        seqField.is<uint16_t>() ? seqField.as<uint16_t>() : uint16_t{0};
+    Serial.printf("[wisp.op] setManualPalette colors=%u seq=%u\n",
+                  (unsigned)parsed.size(), (unsigned)seq);
+    config_.setManualPalette(parsed, seq);
     return DispatchResult::AppliedManualPalette;
   }
 

@@ -251,6 +251,57 @@ Change a swatch on A without saving, leave and reopen: the edit is still
 there. Open the lamp a few times on a wisp whose Manual palette is empty:
 "Reading palette from wisp…" never stays past a few seconds.
 
+P14 — **the palette editor shows the palette the wisp states.** Needs a wisp
+flashed from this branch (`npm run wisp:flash`), two phones, and
+`npm run lamp:tap` on the lamp, opened once. With the wisp in
+Manual and its palette empty, open the lamp: the editor shows empty within a
+second or two, and the lamp log's `[wisp_state] notify` preview carries
+`"manualId":""`. Put the new wisp in Osc with Straylight changing palettes and
+a non-empty Manual palette, then tap Manual: the loading line shows, then the
+real palette; never an empty editor with Save. Empty the palette from phone B
+while phone A is off the lamp, then open it on A: empty. Power-cycle the lamp
+while A has it open, and change the palette from B meanwhile: after A
+reconnects it shows "Reading palette from wisp…" until the wisp's next status
+(up to 30 s when idle), then B's palette, and never offers Save over the old
+one. Power-cycle the lamp, and open it on A the moment it connects: the editor
+shows "Reading palette from wisp…" with no Save until the lamp log's
+`[wisp_state] notify` preview carries `"source"`, then the wisp's palette.
+
+P15 — **a palette save confirms on the wisp's echo.** Same setup as P14. On
+the wisp, edit and Save: the wisp's serial prints `[wisp.op]
+setManualPalette colors=N seq=S`, the lamp log's `[wisp_state] notify` preview
+carries `"manualSeq":S`, and no "not saved" shows. Save, then reset the wisp
+at once: either the save confirms once the wisp is back, or "not saved" shows
+and reopening the lamp shows what the wisp holds; never "saved" while the wisp
+holds something else. Save different palettes from two phones (Pixel and the
+emulator bridge) within a second of each other: both end showing the wisp's
+palette, and at most one shows "not saved". Save, then tap Osc at once: the
+save confirms, and back in Manual the palette shows.
+Give the wisp a rich config (20-character name, password, oscRole
+secondary, brightness 80) and note the lamp's `notify len=`: saves still
+confirm within a few seconds.
+
+P16 — **a Manual palette holds 16 colours.** Same setup as P14. In the
+editor add colours: the `+` stops at 16. Save 16 colours with white on each:
+the wisp's serial prints `setManualPalette colors=16`, the save confirms, and
+the wisp's ring shows all 16.
+
+P17 — **a settings change the wisp never gets is read back.** Same setup as
+P14. Open the Settings tab, move brightness, and
+within a second power the wisp off: about 5 s later the slider goes back to
+the value the lamp last heard from the wisp. With the wisp up, change drift,
+brightness and the LED strip once each: each still shows its new value 10 s
+later.
+
+P18 — **no Save over a palette the app has not read.** Same setup as P14. Open
+the palette sheet, edit a swatch, and power-cycle the lamp:
+once the app reconnects the open sheet's Save greys under "Reading palette
+from wisp…" and the edit stays. When the palette is read the note goes and
+Save comes back with the sheet still open and the edit kept; until then the
+wisp's serial prints no `setManualPalette`. Tap Manual from Osc with the palette
+shown, then power-cycle the lamp within 20 s: the editor turns to "Reading
+palette from wisp…" with no tap.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -278,6 +329,19 @@ there. Open the lamp a few times on a wisp whose Manual palette is empty:
 - P13: the wisp screen follows the wisp after a reconnect and a save then
   confirms; a reopened lamp shows a palette changed or emptied elsewhere and
   keeps an unsaved edit; the palette editor never sticks on reading.
+- P14: the editor shows an empty palette as empty, never shows an empty or
+  stale palette as the wisp's, and shows the loading line after a reconnect
+  until the wisp states its palette; a lamp that just booted shows the loading
+  line with no Save until the wisp's own status arrives.
+- P15: a save confirms only on its own echo, in any
+  source mode, and never shows "saved" for a palette the wisp does not hold.
+- P16: the editor stops at 16 colours, and 16 white-heavy colours save
+  whole.
+- P17: a settings change the wisp never applied goes back to the wisp's value
+  within about 5 s; one it applied stays.
+- P18: no `setManualPalette` leaves the app while the palette is unread, a
+  sheet left open greys its Save until the palette is read and then gives it
+  back without closing, and a reconnect shows the loading line with no tap.
 
 ## Not covered here
 

@@ -93,7 +93,7 @@ class _DriftControlsState extends ConsumerState<DriftControls> {
       children: [
         const SettingsGroupHeading('Color drift'),
         if (!widget.status.configKnown)
-          const LampCard(child: WispSettingsPending())
+          LampCard(child: WispSettingsPending(lampId: widget.lampId))
         else
           LampCard(
             child: Column(

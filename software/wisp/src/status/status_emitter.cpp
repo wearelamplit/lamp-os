@@ -145,7 +145,9 @@ void StatusEmitter::emitStatus() {
   bool hasOffColor = false;
   const char* wispName = "";
   bool hasPassword = false;
+  ManualPaletteStatus manual{};
   if (config_) {
+    manual = config_->manualPaletteStatus();
     const auto off = config_->offColor();
     offR = off.r; offG = off.g; offB = off.b; offW = off.w;
     hasOffColor = true;
@@ -155,12 +157,12 @@ void StatusEmitter::emitStatus() {
   const WispStatusFields fields{
       wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
-      wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp };
-  const WispConfigFields configCopy = configFields();
+      wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp,
+      manual.id, manual.seq };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(
-      fields, &configCopy, jsonBuf, sizeof(jsonBuf),
+      fields, jsonBuf, sizeof(jsonBuf),
       lamp_protocol::CONTROL_MAX_PAYLOAD);
 
   // Emit palette first: a wispStatus build failure must not suppress it.

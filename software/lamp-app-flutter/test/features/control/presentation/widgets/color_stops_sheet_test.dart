@@ -256,6 +256,97 @@ void main() {
     });
   });
 
+  group('saveUnavailable', () {
+    const note = Text('Not now');
+
+    /// Opens a sheet whose Save is unavailable while [unavailable] holds true,
+    /// recording every save into [saves].
+    Future<void> open(
+      WidgetTester tester, {
+      required ValueNotifier<bool> unavailable,
+      required List<List<LampColor>> saves,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: appTheme,
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: TextButton(
+                onPressed: () => showAppSheet<void>(
+                  ctx,
+                  builder: (_) => ValueListenableBuilder<bool>(
+                    valueListenable: unavailable,
+                    builder: (_, off, _) => ColorStopsSheet(
+                      initial: const [_red, _green],
+                      title: 'Palette',
+                      max: 4,
+                      reorderable: false,
+                      saveUnavailable: off ? note : null,
+                      onSave: (c) async => saves.add(c),
+                    ),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    bool saveEnabled(WidgetTester tester) => tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Save'))
+        .enabled;
+
+    testWidgets('unset, Save is live and no note shows', (tester) async {
+      final saves = <List<LampColor>>[];
+      await open(tester, unavailable: ValueNotifier(false), saves: saves);
+
+      expect(saveEnabled(tester), isTrue);
+      expect(find.text('Not now'), findsNothing);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(saves, hasLength(1));
+      expect(find.text('Palette'), findsNothing);
+    });
+
+    testWidgets('set, Save is disabled under the note and saves nothing', (
+      tester,
+    ) async {
+      final saves = <List<LampColor>>[];
+      await open(tester, unavailable: ValueNotifier(true), saves: saves);
+
+      expect(saveEnabled(tester), isFalse);
+      expect(find.text('Not now'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(saves, isEmpty);
+      expect(find.text('Palette'), findsOneWidget);
+    });
+
+    testWidgets('cleared while open, Save comes back with the edits kept', (
+      tester,
+    ) async {
+      final saves = <List<LampColor>>[];
+      final unavailable = ValueNotifier(true);
+      await open(tester, unavailable: unavailable, saves: saves);
+      await tester.tap(find.text('Add Color'));
+      await tester.pumpAndSettle();
+
+      unavailable.value = false;
+      await tester.pumpAndSettle();
+
+      expect(find.text('Palette'), findsOneWidget);
+      expect(find.text('Not now'), findsNothing);
+      expect(saveEnabled(tester), isTrue);
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      await tester.pumpAndSettle();
+      expect(saves.single, hasLength(3));
+    });
+  });
+
   group('showColorStopsSheet is a fixed 0.6 high', () {
     for (final n in [2, 6]) {
       testWidgets('$n colours', (tester) async {

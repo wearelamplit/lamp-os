@@ -50,7 +50,8 @@ bool WispController::effectiveOff() const {
 
 // Fill `pixels` (pre-gamma RGB, length px*3) from the current source state.
 void WispController::computeRingPixels(uint8_t* pixels, size_t px, bool off) {
-  uint8_t stopsRgb[wisp::kManualPaletteMaxColors * 3];
+  static_assert(kOscMaxColors >= kManualPaletteMaxColors);
+  uint8_t stopsRgb[kOscMaxColors * 3];
   size_t numStops = 0;
 
   const wisp::WispSourceMode mode = config_.sourceMode();
@@ -67,9 +68,7 @@ void WispController::computeRingPixels(uint8_t* pixels, size_t px, bool off) {
     numStops = n;
   } else if (sourceLive()) {
     const auto& cols = palette_.colors();
-    const size_t n = cols.size() > wisp::kManualPaletteMaxColors
-                         ? wisp::kManualPaletteMaxColors
-                         : cols.size();
+    const size_t n = cols.size() > kOscMaxColors ? kOscMaxColors : cols.size();
     for (size_t i = 0; i < n; ++i) {
       // WS2812 ring has no W channel; fold W into R/G with warm bias.
       wisp::rgbwToRgbWarmBias(cols[i].r, cols[i].g, cols[i].b, cols[i].w,

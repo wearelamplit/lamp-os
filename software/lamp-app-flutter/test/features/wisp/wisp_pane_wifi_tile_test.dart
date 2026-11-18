@@ -27,8 +27,22 @@ class _FakeLampNearbyPeers extends LampNearbyPeersNotifier {
 
 const _devId = 'lamp-x';
 
+/// A lamp that serves the wisp sections, holding [status] and the wisp's
+/// default settings.
+void _seedWispSections(InMemoryBleClient ble, String status) {
+  ble.seedSection(_devId, 'wispstatus', Uint8List.fromList(utf8.encode(status)));
+  ble.seedSection(
+    _devId,
+    'wispconfig',
+    Uint8List.fromList(utf8.encode(
+        '{"char":"wispConfig","ledType":"GRB","px":30,"brightness":100,'
+        '"driftIntervalMs":120000,"driftFadePct":50,"shuffleSeed":0,'
+        '"opSeq":0}')),
+  );
+}
+
 Future<ProviderContainer> _makeContainer({
-  String wispStatusJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}',
+  String wispStatusJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}',
   String wifiStateJson =
       '{"state":"idle","scanResults":[{"ssid":"homenet","rssi":-55,"encrypted":true}]}',
 }) async {
@@ -42,6 +56,7 @@ Future<ProviderContainer> _makeContainer({
     BleUuids.wispStatus,
     Uint8List.fromList(utf8.encode(wispStatusJson)),
   );
+  _seedWispSections(ble, wispStatusJson);
   await ble.write(
     _devId,
     BleUuids.controlService,
@@ -101,7 +116,7 @@ void main() {
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson:
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"source":"osc"}',
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"configSplit":true,"source":"osc"}',
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
@@ -120,7 +135,7 @@ void main() {
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson:
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":true,"source":"osc"}',
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":true,"configSplit":true,"source":"osc"}',
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
@@ -135,7 +150,8 @@ void main() {
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson:
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"source":"manual"}',
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,"configSplit":true,"source":"manual",'
+          '"manualId":""}',
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
@@ -151,7 +167,7 @@ void main() {
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,'
-          '"source":"osc","ethIp":"10.0.0.42"}',
+          '"configSplit":true,"source":"osc","ethIp":"10.0.0.42"}',
     );
     addTearDown(c.dispose);
     await _pumpScreen(tester, c);
@@ -166,7 +182,7 @@ void main() {
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","wifiConnected":false,'
-          '"source":"osc","ethIp":"10.0.0.42",'
+          '"configSplit":true,"source":"osc","ethIp":"10.0.0.42",'
           '"wifiChannelMismatch":true,"wifiApChannel":1}',
     );
     addTearDown(c.dispose);
@@ -209,8 +225,10 @@ void main() {
       _devId,
       BleUuids.controlService,
       BleUuids.wispStatus,
-      Uint8List.fromList(utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}')),
+      Uint8List.fromList(utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}')),
     );
+    _seedWispSections(
+        ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}');
     await ble.write(
       _devId,
       BleUuids.controlService,
@@ -280,8 +298,10 @@ void main() {
       _devId,
       BleUuids.controlService,
       BleUuids.wispStatus,
-      Uint8List.fromList(utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}')),
+      Uint8List.fromList(utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}')),
     );
+    _seedWispSections(
+        ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}');
     await ble.write(
       _devId,
       BleUuids.controlService,
@@ -337,7 +357,7 @@ void main() {
     testWidgets('WiFi row is on Settings tab when source=$mode', (tester) async {
       final c = await _makeContainer(
         wispStatusJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"$mode"}',
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"$mode","manualId":""}',
       );
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);

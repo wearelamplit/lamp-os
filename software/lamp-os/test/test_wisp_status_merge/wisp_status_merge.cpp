@@ -20,11 +20,12 @@ using lamp::WispStatusMergeInput;
 
 namespace {
 
-// The wisp's widest status once the config copy is gone (test_status_json's
-// status-only worst case on the wisp side): Off mode, every live field set.
-const char kStatusOnlyWorst[] =
+// The wisp's widest status (test_status_json's worst case on the wisp side):
+// Off mode, every live field set.
+const char kWorstStatus[] =
     R"({"char":"wispStatus","source":"off","wifiConnected":false,)"
-    R"("sourceLive":false,"lastSeenMs":9223372036854775,"hasPassword":true,)"
+    R"("sourceLive":false,"lastSeenMs":9223372036854775,"configSplit":true,)"
+    R"("hasPassword":true,"manualId":"abcdef12","manualSeq":65535,)"
     R"("offColor":"ffffffff","oscRole":"secondary","paletteIdPrefix":"abcdef12",)"
     R"("name":"12345678901234567890","ethIp":"255.255.255.255",)"
     R"("wifiChannelMismatch":true,"wifiApChannel":11})";
@@ -75,35 +76,75 @@ void test_config_stamp_merged_only_when_config_cached() {
   TEST_ASSERT_EQUAL_STRING("osc", d2["source"].as<const char*>());
 }
 
-// The merge adds 301 B at worst, so even the wisp's status with no config copy
-// overflows the 512 B characteristic whole; the page section serves all of it.
-void test_uncapped_merge_of_status_only_worst_case_pinned() {
-  TEST_ASSERT_EQUAL_size_t(301, std::strlen(kStatusOnlyWorst));
-  const std::string out = mergeWispStatusJson(widestMerge(kStatusOnlyWorst), 0);
-  TEST_ASSERT_EQUAL_size_t(602, out.size());
+// The merge adds 301 B at worst, so the wisp's widest status overflows the
+// 512 B characteristic whole; the page section serves all of it.
+void test_uncapped_merge_of_worst_status_pinned() {
+  TEST_ASSERT_EQUAL_size_t(360, std::strlen(kWorstStatus));
+  const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus), 0);
+  TEST_ASSERT_EQUAL_size_t(661, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_FALSE(d["helloPaletteIdPrefix"].isNull());
   TEST_ASSERT_FALSE(d["configLastSeenMs"].isNull());
 }
 
-// Capped for CHAR_WISP_STATUS, the diagnostics shed in order until the
-// document fits; every field an app reads survives.
-void test_capped_merge_sheds_diagnostics_to_fit() {
-  const std::string out = mergeWispStatusJson(widestMerge(kStatusOnlyWorst),
+// Capped for CHAR_WISP_STATUS, the diagnostics shed in order. The widest
+// status is still over 512 B with all four gone, so its notify goes blank
+// and the app re-reads the page section. Every field an app reads survives,
+// configSplit among them, since without it the app reads the settings as
+// parser defaults, and manualId and manualSeq, whose absence reads as an
+// older wisp or a save not yet applied.
+void test_capped_merge_sheds_every_diagnostic() {
+  const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus),
                                               kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(509, out.size());
+  TEST_ASSERT_EQUAL_size_t(551, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloPaletteIdPrefix"].isNull());
   TEST_ASSERT_TRUE(d["helloLastSeenMs"].isNull());
   TEST_ASSERT_TRUE(d["statusLastSeenMs"].isNull());
   TEST_ASSERT_FALSE(d["configLastSeenMs"].isNull());
-  TEST_ASSERT_FALSE(d["helloFlags"].isNull());
+  TEST_ASSERT_TRUE(d["helloFlags"].isNull());
   TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FF", d["wispMac"].as<const char*>());
   TEST_ASSERT_FALSE(d["wispVersion"].isNull());
   TEST_ASSERT_FALSE(d["shadeWispColor"].isNull());
   TEST_ASSERT_EQUAL_STRING("12345678901234567890", d["name"].as<const char*>());
+  TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
+  TEST_ASSERT_EQUAL_STRING("abcdef12", d["manualId"].as<const char*>());
+  TEST_ASSERT_EQUAL_UINT32(65535, d["manualSeq"].as<uint32_t>());
+}
+
+// A Manual status without Ethernet or a name fits once three diagnostics are
+// gone, so the shedding stops there and helloFlags stays.
+void test_capped_merge_stops_shedding_once_it_fits() {
+  std::string status(kWorstStatus);
+  status.replace(status.find(R"("source":"off")"), 14, R"("source":"manual")");
+  status.erase(status.find(R"("offColor":"ffffffff",)"), 22);
+  status.erase(status.find(R"("ethIp":"255.255.255.255",)"), 26);
+  status.erase(status.find(R"("name":"12345678901234567890",)"), 30);
+  const std::string out =
+      mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
+  TEST_ASSERT_EQUAL_size_t(493, out.size());
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_TRUE(d["statusLastSeenMs"].isNull());
+  TEST_ASSERT_FALSE(d["helloFlags"].isNull());
+  TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
+}
+
+// A name of 20 quotes, escaped to 40 bytes, still overflows after every
+// diagnostic sheds; configSplit stays even then.
+void test_capped_merge_keeps_config_split_when_still_over() {
+  std::string status(kWorstStatus);
+  status.replace(status.find("12345678901234567890"), 20,
+                 R"(\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\")");
+  const std::string out =
+      mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
+  TEST_ASSERT_EQUAL_size_t(571, out.size());
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_TRUE(d["helloFlags"].isNull());
+  TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
 }
 
 // A document that already fits sheds nothing.
@@ -153,8 +194,10 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_nothing_known_serves_empty_object);
   RUN_TEST(test_config_stamp_merged_only_when_config_cached);
-  RUN_TEST(test_uncapped_merge_of_status_only_worst_case_pinned);
-  RUN_TEST(test_capped_merge_sheds_diagnostics_to_fit);
+  RUN_TEST(test_uncapped_merge_of_worst_status_pinned);
+  RUN_TEST(test_capped_merge_sheds_every_diagnostic);
+  RUN_TEST(test_capped_merge_stops_shedding_once_it_fits);
+  RUN_TEST(test_capped_merge_keeps_config_split_when_still_over);
   RUN_TEST(test_capped_merge_keeps_diagnostics_when_it_fits);
   RUN_TEST(test_status_payload_keys_win);
   RUN_TEST(test_store_if_changed_only_on_new_bytes);

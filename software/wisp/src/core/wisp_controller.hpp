@@ -42,7 +42,9 @@ class WispController {
   // Apply the DispatchResult from a CONTROL_OP. MeshRouter result callback.
   void applyOpResult(DispatchResult res);
 
-  // OSC palette input (flat RGB floats 0..1, at most kManualPaletteMaxColors).
+  static constexpr size_t kOscMaxColors = 50;
+
+  // OSC palette input (flat RGB floats 0..1, at most kOscMaxColors).
   // Applied only in Osc mode; an unchanged palette only refreshes liveness
   // and a blank one counts as no palette. Ring updates at once; lamp paint,
   // STATE and ArtNet follow at most once per kOscPaintIntervalMs, trailing
@@ -86,7 +88,7 @@ class WispController {
   void holdOscStream();
   void pushOscPaint();
 
-  static constexpr size_t kOscMaxFloats = kManualPaletteMaxColors * 3;
+  static constexpr size_t kOscMaxFloats = kOscMaxColors * 3;
   // A fast-moving palette re-colours lamps at most this often; each pass
   // re-assigns every lamp and bursts STATE over the mesh.
   static constexpr uint32_t kOscPaintIntervalMs = 1000;
