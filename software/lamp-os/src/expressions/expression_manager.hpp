@@ -188,10 +188,9 @@ class ExpressionManager {
    */
   void setCompositor(Compositor* compositor);
 
-  /**
-   * Load expressions from config.
-   */
-  void loadFromConfig(const ExpressionSettings& settings);
+  // Loads the configured expressions, first erasing from `settings` every
+  // entry of an internal type. Returns how many it erased.
+  size_t loadFromConfig(ExpressionSettings& settings);
 
   /**
    * Get active expression behaviors for compositor.

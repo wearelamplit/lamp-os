@@ -87,6 +87,22 @@ const std::vector<const ExpressionDescriptor*>& ExpressionRegistry::all() const 
   return descriptors_;
 }
 
+bool ExpressionRegistry::configurable(const char* id) const {
+  const ExpressionDescriptor* d = find(id);
+  return d && !d->internal;
+}
+
+size_t ExpressionRegistry::dropInternal(ExpressionSettings& settings) const {
+  auto& exprs = settings.expressions;
+  const auto kept = std::remove_if(exprs.begin(), exprs.end(), [this](const ExpressionConfig& e) {
+    const ExpressionDescriptor* d = find(e.type.c_str());
+    return d && d->internal;
+  });
+  const size_t dropped = static_cast<size_t>(exprs.end() - kept);
+  exprs.erase(kept, exprs.end());
+  return dropped;
+}
+
 void ExpressionRegistry::applyDefaults(const ExpressionDescriptor& d,
                                        ExpressionParams& params,
                                        uint16_t window) const {

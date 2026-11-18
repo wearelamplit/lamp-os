@@ -36,12 +36,13 @@ void ExpressionManager::begin(FrameBuffer* shade, FrameBuffer* base) {
   }
 }
 
-void ExpressionManager::loadFromConfig(const ExpressionSettings& settings) {
+size_t ExpressionManager::loadFromConfig(ExpressionSettings& settings) {
   clear();
-
+  const size_t dropped = registry_.dropInternal(settings);
   for (const auto& config : settings.expressions) {
     addExpression(config);
   }
+  return dropped;
 }
 
 

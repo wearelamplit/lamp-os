@@ -255,7 +255,8 @@ contract: [`moments.md`](moments.md).
 - **Yawns spread.** A tired introvert yawns now and then, and a lamp that
   sees a peer yawn may yawn back, likelier the fonder it is of that peer and
   less likely in a crowd. Both run only while the social engine is on and
-  home mode is off. Detail in
+  home mode is off. Yawn is built in: it is never one of the lamp's
+  configured expressions. Detail in
   [`expressions.md`](expressions.md#yawn-contagion).
 - **OTA outranks personality.** Offering an update is not a social
   behaviour. The offer scan (`tickOtaOffers`, `components/firmware/ota_offer.cpp`)

@@ -50,6 +50,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   showing a stale pick.
 
 ### Changed
+- **Yawn is built in.** The app and Web Config no longer offer Yawn as an
+  expression to add or configure; lamps still yawn on their own, a tired
+  introvert now and then and a lamp yawning back at a peer. A lamp that had
+  Yawn added drops it on update and keeps its other expressions.
 - **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
   app's Test with colours, or a mushroom's tint, fades back and stops; a
   configured Shifty still chains into Glitchy.
