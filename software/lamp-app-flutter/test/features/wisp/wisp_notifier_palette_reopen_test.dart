@@ -41,7 +41,7 @@ void main() {
         ? ''
         : ',"paletteIdPrefix":"${WispRepository.manualPaletteId(palette)}"';
     await ble.write(_lampId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual",'
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"manual",'
             '"manualId":"${WispRepository.statusManualId(palette)}"$prefix}'));
     ble.seedSection(_lampId, 'wisppalette',
         Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));

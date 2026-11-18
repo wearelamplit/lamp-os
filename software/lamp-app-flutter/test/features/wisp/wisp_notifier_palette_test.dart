@@ -128,7 +128,7 @@ void main() {
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(ble,
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}');
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}');
       final c = makeContainer(ble: ble);
 
       c.listen(wispNotifierProvider(lampId), (_, _) {});
@@ -155,7 +155,7 @@ void main() {
     test('setManualPalette writes a wispOp with RGB triples', () async {
       final ble = InMemoryBleClient();
       await primeStatus(ble,
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}');
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}');
       final c = makeContainer(ble: ble);
 
       c.listen(wispNotifierProvider(lampId), (_, _) {});
@@ -191,7 +191,7 @@ void main() {
       // No status NOTIFY ever echoes the save, so no confirm arrives and
       // every attempt times out.
       await primeStatus(ble,
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}');
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}');
       final c = makeContainer(ble: ble);
       c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
@@ -421,7 +421,7 @@ void main() {
         BleUuids.controlService,
         BleUuids.wispStatus,
         Uint8List.fromList(utf8.encode(
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"$mode","manualId":""}')),
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"$mode","manualId":""}')),
       );
     }
 
@@ -455,7 +455,7 @@ void main() {
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(
-          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","manualId":""}');
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc","manualId":""}');
       final c = makeContainer(ble: ble);
 
       c.listen(wispNotifierProvider(lampId), (_, _) {});
@@ -480,7 +480,7 @@ void main() {
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(
-          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","manualId":""}');
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc","manualId":""}');
       final c = makeContainer(ble: ble);
       c.listen(wispNotifierProvider(lampId), (_, _) {});
       await c.read(wispNotifierProvider(lampId).future);
@@ -511,7 +511,7 @@ void main() {
       seedPalette(ble, seeded);
       await primeStatus(
           ble,
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual",'
           '"manualId":"$seededId"}');
       final c = makeContainer(ble: ble);
 
@@ -529,7 +529,7 @@ void main() {
         BleUuids.controlService,
         BleUuids.wispStatus,
         Uint8List.fromList(utf8.encode(
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual",'
             '"manualId":"$seededId"}')),
       );
       await Future<void>.delayed(Duration.zero);
@@ -546,7 +546,7 @@ void main() {
         BleUuids.controlService,
         BleUuids.wispStatus,
         Uint8List.fromList(utf8.encode(
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off",'
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off",'
             '"manualId":"$seededId"}')),
       );
       await f;
@@ -556,7 +556,7 @@ void main() {
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(
-          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}');
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}');
       final c = makeContainer(ble: ble);
 
       c.listen(wispNotifierProvider(lampId), (_, _) {});
@@ -571,7 +571,7 @@ void main() {
         BleUuids.wispStatus,
         Uint8List.fromList(
             utf8.encode(
-                '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","manualId":""}')),
+                '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off","manualId":""}')),
       );
       await f;
 
@@ -582,7 +582,7 @@ void main() {
         BleUuids.wispStatus,
         Uint8List.fromList(
             utf8.encode(
-                '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}')),
+                '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}')),
       );
       await Future<void>.delayed(Duration.zero);
 
@@ -601,7 +601,7 @@ void main() {
       ];
       seedPalette(ble, seeded);
       await primeStatus(ble,
-          '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off",'
+          '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off",'
           '"manualId":"${WispRepository.statusManualId(seeded)}"}');
       final c = makeContainer(ble: ble);
 
@@ -633,7 +633,7 @@ void main() {
         () async {
       final ble = InMemoryBleClient();
       await primeStatus(
-          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","manualId":""}');
+          ble, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off","manualId":""}');
       final c = makeContainer(ble: ble);
 
       await c.read(wispNotifierProvider(lampId).future);

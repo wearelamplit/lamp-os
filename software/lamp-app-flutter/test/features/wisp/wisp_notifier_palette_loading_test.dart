@@ -16,7 +16,7 @@ import '../../_support/in_memory_ble_client.dart';
 
 const _lampId = 'loading-lamp';
 const _emptyManual =
-    '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}';
+    '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}';
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
@@ -91,7 +91,7 @@ void main() {
   test('a palette skipped behind a status re-read is read when that re-read '
       'lands with the same palette id', () async {
     const palette = [LampColor(r: 9, g: 80, b: 200, w: 0)];
-    final manual = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual",'
+    final manual = '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual",'
         '"manualId":"${WispRepository.statusManualId(palette)}",'
         '"paletteIdPrefix":"${WispRepository.manualPaletteId(palette)}"}';
     final ble = _HeldReadsBle();
@@ -136,7 +136,7 @@ void main() {
   });
 
   test('an Osc wisp with no manual palette reads it once', () async {
-    const osc = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+    const osc = '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
         '"manualId":"","paletteIdPrefix":"0a1b2c3d"}';
     final ble = _HeldReadsBle();
     await ble.connect(_lampId);
@@ -167,7 +167,7 @@ void main() {
     ble.seedSection(
         _lampId,
         'wispstatus',
-        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off",'
+        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off",'
             '"manualId":"${WispRepository.statusManualId(palette)}"}'));
     ble.seedSection(_lampId, 'wisppalette',
         Uint8List.fromList([for (final x in palette) ...[x.r, x.g, x.b, x.w]]));
@@ -198,7 +198,7 @@ void main() {
     final osc = _HeldReadsBle();
     await osc.connect(_lampId);
     osc.seedSection(_lampId, 'wispstatus',
-        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","manualId":""}'));
+        _b('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc","manualId":""}'));
     final c3 = makeContainer(osc);
     c3.listen(wispNotifierProvider(_lampId), (_, _) {});
     await c3.read(wispNotifierProvider(_lampId).future);

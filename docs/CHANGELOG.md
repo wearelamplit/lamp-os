@@ -47,10 +47,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **A wrong current password on a wisp takes up to 10 s to report.** The app
   waits that long for the wisp to confirm a password change.
 - **The wisp's status no longer repeats its settings**, which keeps it inside
-  the lamp's Bluetooth limit. Apps read them from the wisp's settings message.
-  Update the app on every phone that opens a wisp first: an older app shows
-  default settings or never loads them. Through a lamp older than 1.2.8 the
-  wisp's settings don't show.
+  the lamp's Bluetooth limit. The app reads them only from the wisp's
+  settings message. Update the app on every phone that opens a wisp first:
+  an older app shows default settings or never loads them. Through a lamp
+  older than 1.2.8 the wisp's settings don't show.
 
 ## 1.3.8
 

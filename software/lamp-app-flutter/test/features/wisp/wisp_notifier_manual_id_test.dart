@@ -39,6 +39,7 @@ String _status({
   String prefix = '',
 }) => jsonEncode({
   'wispMac': mac,
+  'configSplit': true,
   'source': source,
   'manualId': manualId,
   if (prefix.isNotEmpty) 'paletteIdPrefix': prefix,

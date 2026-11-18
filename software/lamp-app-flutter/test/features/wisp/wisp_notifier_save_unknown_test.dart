@@ -93,7 +93,7 @@ void main() {
         'the save sends nothing', () async {
       final ble = PaletteBle(_lampId)..seedPalette(_p);
       final status =
-          '{"wispMac":"$wispA","source":"$source",'
+          '{"wispMac":"$wispA","configSplit":true,"source":"$source",'
           '"configSplit":true}';
       final (_, n) = await openWisp(ble, status);
       ble.notifyStatus(status);

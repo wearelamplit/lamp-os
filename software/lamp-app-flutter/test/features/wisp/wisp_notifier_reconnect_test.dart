@@ -82,7 +82,7 @@ void main() {
     ble.seedSection(_lampId, 'wisppalette',
         Uint8List.fromList([for (final c in saved) ...[c.r, c.g, c.b, c.w]]));
     await ble.connect(_lampId);
-    final manual = '{"wispMac":"$_mac","source":"manual",'
+    final manual = '{"wispMac":"$_mac","configSplit":true,"source":"manual",'
         '"manualId":"${WispRepository.statusManualId(saved)}"}';
     await ble.write(
         _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(manual));
@@ -105,7 +105,7 @@ void main() {
 
     notify(
         ble,
-        '{"wispMac":"$_mac","source":"osc",'
+        '{"wispMac":"$_mac","configSplit":true,"source":"osc",'
         '"manualId":"${WispRepository.statusManualId(saved)}"}');
     await pumpEventQueue();
     expect(c.read(wispNotifierProvider(_lampId)).value!.source,

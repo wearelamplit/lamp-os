@@ -617,14 +617,11 @@ class WispNotifier extends _$WispNotifier {
     _onIncoming(status);
   }
 
-  /// [status] with the held config merged in, when the status carries no
-  /// settings of its own and the config came from the same wisp. A status
-  /// that [WispStatus.carriesConfig] is the fresher of the two: a config
-  /// re-read can be skipped or lost, a status cannot go stale behind it.
+  /// [status] with the held config merged in, when the config came from the
+  /// same wisp.
   WispStatus _withHeldConfig(WispStatus status) {
     final config = _config;
     if (config == null ||
-        status.carriesConfig ||
         status.wispMac == null ||
         status.wispMac != _configMac) {
       return status;

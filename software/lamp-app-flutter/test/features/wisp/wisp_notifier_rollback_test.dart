@@ -40,7 +40,7 @@ void main() {
       final ble = InMemoryBleClient();
       await primeStatus(
         ble,
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
         '"oscRole":"secondary"}',
       );
       final c = makeContainer(ble);
@@ -67,7 +67,7 @@ void main() {
     test('setSource sends no second copy of an op the wisp echoed before its '
         'write reported an error', () async {
       final ble = PaletteBle(lampId);
-      final (_, n) = await openWisp(ble, '{"wispMac":"$wispA","source":"osc"}');
+      final (_, n) = await openWisp(ble, '{"wispMac":"$wispA","configSplit":true,"source":"osc"}');
 
       ble.holdSourceWrite = Completer<void>();
       final result = n.setSource(WispSourceMode.off).then<Object?>(
@@ -75,7 +75,7 @@ void main() {
             onError: (Object e) => e,
           );
       await pumpEventQueue();
-      ble.notifyStatus('{"wispMac":"$wispA","source":"off"}');
+      ble.notifyStatus('{"wispMac":"$wispA","configSplit":true,"source":"off"}');
       await pumpEventQueue();
       ble.holdSourceWrite!.completeError(Exception('response lost'));
       ble.holdSourceWrite = null;
@@ -92,7 +92,7 @@ void main() {
       final ble = InMemoryBleClient();
       await primeStatus(
         ble,
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}',
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}',
       );
       final c = makeContainer(ble);
 

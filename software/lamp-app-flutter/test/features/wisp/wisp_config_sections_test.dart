@@ -203,40 +203,13 @@ void main() {
       expect(c.read(wispNotifierProvider(_lampId)).value!.brightness, 25);
     });
 
-    // During the changeover the status copy is the fresher source: a config
-    // re-read can be skipped or lost, the status cannot fall behind it.
-    test('a status that carries config wins over the held config', () async {
-      final ble = await connectedBle();
-      ble.seedSection(
-        _lampId,
-        'wispstatus',
-        _b('{"wispMac":"$_mac","source":"osc","configLastSeenMs":100}'),
-      );
-      ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 60)));
-      final c = makeContainer(ble);
-      await built(c);
-
-      ble.simulateNotify(
-        _lampId,
-        BleUuids.controlService,
-        BleUuids.wispStatus,
-        _b(
-          '{"wispMac":"$_mac","source":"osc","px":30,'
-          '"configLastSeenMs":100}',
-        ),
-      );
-      await settle();
-
-      expect(c.read(wispNotifierProvider(_lampId)).value!.pixelCount, 30);
-    });
-
     // A rival wisp took the slot: the old wisp's config must not dress it.
     test('a held config never merges onto another wisp', () async {
       final ble = await connectedBle();
       ble.seedSection(
         _lampId,
         'wispstatus',
-        _b('{"wispMac":"$_mac","source":"osc","configLastSeenMs":100}'),
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"osc","configLastSeenMs":100}'),
       );
       ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 60)));
       final c = makeContainer(ble);
@@ -266,7 +239,7 @@ void main() {
       ble.seedSection(
         _lampId,
         'wispstatus',
-        _b('{"wispMac":"$_mac","source":"off"}'),
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"off"}'),
       );
       final c = makeContainer(ble);
       await built(c);
@@ -274,7 +247,7 @@ void main() {
       ble.seedSection(
         _lampId,
         'wispstatus',
-        _b('{"wispMac":"$_mac","source":"manual","name":"whole"}'),
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"manual","name":"whole"}'),
       );
       ble.simulateNotify(
         _lampId,
@@ -319,38 +292,6 @@ void main() {
       );
 
       expect(await future, isTrue);
-    });
-
-    // The held config (opSeq 4) lags the status copy (5). The baseline is the
-    // status's 5, so the config catching up to 5 after a rejected op does not
-    // read as an advance.
-    test('a stale held config never lowers the opSeq baseline', () async {
-      final ble = await connectedBle();
-      const status =
-          '{"wispMac":"$_mac","source":"osc","hasPassword":true,'
-          '"opSeq":5,"configLastSeenMs":100}';
-      ble.seedSection(_lampId, 'wispstatus', _b(status));
-      ble.seedSection(_lampId, 'wispconfig', _b(_config(opSeq: 4)));
-      final c = makeContainer(ble);
-      await built(c);
-      final n = c.read(wispNotifierProvider(_lampId).notifier);
-
-      final future = n.setPassword('newpass', currentPassword: 'wrongpass');
-      await opSent(ble);
-      ble.seedSection(_lampId, 'wispconfig', _b(_config(opSeq: 5)));
-      ble.simulateNotify(
-        _lampId,
-        BleUuids.controlService,
-        BleUuids.wispStatus,
-        _b(
-          status.replaceFirst(
-            '"configLastSeenMs":100',
-            '"configLastSeenMs":200',
-          ),
-        ),
-      );
-
-      expect(await future, isFalse);
     });
 
     // A config read already in flight when the op starts lands opSeq 6. The

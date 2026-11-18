@@ -9,6 +9,16 @@ import 'package:lamp_app/features/wisp/domain/wisp_status.dart';
 /// Wrap a JSON string as the raw UTF-8 bytes the BLE layer hands us.
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
+const _anyConfig = WispConfig(
+  ledType: 'GRB',
+  pixelCount: 30,
+  brightness: 100,
+  driftIntervalMs: 120000,
+  driftFadePct: 50,
+  shuffleSeed: 0,
+  opSeq: 0,
+);
+
 void main() {
   group('WispStatus.fromBytes', () {
     test('empty bytes → empty status (not present)', () {
@@ -127,26 +137,11 @@ void main() {
       expect(b.copyWith(oscRole: OscRole.primary), a);
     });
 
-    test('shuffleSeed parses from JSON', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","shuffleSeed":7}',
-      ));
-      expect(s.shuffleSeed, 7);
-    });
-
     test('shuffleSeed defaults to 0 when absent', () {
       final s = WispStatus.fromBytes(_b(
         '{"wispMac":"AA:BB:CC:DD:EE:FF"}',
       ));
       expect(s.shuffleSeed, 0);
-    });
-
-    test('driftIntervalMs and driftFadePct parse from JSON', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","driftIntervalMs":90000,"driftFadePct":40}',
-      ));
-      expect(s.driftIntervalMs, 90000);
-      expect(s.driftFadePct, 40);
     });
 
     test('driftIntervalMs defaults to 120000 when absent', () {
@@ -163,16 +158,6 @@ void main() {
       expect(s.driftFadePct, 50);
     });
 
-    // Option A: the wisp emits offColor only in off mode and drift fields only
-    // in manual/osc. Both sets must round-trip even when the other is absent.
-    test('offColor parses the W element when present', () {
-      final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":[200,100,50,90]}',
-      ));
-      expect(s.offColor.r, 200);
-      expect(s.offColor.w, 90);
-    });
-
     test('offColor parses the packed hex string form', () {
       final s = WispStatus.fromBytes(_b(
         '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":"c8643219"}',
@@ -183,24 +168,12 @@ void main() {
       expect(s.offColor.w, 25);
     });
 
-    test('off-mode frame carries offColor; manual-mode frame carries drift fields', () {
-      final off = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off","offColor":[200,100,50]}',
-      ));
-      expect(off.offColor.r, 200);
-      expect(off.offColor.g, 100);
-      expect(off.offColor.b, 50);
-      expect(off.offColor.w, 0);
-      expect(off.driftIntervalMs, 120000); // absent → default
-      expect(off.driftFadePct, 50);        // absent → default
-
+    // The wisp emits offColor only in Off mode.
+    test('a frame without offColor reads the default Off colour', () {
       final manual = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"'
-        ',"driftIntervalMs":90000,"driftFadePct":40}',
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}',
       ));
-      expect(manual.offColor.r, 255); // absent → _defaultOffColor
-      expect(manual.driftIntervalMs, 90000);
-      expect(manual.driftFadePct, 40);
+      expect(manual.offColor, WispStatus.empty.offColor);
     });
 
     test('name parses from JSON', () {
@@ -238,10 +211,10 @@ void main() {
       expect(s.hasPassword, isFalse);
     });
 
-    test('brightness parses from JSON and rides copyWith/==', () {
+    test('brightness rides withConfig, copyWith and ==', () {
       final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","brightness":40}',
-      ));
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true}',
+      )).withConfig(_anyConfig.copyWith(brightness: 40));
       expect(s.brightness, 40);
       final dimmer = s.copyWith(brightness: 20);
       expect(dimmer.brightness, 20);
@@ -286,12 +259,30 @@ void main() {
   });
 
   group('WispStatus config knowledge', () {
-    test('a status the wisp sent carries known config', () {
+    // Settings come only from the wisp's config report ([withConfig]).
+    test('a status without configSplit carries no settings', () {
       final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","px":60}',
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","ledType":"BGR",'
+        '"px":12,"brightness":30,"driftIntervalMs":5000,"driftFadePct":5,'
+        '"shuffleSeed":3,"opSeq":2}',
       ));
-      expect(s.configKnown, isTrue);
-      expect(s.pixelCount, 60);
+      const none = WispStatus.empty;
+      expect(s.configKnown, isFalse);
+      expect(s.fromWisp, isFalse);
+      expect(s.ledType, none.ledType);
+      expect(s.pixelCount, none.pixelCount);
+      expect(s.brightness, none.brightness);
+      expect(s.driftIntervalMs, none.driftIntervalMs);
+      expect(s.driftFadePct, none.driftFadePct);
+      expect(s.shuffleSeed, none.shuffleSeed);
+      expect(s.opSeq, none.opSeq);
+    });
+
+    test('a status with configSplit is from the wisp', () {
+      final s = WispStatus.fromBytes(_b(
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","configSplit":true}',
+      ));
+      expect(s.fromWisp, isTrue);
     });
 
     // Hello-only merge: the lamp has no wispStatus payload yet, so the
@@ -337,7 +328,6 @@ void main() {
         '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off"}',
       )).withConfig(config);
       expect(s.configKnown, isTrue);
-      expect(s.carriesConfig, isFalse);
       expect(s.ledType, 'BGR');
       expect(s.pixelCount, 12);
       expect(s.brightness, 40);
@@ -350,8 +340,9 @@ void main() {
 
     test('copyWith keeps config knowledge', () {
       final s = WispStatus.fromBytes(_b(
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","configLastSeenMs":7}',
-      )).copyWith(brightness: 30);
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc","configSplit":true,'
+        '"configLastSeenMs":7}',
+      )).withConfig(_anyConfig).copyWith(brightness: 30);
       expect(s.configKnown, isTrue);
       expect(s.configLastSeenMs, 7);
     });

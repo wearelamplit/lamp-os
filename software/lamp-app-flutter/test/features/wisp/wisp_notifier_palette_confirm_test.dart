@@ -129,7 +129,7 @@ void main() {
     final ble = InMemoryBleClient();
     await ble.connect(_lampId);
     await ble.write(_lampId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual","manualId":""}'));
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"manual","manualId":""}'));
     final c = makeContainer(ble);
     c.listen(wispNotifierProvider(_lampId), (_, _) {});
     await c.read(wispNotifierProvider(_lampId).future);

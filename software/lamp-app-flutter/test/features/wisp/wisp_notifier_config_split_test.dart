@@ -69,6 +69,44 @@ void main() {
                 as String,
       ];
 
+  // Settings come only from the wisp's config report, never from a status.
+  test('a status carrying settings without configSplit leaves them to the '
+      'config report', () async {
+    final ble = InMemoryBleClient();
+    await ble.connect(_lampId);
+    ble.seedSection(
+        _lampId,
+        'wispstatus',
+        _b('{"wispMac":"$_mac","source":"osc","ledType":"BGR","px":12,'
+            '"brightness":30,"driftIntervalMs":5000,"driftFadePct":5,'
+            '"shuffleSeed":3,"opSeq":2}'));
+    ble.seedSection(_lampId, 'wispconfig', _b('{}'));
+    final c = makeContainer(ble);
+    await built(c);
+    final before = c.read(wispNotifierProvider(_lampId)).value!;
+    expect(before.configKnown, isFalse);
+    expect(before.pixelCount, isNot(12));
+    expect(before.brightness, isNot(30));
+    expect(before.shuffleSeed, isNot(3));
+
+    ble.seedSection(_lampId, 'wispconfig', _b(_config(px: 44, opSeq: 9)));
+    notify(
+        ble,
+        '{"wispMac":"$_mac","source":"osc","px":12,"brightness":30,'
+        '"opSeq":2,"configLastSeenMs":5}');
+    for (var i = 0;
+        i < 40 && !c.read(wispNotifierProvider(_lampId)).value!.configKnown;
+        i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    final s = c.read(wispNotifierProvider(_lampId)).value!;
+    expect(s.configKnown, isTrue);
+    expect(s.pixelCount, 44);
+    expect(s.brightness, 80);
+    expect(s.opSeq, 9);
+  });
+
   // The lamp booted after the wisp, or cleared its cache on a display
   // switch, so it holds no config, and no notify follows once one lands.
   test('refill without notify: a missing config is re-polled and re-read',

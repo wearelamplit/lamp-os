@@ -26,7 +26,7 @@ class _FakePeers extends LampNearbyPeersNotifier {
 const _devId = 'lamp-tab-test';
 
 Future<ProviderContainer> _makeContainer({
-  String wispJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":""}',
+  String wispJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}',
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
@@ -37,6 +37,19 @@ Future<ProviderContainer> _makeContainer({
     BleUuids.controlService,
     BleUuids.wispStatus,
     Uint8List.fromList(utf8.encode(wispJson)),
+  );
+  ble.seedSection(
+    _devId,
+    'wispstatus',
+    Uint8List.fromList(utf8.encode(wispJson)),
+  );
+  ble.seedSection(
+    _devId,
+    'wispconfig',
+    Uint8List.fromList(utf8.encode(
+        '{"char":"wispConfig","ledType":"GRB","px":30,"brightness":100,'
+        '"driftIntervalMs":120000,"driftFadePct":50,"shuffleSeed":0,'
+        '"opSeq":0}')),
   );
   final c = ProviderContainer(
     overrides: [
@@ -118,7 +131,7 @@ void main() {
     testWidgets('Straylight source shows role picker and waiting notice',
         (tester) async {
       final c = await _makeContainer(
-        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
             '"oscRole":"fill"}',
       );
       addTearDown(c.dispose);
@@ -135,7 +148,7 @@ void main() {
     testWidgets('live Straylight stream hides the waiting notice',
         (tester) async {
       final c = await _makeContainer(
-        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
             '"sourceLive":true}',
       );
       addTearDown(c.dispose);
@@ -243,7 +256,7 @@ void main() {
         (tester) async {
       final c = await _makeContainer(
         wispJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":"",'
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":"",'
             '"hasPassword":true}',
       );
       addTearDown(c.dispose);
@@ -276,7 +289,7 @@ void main() {
         (tester) async {
       final c = await _makeContainer(
         wispJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","manualId":"",'
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":"",'
             '"hasPassword":true}',
       );
       addTearDown(c.dispose);

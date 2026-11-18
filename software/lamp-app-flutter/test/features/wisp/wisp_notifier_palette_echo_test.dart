@@ -35,6 +35,7 @@ String _status({
   int? lastSeenMs,
 }) => jsonEncode({
   'wispMac': _mac,
+  'configSplit': true,
   'source': source,
   'manualId': manualId,
   if (manualSeq != 0) 'manualSeq': manualSeq,
@@ -388,7 +389,7 @@ void main() {
 
     test('manualSeq parses, is 0 when absent, and survives a copy', () {
       final s = WispStatus.fromBytes(
-        _b('{"wispMac":"$_mac","source":"osc","manualSeq":4321}'),
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"osc","manualSeq":4321}'),
       );
       expect(s.manualSeq, 4321);
       expect(s.copyWith(brightness: 30).manualSeq, 4321);

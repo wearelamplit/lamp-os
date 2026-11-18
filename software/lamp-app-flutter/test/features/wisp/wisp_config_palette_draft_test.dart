@@ -58,7 +58,7 @@ void main() {
       _devId,
       BleUuids.controlService,
       BleUuids.wispStatus,
-      _b('{"wispMac":"$_mac","source":"manual",'
+      _b('{"wispMac":"$_mac","configSplit":true,"source":"manual",'
           '"manualId":"${WispRepository.statusManualId(_saved)}",'
           '"paletteIdPrefix":"${WispRepository.manualPaletteId(_saved)}"}'),
     );
@@ -164,7 +164,7 @@ void main() {
       ]),
     );
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual",'
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"manual",'
             '"manualId":"${WispRepository.statusManualId(moved)}",'
             '"paletteIdPrefix":"${WispRepository.manualPaletteId(moved)}"}'));
     await settle(tester);

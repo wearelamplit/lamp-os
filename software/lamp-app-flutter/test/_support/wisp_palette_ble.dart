@@ -24,6 +24,7 @@ String helloOnlyStatus(String mac) =>
 /// it sends: the app takes its palette as unknown.
 String unstatedStatus(String mac, List<LampColor> p) => jsonEncode({
   'wispMac': mac,
+  'configSplit': true,
   'source': 'manual',
   if (p.isNotEmpty) 'paletteIdPrefix': WispRepository.manualPaletteId(p),
 });
@@ -32,6 +33,7 @@ String unstatedStatus(String mac, List<LampColor> p) => jsonEncode({
 /// echoing [seq] when given.
 String statingStatus(String mac, List<LampColor> p, {int? seq}) => jsonEncode({
   'wispMac': mac,
+  'configSplit': true,
   'source': 'manual',
   'manualId': WispRepository.statusManualId(p),
   'manualSeq': ?seq,
