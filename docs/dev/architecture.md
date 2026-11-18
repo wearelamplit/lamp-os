@@ -14,8 +14,8 @@ Everything lives under [`software/`](../../software/).
   ESP-NOW mesh to other lamps. Per-variant builds
   (`upesy_wroom_standard` / `_snafu` / `_staff`). Source: `software/lamp-os/src/`.
 - **`wisp/`** — the infrastructure node (Seeed XIAO ESP32-C6, external antenna).
-  Takes a palette from Straylight or a Limbic Maestro over OSC (USB serial or
-  UDP), samples it, and distributes paint to lamps over the mesh (and to
+  Takes a palette from Straylight, a Limbic Maestro or any sender on a typed
+  address over OSC (USB serial or UDP), samples it, and distributes paint to lamps over the mesh (and to
   pre-mesh lamps as ArtNet DMX over its own softAP); beacons its status.
   USB-flash-only (no OTA).
   Build env `seeed_xiao_esp32_c6`. Source: `software/wisp/src/`.

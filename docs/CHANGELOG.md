@@ -15,6 +15,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   `osc:mode maestro` and `osc:slot <n>` on the wisp's console, then point the
   Maestro at the wisp's address, port 9000. Lamps keep the last Maestro
   palette when it goes quiet. Needs the wisp reflashed.
+- **The wisp follows any OSC sender on a typed address.** A third OSC
+  sub-mode, Custom, reads one address you type (up to 15 characters,
+  starting with `/`), matched exactly, and works out the colour format from
+  the message itself. Set it with `osc:addr </path>` and `osc:mode custom` on
+  the wisp's console; the wisp reports the address in its settings. Needs the
+  wisp reflashed.
 
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and

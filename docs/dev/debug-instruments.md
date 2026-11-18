@@ -92,7 +92,7 @@ Serial-ingress commands (`scripts/bench_cmd.py`), `core/lamp_test_action.cpp`:
 | `[eth]` | `wisp/src/net/eth_link.cpp` | Wisp W5500 Ethernet: `no W5500 (cs=N); Ethernet off` (once at boot, no module fitted, after the framework's expected `w5500.mac` / `esp_eth` / `ETH.cpp` error lines listed in the wisp README), `spi_bus_free failed: N`, `W5500 up as <hostname>; waiting for link`, `link up N Mbps full\|half duplex`, `link down`, `got IP a.b.c.d`, `lost IP`; `eth:show` prints the same link line with `ip=` |
 | `[wisp.beacon]` | `wisp/src/status/status_emitter.cpp` | `connectivity edge wifi=N eth=N` (re-emits wispStatus), wispStatus / wispConfig build failures |
 | `[bright]` | `wisp/src/paint/paint_distributor.cpp` | Per-lamp brightness send (`send %u->mac seq=..`) |
-| `[osc]` | `wisp/src/core/wisp_controller.cpp`, `osc/osc_listener.cpp` | OSC palette in (`palette n=.. via serial\|udp`, at most 1/s), stream stale, a message on the Maestro address that does not read whole (`refused <address> ,<tags> via ..`, at most 1/s), a sub-mode or slot change holding lamps at Off (`now <address> — holding lamps at Off ..`), UDP listen / bind failures |
+| `[osc]` | `wisp/src/core/wisp_controller.cpp`, `osc/osc_listener.cpp` | OSC palette in (`palette n=.. via serial\|udp`, at most 1/s), stream stale, a message on the Maestro or Custom address that does not read whole (`refused <address> ,<tags> via ..`, at most 1/s), a sub-mode, slot or Custom address change holding lamps at Off (`now <address> — holding lamps at Off ..`), UDP listen / bind failures |
 | `[artnet]` | `wisp/src/artnet/artnet_emitter.cpp` | Art-Net UDP emit (ready / frame-build-failed) |
 | `[stage]` | `wisp/src/net/stage_beacon.cpp` | Stage BLE beacon advertise (creds, mfg-data size) |
 

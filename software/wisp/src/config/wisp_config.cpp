@@ -1,6 +1,7 @@
 #include "config/wisp_config.hpp"
 
 #include <algorithm>
+#include <cstdio>
 
 #include "paint/palette_id.hpp"
 #include "status/status_ring.hpp"
@@ -37,6 +38,7 @@ constexpr const char* kKeySourceMode  = "srcMode";
 constexpr const char* kKeyOscRole     = "oscRole";
 constexpr const char* kKeyOscMode     = "oscMode";
 constexpr const char* kKeyOscSlot     = "oscSlot";
+constexpr const char* kKeyOscAddress  = "oscAddr";
 // Legacy packed RGB blob (3 bytes/color), read-only for migration.
 constexpr const char* kKeyManualPaletteRgb = "manualPal";
 // Packed RGBW blob (4 bytes/color). A separate key because length parity
@@ -95,6 +97,12 @@ void WispConfig::begin() {
   oscRole_      = coerceOscRole(prefs_.getUChar(kKeyOscRole, 0));
   oscMode_      = coerceOscMode(prefs_.getUChar(kKeyOscMode, 0));
   oscSlot_      = coerceMaestroSlot(prefs_.getUChar(kKeyOscSlot, kMaestroSlotMin));
+  {
+    const String addr = prefs_.getString(kKeyOscAddress, String());
+    const bool valid = oscCustomAddressValid(addr.c_str());
+    std::snprintf(oscAddress_, sizeof(oscAddress_), "%s",
+                  valid ? addr.c_str() : "");
+  }
 
   manualPalette_.clear();
   const size_t paletteLen = prefs_.getBytesLength(kKeyManualPalette);
@@ -187,14 +195,14 @@ void WispConfig::begin() {
   }
 
   Serial.printf("[wisp.cfg] loaded ssid='%s' pw=%s "
-                "srcMode=%d oscRole=%s oscMode=%s oscSlot=%u "
+                "srcMode=%d oscRole=%s oscMode=%s oscSlot=%u oscAddr='%s' "
                 "manualColors=%u offColor=%u,%u,%u "
                 "shuffleSeed=%u swatches=%d "
                 "driftIntv=%u ms driftFade=%u%% name='%s' hasPassword=%d\n",
                 wifiSsid_.c_str(),
                 wifiPw_.length() ? "<set>" : "<empty>",
                 static_cast<int>(sourceMode_), oscRoleName(oscRole_),
-                oscModeName(oscMode_), (unsigned)oscSlot_,
+                oscModeName(oscMode_), (unsigned)oscSlot_, oscAddress_,
                 (unsigned)manualPalette_.size(),
                 offColor_.r, offColor_.g, offColor_.b,
                 (unsigned)shuffleSeed_,
@@ -241,16 +249,27 @@ void WispConfig::setOscRole(OscRole role) {
   Serial.printf("[wisp.cfg] oscRole <= %s\n", oscRoleName(role));
 }
 
-bool WispConfig::setOsc(OscMode mode, uint8_t slot) {
+OscTarget WispConfig::oscTarget() const {
+  OscTarget t{oscMode_, oscRole_, oscSlot_};
+  std::snprintf(t.address, sizeof(t.address), "%s", oscAddress_);
+  return t;
+}
+
+bool WispConfig::setOsc(OscMode mode, uint8_t slot, const char* address) {
   const OscTarget before = oscTarget();
   oscMode_ = mode;
   oscSlot_ = slot;
+  // `address` may be oscAddress_ itself, and snprintf must not overlap.
+  if (address != oscAddress_) {
+    std::snprintf(oscAddress_, sizeof(oscAddress_), "%s", address);
+  }
   if (opened_) {
     prefs_.putUChar(kKeyOscMode, static_cast<uint8_t>(mode));
     prefs_.putUChar(kKeyOscSlot, slot);
+    prefs_.putString(kKeyOscAddress, oscAddress_);
   }
-  Serial.printf("[wisp.cfg] osc <= %s slot %u\n", oscModeName(mode),
-                (unsigned)slot);
+  Serial.printf("[wisp.cfg] osc <= %s slot %u addr '%s'\n", oscModeName(mode),
+                (unsigned)slot, oscAddress_);
   return sourceMode_ == WispSourceMode::Osc &&
          oscTargetResets(before, oscTarget());
 }

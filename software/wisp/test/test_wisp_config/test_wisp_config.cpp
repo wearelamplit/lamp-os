@@ -186,7 +186,7 @@ void test_osc_defaults_to_straylight_slot_1() {
 void test_osc_settings_persist() {
   wisp::WispConfig cfg;
   cfg.begin();
-  cfg.setOsc(wisp::OscMode::Maestro, 7);
+  cfg.setOsc(wisp::OscMode::Maestro, 7, "");
   wisp::WispConfig reload;
   reload.begin();
   TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)reload.oscMode());
@@ -201,18 +201,18 @@ void test_osc_settings_persist() {
 void test_set_osc_holds_only_a_live_retarget() {
   wisp::WispConfig cfg;
   cfg.begin();
-  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 3));  // source Off
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 3, ""));  // source Off
   cfg.setSourceMode(wisp::WispSourceMode::Manual);
-  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4, ""));
   cfg.setSourceMode(wisp::WispSourceMode::Osc);
-  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4));
-  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 5));
-  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Straylight, 5));
-  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Straylight, 9));
-  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 9));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4, ""));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 5, ""));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Straylight, 5, ""));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Straylight, 9, ""));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 9, ""));
   wisp::WispConfig reboot;
   reboot.begin();
-  TEST_ASSERT_FALSE(reboot.setOsc(wisp::OscMode::Maestro, 9));
+  TEST_ASSERT_FALSE(reboot.setOsc(wisp::OscMode::Maestro, 9, ""));
 }
 
 void test_corrupt_osc_settings_load_as_straylight_slot_1() {
@@ -234,6 +234,53 @@ void test_corrupt_osc_settings_load_as_straylight_slot_1() {
   high.begin();
   TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)high.oscMode());
   TEST_ASSERT_EQUAL_UINT8(1, high.oscSlot());
+}
+
+// The Custom address persists, and the stored target carries it.
+void test_custom_address_persists() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_STRING("", cfg.oscAddress());
+  cfg.setOsc(wisp::OscMode::Custom, 1, "/lamp/palette");
+  wisp::WispConfig reload;
+  reload.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)reload.oscMode());
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", reload.oscAddress());
+  char addr[wisp::kOscTargetAddressCap];
+  wisp::oscTargetAddress(reload.oscTarget(), addr, sizeof(addr));
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", addr);
+  // Storing the address already held, as a slot-only change does.
+  reload.setOsc(wisp::OscMode::Custom, 4, reload.oscAddress());
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", reload.oscAddress());
+}
+
+// A stored address the rule refuses loads as "" (P9).
+void test_invalid_stored_custom_address_loads_empty() {
+  for (const char* bad : {"lamp", "/a b", "/0123456789abcde", "/a#"}) {
+    kv_reset();
+    {
+      Preferences p;
+      p.putString("oscAddr", bad);
+    }
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", cfg.oscAddress(), bad);
+  }
+}
+
+// In Osc, a Custom address change asks for a hold; the same address, or a
+// slot change, does not.
+void test_set_osc_custom_holds_only_on_an_address_change() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Custom, 1, "/a"));  // source Off
+  cfg.setSourceMode(wisp::WispSourceMode::Osc);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Custom, 1, "/a"));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Custom, 6, "/a"));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Custom, 6, "/b"));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 6, "/b"));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 6, "/c"));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Custom, 6, "/c"));
 }
 
 void test_osc_address_built_per_role() {
@@ -384,6 +431,9 @@ int main(int, char**) {
   RUN_TEST(test_osc_settings_persist);
   RUN_TEST(test_corrupt_osc_settings_load_as_straylight_slot_1);
   RUN_TEST(test_set_osc_holds_only_a_live_retarget);
+  RUN_TEST(test_custom_address_persists);
+  RUN_TEST(test_invalid_stored_custom_address_loads_empty);
+  RUN_TEST(test_set_osc_custom_holds_only_on_an_address_change);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
   RUN_TEST(test_manual_palette_status_echoes_the_save_seq);

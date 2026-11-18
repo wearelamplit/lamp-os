@@ -39,6 +39,7 @@ struct WispConfigFields {
   bool         swatches = false;
   OscMode      oscMode = OscMode::Straylight;
   uint8_t      oscSlot = 1;
+  const char*  oscAddr = "";  // the Custom address, "" for none
 };
 
 // The OSC send-to address into `out`: `ethIp` when set, else `staIp` while

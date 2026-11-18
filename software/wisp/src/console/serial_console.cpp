@@ -113,10 +113,17 @@ void SerialConsole::handleCommand(const String& cmd) {
   } else if (cmd.startsWith("osc:mode ")) {
     OscMode mode = OscMode::Straylight;
     if (!oscModeFromName(cmd.c_str() + 9, mode)) {
-      Serial.println("[wisp.cmd] usage: osc:mode <straylight|maestro>");
+      Serial.println(
+          "[wisp.cmd] usage: osc:mode <straylight|maestro|custom>");
       return;
     }
-    apply_(applyOscSettings(config_, mode, config_.oscSlot()));
+    const DispatchResult res = applyOscSettings(
+        config_, mode, config_.oscSlot(), config_.oscAddress());
+    if (res == DispatchResult::Malformed) {
+      Serial.println("[wisp.cmd] custom needs an address: osc:addr </path>");
+      return;
+    }
+    apply_(res);
     Serial.printf("[wisp.cmd] osc mode = %s\n", oscModeName(mode));
   } else if (cmd.startsWith("osc:slot ")) {
     uint8_t slot = 0;
@@ -124,8 +131,20 @@ void SerialConsole::handleCommand(const String& cmd) {
       Serial.println("[wisp.cmd] usage: osc:slot <1-10>");
       return;
     }
-    apply_(applyOscSettings(config_, config_.oscMode(), slot));
+    apply_(applyOscSettings(config_, config_.oscMode(), slot,
+                            config_.oscAddress()));
     Serial.printf("[wisp.cmd] maestro slot = %u\n", (unsigned)slot);
+  } else if (cmd.startsWith("osc:addr ")) {
+    const char* address = cmd.c_str() + 9;
+    if (!oscCustomAddressValid(address)) {
+      Serial.printf("[wisp.cmd] usage: osc:addr </path> (up to %u printable "
+                    "bytes, none of \"\\#*,?[]{})\n",
+                    (unsigned)kOscCustomAddressMaxLen);
+      return;
+    }
+    apply_(applyOscSettings(config_, config_.oscMode(), config_.oscSlot(),
+                            address));
+    Serial.printf("[wisp.cmd] custom address = %s\n", address);
   } else if (cmd == "paint:swatches on" || cmd == "paint:swatches off") {
     const bool on = cmd.endsWith("on");
     config_.setPaletteStyle(on ? PaletteStyle::Swatches

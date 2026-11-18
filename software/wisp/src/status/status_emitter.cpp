@@ -188,6 +188,7 @@ WispConfigFields StatusEmitter::configFields() const {
   c.swatches = config_->paletteStyle() == PaletteStyle::Swatches;
   c.oscMode = config_->oscMode();
   c.oscSlot = config_->oscSlot();
+  c.oscAddr = config_->oscAddress();
   char ethIp[16];
   eth::formatIp(ethIp, sizeof(ethIp));
   const bool staConnected = WiFi.isConnected();

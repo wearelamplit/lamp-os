@@ -21,7 +21,7 @@ enum class DispatchResult {
   AppliedWifiChange,   // setWifi persisted + WifiLink/StageBeacon kicked
   AppliedSourceChange, // setSource applied (Off/Manual/Osc)
   AppliedOscRole,      // setOscRole applied
-  AppliedOscSettings,  // setOsc stored (sub-mode + Maestro slot)
+  AppliedOscSettings,  // setOsc stored (sub-mode, Maestro slot, Custom address)
   AppliedOscRetarget,  // setOsc stored and moved the live Osc address
   AppliedManualPalette,// setManualPalette stored
   AppliedOffColor,     // setOffColor stored (Off-mode wisp-ring color)
@@ -38,9 +38,12 @@ enum class DispatchResult {
   Rejected,              // auth gate blocked (password set, plaintext not allowed)
 };
 
-// Stores the OSC sub-mode and Maestro slot (`slot` valid per
-// maestroSlotValid) and names the result the controller applies.
-DispatchResult applyOscSettings(WispConfig& config, OscMode mode, uint8_t slot);
+// Stores the OSC sub-mode, Maestro slot (valid per maestroSlotValid) and
+// Custom address ("" or valid per oscCustomAddressValid), and names the
+// result the controller applies. Custom with no address stores nothing and
+// is Malformed: it would listen to nothing.
+DispatchResult applyOscSettings(WispConfig& config, OscMode mode, uint8_t slot,
+                                const char* address);
 
 class WispOpDispatcher {
  public:

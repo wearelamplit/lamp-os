@@ -106,6 +106,7 @@ size_t buildWispConfigJson(const WispConfigFields& f, char* out,
   doc["swatches"]        = f.swatches;
   doc["oscMode"]         = oscModeName(f.oscMode);
   doc["oscSlot"]         = f.oscSlot;
+  doc["oscAddr"]         = f.oscAddr ? f.oscAddr : "";
   if (measureJson(doc) >= outCap) return 0;
   return serializeJson(doc, out, outCap);
 }

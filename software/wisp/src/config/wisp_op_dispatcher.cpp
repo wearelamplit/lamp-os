@@ -40,9 +40,13 @@ static bool isApplied(DispatchResult r) {
 }
 
 DispatchResult applyOscSettings(WispConfig& config, OscMode mode,
-                                uint8_t slot) {
-  return config.setOsc(mode, slot) ? DispatchResult::AppliedOscRetarget
-                                   : DispatchResult::AppliedOscSettings;
+                                uint8_t slot, const char* address) {
+  if (mode == OscMode::Custom && address[0] == '\0') {
+    return DispatchResult::Malformed;
+  }
+  return config.setOsc(mode, slot, address)
+             ? DispatchResult::AppliedOscRetarget
+             : DispatchResult::AppliedOscSettings;
 }
 
 DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
@@ -190,9 +194,23 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
       }
       slot = static_cast<uint8_t>(slotVar.as<int>());
     }
-    Serial.printf("[wisp.op] setOsc mode=%s slot=%u\n", oscModeName(mode),
-                  (unsigned)slot);
-    return applyOscSettings(config_, mode, slot);
+    const char* address = config_.oscAddress();
+    JsonVariantConst addressVar = doc["address"];
+    if (!addressVar.isNull()) {
+      if (!addressVar.is<const char*>() ||
+          !oscCustomAddressValid(addressVar.as<const char*>())) {
+        Serial.println("[wisp.op] setOsc invalid 'address'");
+        return DispatchResult::Malformed;
+      }
+      address = addressVar.as<const char*>();
+    }
+    Serial.printf("[wisp.op] setOsc mode=%s slot=%u address='%s'\n",
+                  oscModeName(mode), (unsigned)slot, address);
+    const DispatchResult res = applyOscSettings(config_, mode, slot, address);
+    if (res == DispatchResult::Malformed) {
+      Serial.println("[wisp.op] setOsc custom needs an 'address'");
+    }
+    return res;
   }
 
   if (strcmp(op, "setOffColor") == 0) {
