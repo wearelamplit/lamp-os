@@ -42,11 +42,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the message itself. Set it with `osc:addr </path>` and `osc:mode custom` on
   the wisp's console; the wisp reports the address in its settings. Needs the
   wisp reflashed.
-
 - **The wisp numbers each Gradient/Swatches pick.** A `setSwatches` from
   the app can carry a number the wisp echoes in its status as `swatchesSeq`,
   so the app can tell its latest pick landed rather than a late copy of an
   earlier one. Needs the wisp reflashed; an older app's pick works as before.
+  The app's Gradient | Swatches switch confirms on it, so it can't be left
+  showing a stale pick.
 
 ### Changed
 - **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
