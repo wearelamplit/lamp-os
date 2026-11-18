@@ -468,7 +468,7 @@ static void runBurst(uint32_t burstMs, float target, float& peak, float& atEnd) 
 
 void test_burst_spark_rises_visible_and_ends_dark() {
   const FireStyle twinkle = fireStyle(0);
-  for (uint32_t ms : {160u, 700u, 2000u}) {
+  for (uint32_t ms : {160u, 700u, 2000u, 2600u, 5000u, 10000u}) {
     float peak = 0.0f, atEnd = 1.0f;
     runBurst(ms, twinkle.sparkLo, peak, atEnd);
     TEST_ASSERT_TRUE_MESSAGE(peak > kBurstPaintHeat, "weakest spark never shows");
@@ -500,6 +500,38 @@ void test_burst_length_clamps() {
   TEST_ASSERT_TRUE(burstFalling(350, 700));
   TEST_ASSERT_FALSE(burstDone(699, 700));
   TEST_ASSERT_TRUE(burstDone(700, 700));
+  TEST_ASSERT_EQUAL_UINT32(5000, clampBurstMs(5000));
+  TEST_ASSERT_EQUAL_UINT32(kBurstMaxMs, clampBurstMs(kBurstMaxMs + 1));
+}
+
+// Up to the swell a burst's shape scales with its length; past it the rise
+// and fall keep the swell's pace and the fall starts one half-swell before
+// the end, so the stars hold at peak in between.
+void test_a_long_burst_keeps_the_swell_and_holds() {
+  const uint32_t swellStep = burstStepMs(kBurstSwellMaxMs);
+  for (uint32_t ms : {2600u, 5000u, 10000u}) {
+    TEST_ASSERT_EQUAL_UINT32(swellStep, burstStepMs(ms));
+    const uint32_t fallFrom = ms - kBurstSwellMaxMs / 2;
+    TEST_ASSERT_FALSE(burstFalling(fallFrom - 1, ms));
+    TEST_ASSERT_TRUE(burstFalling(fallFrom, ms));
+  }
+  TEST_ASSERT_TRUE(burstStepMs(1400) < swellStep);
+  TEST_ASSERT_TRUE(burstFalling(700, 1400));
+  TEST_ASSERT_TRUE(burstFalling(1000, 2000));
+  TEST_ASSERT_FALSE(burstFalling(999, 2000));
+}
+
+// A held star is still near its target at the moment the fall begins.
+void test_a_long_burst_holds_its_stars_at_peak() {
+  const FireStyle twinkle = fireStyle(0);
+  constexpr uint32_t kMs = 6000;
+  float heat = 0.0f;
+  uint32_t ms = 16;
+  for (; !burstFalling(ms, kMs); ms += 16) {
+    heat = approachHeat(heat, twinkle.sparkLo, approachFactor(16, burstStepMs(kMs)));
+  }
+  TEST_ASSERT_TRUE(ms > kMs / 2 + 1000);
+  TEST_ASSERT_TRUE(heat > 0.99f * twinkle.sparkLo);
 }
 
 int main(int, char**) {
@@ -542,5 +574,7 @@ int main(int, char**) {
   RUN_TEST(test_burst_spark_rises_visible_and_ends_dark);
   RUN_TEST(test_tinted_burst_fades_from_the_anchor_to_the_tint);
   RUN_TEST(test_burst_length_clamps);
+  RUN_TEST(test_a_long_burst_keeps_the_swell_and_holds);
+  RUN_TEST(test_a_long_burst_holds_its_stars_at_peak);
   return UNITY_END();
 }

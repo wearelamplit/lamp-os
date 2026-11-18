@@ -16,6 +16,9 @@ enum class TransientSource : unsigned char {
 struct TransientSlots {
   static constexpr size_t kMax = 4;
   static constexpr size_t kMaxRemote = 2;
+  // A transient still running this long after it started is reaped, so a
+  // stuck completion signal cannot hold its slot forever.
+  static constexpr uint32_t kMaxLifetimeMs = 180000;
 };
 
 // True when an invocation needing `targets` instances may start: the slots

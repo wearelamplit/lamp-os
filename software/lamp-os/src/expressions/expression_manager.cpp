@@ -237,6 +237,16 @@ void ExpressionManager::retireStale(uint32_t nowMs) {
   recentPlays_.retire(nowMs);
 }
 
+bool ExpressionManager::remoteTransientPlaying(const char* type, const uint8_t* srcMac) const {
+  for (const auto& t : transientExpressions_) {
+    if (t.source == TransientSource::Remote && t.type == type &&
+        (!srcMac || std::memcmp(t.srcMac, srcMac, 6) == 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool ExpressionManager::playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const {
   return recentPlays_.playedWithin(registry_.find(type), windowMs, nowMs);
 }
@@ -558,10 +568,6 @@ bool ExpressionManager::replayAndAnnounce(const ExpressionInvocation& inv,
   return true;
 }
 
-// Evict a one-shot cascade even when isAnimationComplete() never fires; a
-// stuck completion signal would otherwise latch it on the compositor forever.
-static constexpr uint32_t kTransientMaxLifetimeMs = 180000;
-
 void ExpressionManager::gcTransients() {
   if (transientExpressions_.empty()) return;
   const uint32_t nowMs = millis();
@@ -578,7 +584,7 @@ void ExpressionManager::gcTransients() {
     const bool complete = skippedAtHome ||
                           (it->expression && (it->expression->isAnimationComplete() ||
                                               it->expression->retired()));
-    const bool expired = nowMs - it->createdMs >= kTransientMaxLifetimeMs;
+    const bool expired = nowMs - it->createdMs >= TransientSlots::kMaxLifetimeMs;
     if (complete || expired) {
       if (expired && !complete) {
         Serial.printf("[expr] WARN transient reaped expired type=%s age=%lums (never completed)\n",

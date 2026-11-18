@@ -48,6 +48,8 @@ class ShimmerExpression : public Expression {
   using Expression::Expression;
   ShimmerExpression(FrameBuffer* inBuffer, uint32_t inFrames = 90);
   void configureFromParameters(const ExpressionParams& parameters) override;
+  // True when `parameters` make a transient's trigger one burst (see bursting()).
+  static bool burstParams(const ExpressionParams& parameters);
   static const ExpressionDescriptor& classDescriptor();
   const ExpressionDescriptor& descriptor() const override;
   void draw() override;

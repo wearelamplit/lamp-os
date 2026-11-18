@@ -146,6 +146,19 @@ class WispRepository {
     });
   }
 
+  /// Which OSC sender the wisp listens to, and with [slot] the Maestro
+  /// palette slot; a null [slot] keeps the stored one. Persisted in wisp NVS
+  /// and echoed as `oscMode` / `oscSlot` in its `wispConfig`.
+  Future<void> setOsc(OscMode mode, {int? slot}) async {
+    assert(mode != OscMode.unknown);
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setOsc',
+      'mode': mode.name,
+      'slot': ?slot,
+    });
+  }
+
   /// How lamps take colours from the palette, in every source mode. Persisted
   /// in wisp NVS and echoed as `swatches` in its `wispConfig`.
   Future<void> setSwatches(bool swatches) async {
