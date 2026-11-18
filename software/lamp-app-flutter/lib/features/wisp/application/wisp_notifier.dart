@@ -1349,8 +1349,8 @@ class WispNotifier extends _$WispNotifier {
   /// While [paletteLoading], or with no wisp shown, it sends nothing, sets the
   /// flag and throws, and a save in flight sends no further copy once the
   /// palette has gone unknown, even if it is known again by the next resend.
-  /// A sheet left open across a display switch or a reconnect would otherwise
-  /// write over a palette the app has not read.
+  /// Otherwise a save across a display switch or a reconnect would write over
+  /// a palette the app has not read.
   Future<void> setManualPalette() async {
     final wispMac = state.value?.wispMac;
     if (paletteLoading || wispMac == null) {

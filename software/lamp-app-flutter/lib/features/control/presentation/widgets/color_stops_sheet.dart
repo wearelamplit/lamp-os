@@ -30,6 +30,7 @@ class ColorStopsSheet extends StatefulWidget {
     this.onRotationChanged,
     this.rotationStop0AtBottom = false,
     this.contentSized = false,
+    this.saveUnavailable,
   });
 
   final List<LampColor> initial;
@@ -71,6 +72,9 @@ class ColorStopsSheet extends StatefulWidget {
   /// The sheet sizes to its content, for a launcher that bounds the height
   /// with [ColorSheetHeight]. Off, it fills a launcher's fixed height.
   final bool contentSized;
+
+  /// While set, Save is disabled and this shows above the buttons saying why.
+  final Widget? saveUnavailable;
 
   @override
   State<ColorStopsSheet> createState() => _ColorStopsSheetState();
@@ -286,20 +290,32 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
     ];
   }
 
-  Widget _buttons() => Row(
-        children: [
-          TextButton(
-            onPressed: () => _close(revert: true),
-            child: const Text('Cancel'),
-          ),
-          const Spacer(),
-          FilledButton.icon(
-            icon: const Icon(Icons.check, size: 18),
-            label: const Text('Save'),
-            onPressed: _save,
-          ),
+  Widget _buttons() {
+    final unavailable = widget.saveUnavailable;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (unavailable != null) ...[
+          unavailable,
+          const SizedBox(height: AppSpace.sm),
         ],
-      );
+        Row(
+          children: [
+            TextButton(
+              onPressed: () => _close(revert: true),
+              child: const Text('Cancel'),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Save'),
+              onPressed: unavailable == null ? _save : null,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   Widget _fixedLayout(BuildContext context) => Padding(
         padding: const EdgeInsets.all(AppSpace.lg),

@@ -301,10 +301,11 @@ brightness and the LED strip once each: each still shows its new value 10 s
 later.
 
 P18 — **no Save over a palette the app has not read.** Same setup as P14. On
-the new wisp, open the palette sheet, edit a swatch, power-cycle the lamp, and
-tap Save in the open sheet once the app reconnects: the wisp's serial prints
-no `setManualPalette`, and the editor shows "Reading palette from wisp…", then
-"not saved" once the palette is read. Repeat with the sheet open while the
+the new wisp, open the palette sheet, edit a swatch, and power-cycle the lamp:
+once the app reconnects the open sheet's Save greys under "Reading palette
+from wisp…" and the edit stays. When the palette is read the note goes and
+Save comes back with the sheet still open and the edit kept; until then the
+wisp's serial prints no `setManualPalette`. Repeat with the sheet open while the
 lamp moves from one wisp's zone to the other's. Tap Manual from Osc
 with the palette shown, and within 20 s move the lamp to the other wisp's
 zone: the editor turns to "Reading palette from wisp…" with no tap.
@@ -348,8 +349,9 @@ zone: the editor turns to "Reading palette from wisp…" with no tap.
 - P17: a settings change the wisp never applied goes back to the wisp's value
   within about 5 s; one it applied stays.
 - P18: no `setManualPalette` leaves the app while the palette is unread, a
-  Save from a sheet left open then shows "not saved", and a display switch
-  shows the loading line with no tap.
+  sheet left open greys its Save until the palette is read and then gives it
+  back without closing, and a display switch shows the loading line with no
+  tap.
 
 ## Not covered here
 
