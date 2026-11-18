@@ -32,8 +32,10 @@ struct WispStatusMergeInput {
 // The merged JSON served on CHAR_WISP_STATUS and the `wispstatus` page
 // section: the wisp's cached wispStatus plus the lamp's own hello, staleness
 // and wisp-control fields. "{}" when nothing is known. With maxLen > 0 the
-// lamp-side diagnostic fields no app reads are shed until the document fits;
-// it can still exceed maxLen when the wisp's own payload does. Empty when the
+// lamp-side fields helloPaletteIdPrefix, helloLastSeenMs, statusLastSeenMs and
+// helloFlags are shed in that order until the document fits. The app reads
+// only statusLastSeenMs, and treats a status missing it as the fresher one.
+// It can still exceed maxLen when the wisp's own payload does. Empty when the
 // heap could not hold the document; may throw std::bad_alloc.
 std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen);
 
