@@ -83,8 +83,8 @@ void _notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
 
 Future<void> _wait(Duration d) => Future<void>.delayed(d);
 
-/// Fails every `setSource` write, the first held open while [holdSource] is
-/// set.
+/// Fails every `setSource` and `setOscRole` write, the first held open while
+/// [holdSource] is set.
 class _FailSourceBle extends InMemoryBleClient {
   Completer<void>? holdSource;
 
@@ -97,7 +97,8 @@ class _FailSourceBle extends InMemoryBleClient {
     bool withoutResponse = false,
     bool allowLongWrite = false,
   }) async {
-    if (utf8.decode(v, allowMalformed: true).contains('setSource')) {
+    final op = utf8.decode(v, allowMalformed: true);
+    if (op.contains('setSource') || op.contains('setOscRole')) {
       final hold = holdSource;
       holdSource = null;
       await hold?.future;
@@ -237,6 +238,54 @@ void main() {
       expect(_swatchOps(ble).where((v) => !v), hasLength(4),
           reason: 'Gradient resent for the whole budget');
       expect(shown(c), PaletteStyle.gradient);
+    });
+
+    // Another setting's write moves the config stamp while Swatches may
+    // still land.
+    test('a pick back is not confirmed by another setting changing', () async {
+      final (ble, c, n) = await open();
+
+      final first = n.setPaletteStyle(PaletteStyle.swatches);
+      await pumpEventQueue();
+      final second = n.setPaletteStyle(PaletteStyle.gradient);
+      await pumpEventQueue();
+      ble.seedSection(
+        _devId,
+        'wispconfig',
+        _b(_config(swatches: false).replaceFirst('"brightness":100',
+            '"brightness":40')),
+      );
+      _notify(ble, _status(seen: 400));
+      await Future.wait([first, second]);
+
+      expect(c.read(wispNotifierProvider(_devId)).value!.brightness, 40,
+          reason: 'the other change was read');
+      expect(_swatchOps(ble).where((v) => !v), hasLength(4));
+      expect(shown(c), PaletteStyle.gradient);
+    });
+
+    test('a failed role change keeps a pick still confirming', () async {
+      final ble = _FailSourceBle();
+      final (_, c, n) = await open(client: ble);
+
+      final hold = ble.holdSource = Completer<void>();
+      Object? roleError;
+      final role = n
+          .setOscRole(OscRole.fill)
+          .catchError((Object e) => roleError = e);
+      await pumpEventQueue();
+      final style = n
+          .setPaletteStyle(PaletteStyle.swatches)
+          .catchError((Object _) {});
+      await pumpEventQueue();
+      hold.complete();
+      await role;
+
+      expect(roleError, isNotNull);
+      final now = c.read(wispNotifierProvider(_devId)).value!;
+      expect(now.oscRole, OscRole.primary);
+      expect(now.paletteStyle, PaletteStyle.swatches);
+      await style;
     });
 
     String otherWisp(int seen) => jsonEncode({

@@ -1189,17 +1189,21 @@ class WispNotifier extends _$WispNotifier {
   /// over every status and any config read still showing the old style,
   /// until a config the lamp cached after the send shows it from this wisp,
   /// resending on a miss. A read of a config cached before the send never
-  /// confirms, since an earlier pick may still land after it. When every
-  /// attempt goes unconfirmed it succeeds if the wisp's held setting is
-  /// [style] (a pick back to the wisp's value changes no config), else rolls
-  /// back to the held setting and throws. A newer call supersedes this one,
-  /// which then stops resending and returns.
+  /// confirms, since an earlier pick may still land after it. A pick equal
+  /// to the wisp's held setting at the send never confirms early: no config
+  /// of its own need follow, so it resends for the whole budget, covering a
+  /// late earlier pick, and then stands if the held setting is still
+  /// [style]. Any other pick that goes unconfirmed rolls back to the held
+  /// setting and throws. A newer call supersedes this one, which then stops
+  /// resending and returns.
   Future<void> setPaletteStyle(PaletteStyle style) async {
     final cur = state.value;
     final mac = cur?.wispMac;
     if (cur == null || mac == null) throw StateError('no wisp shown');
     if (_pendingStyle == style && _pendingStyleMac == mac) return;
     final sentAfter = cur.configLastSeenMs;
+    final pickBack =
+        _configMac == mac && _config?.paletteStyle == style;
     final epoch = ++_styleEpoch;
     _pendingStyle = style;
     _pendingStyleMac = mac;
@@ -1209,7 +1213,9 @@ class WispNotifier extends _$WispNotifier {
         await _repo.setSwatches(style == PaletteStyle.swatches);
         _readBackAfterWrite();
       },
-      confirm: () => _confirmStyleRead(mac, style, sentAfter),
+      confirm: () => pickBack
+          ? Future<bool>.delayed(debugConfigConfirmWindow, () => false)
+          : _confirmStyleRead(mac, style, sentAfter),
       isSuperseded: () => _styleEpoch != epoch,
     );
     if (_disposed || _styleEpoch != epoch) return;
