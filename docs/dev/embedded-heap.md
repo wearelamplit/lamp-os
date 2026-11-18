@@ -28,10 +28,10 @@ update over the mesh, the `fsFinalize` recompute) and unmounts it after
 the server reads from it until the reboot that ends the session
 (`webapp::serverUp`). The mount holds ~4.4 KB, a 2.8 KB cache among it. The
 file walk (`enumerateManifest`) uses `opendir`/`readdir`/`stat` and never has
-two stdio `FILE`s open at once: a second open `FILE` makes newlib allocate a
-448 B glue block it never frees (rule 5), and at boot that block pinned a
-~5.6 KB hole in the largest free block. Each Arduino `File` also carries a
-4 KB stdio buffer while open.
+two stdio `FILE`s open at once. A second open `FILE` makes newlib allocate a
+448 B glue block it never frees (rule 5), which at boot pins a hole in the
+largest free block. Each Arduino `File` also carries a 4 KB stdio buffer
+while open.
 
 ## The recurring anti-pattern
 

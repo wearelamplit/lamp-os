@@ -192,9 +192,11 @@ tap, opened before the transfer so the open's reset lands on the old image.
 ## Web UI files
 
 12. **A web UI files update lands and the config page loads.** Two lamps on
-    the same signed firmware version whose web UIs differ: the source carries
-    a signed release web UI (it has `fw.lsig`, so its boot line reads
-    `[fs_ota] online; ... digestReady=1`), the peer any other. Tap both. The
+    the same signed debug firmware (`DEBUG=1 ... scripts/build_signed_lamp.sh`;
+    every line below is `LAMP_DEBUG`-only) whose web UIs differ: the source
+    carries a signed web UI (it has `fw.lsig`, so its boot line reads
+    `[fs_ota] online; ... digestReady=1`), the peer any other, such as a dev
+    one from `npm run lamp:flashfs`. Tap both. The
     source logs `[fwdist] OFFER -> <peer>`, the peer `[fw_receiver] OFFER from
     <source> ... → ACCEPT`, then `[fs_ota] applied (no reboot); digestReady=1
     version=0x...`, and the source `[fwdist] RESULT success from <peer>`. Join

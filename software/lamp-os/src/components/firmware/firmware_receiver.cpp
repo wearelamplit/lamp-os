@@ -616,8 +616,7 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     ::lamp::ota_quiet_mode::exitQuiet();
     quietHold_.release();
     // FS image OTA finalizes without a reboot: SPIFFS is only read by the
-    // onboarding webapp, so a remount makes the new UI live. Firmware OTA
-    // reboots.
+    // onboarding webapp, which mounts it when it serves. Firmware OTA reboots.
     if (fsHooks_ && fsHooks_->finalize) {
       fsHooks_->finalize();
       state_ = State::Idle;

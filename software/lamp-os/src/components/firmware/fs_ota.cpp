@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <SPIFFS.h>
 #include <esp_partition.h>
+#include <esp_vfs.h>
+#include <sdkconfig.h>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -86,16 +88,17 @@ bool readWhole(const char* path, std::vector<uint8_t>& out) {
 // deliberate: a ~44 KB contiguous vector resize can fail under heap
 // fragmentation (WiFi + BLE + AsyncWebServer all resident) and abort() under
 // -fno-exceptions, a boot-time crash loop. Re-opening per 4 KB read is slow
-// but allocation-free and only runs once at boot / once post-OTA.
+// but holds one file open at a time, and only runs once at boot / once
+// post-OTA.
 //
-// The walk uses opendir/readdir/stat and opens no stdio FILE: a second FILE
-// open at once allocates a newlib glue block that is never freed, and at boot
-// it pins a hole in the largest free block.
+// The walk uses opendir/readdir/stat and opens no stdio FILE. A second FILE
+// open at once allocates a newlib glue block that is never freed, which at
+// boot pins a hole in the largest free block.
 bool enumerateManifest(std::vector<lamp::firmware::FsManifestFile>& files,
                        std::vector<uint8_t>& lsig) {
   const char* mount = SPIFFS.mountpoint();
   if (!mount) return false;
-  char path[64];
+  char path[ESP_VFS_PATH_MAX + 1 + CONFIG_SPIFFS_OBJ_NAME_LEN];
   if (std::snprintf(path, sizeof(path), "%s/", mount) >=
       static_cast<int>(sizeof(path))) {
     return false;
@@ -104,14 +107,14 @@ bool enumerateManifest(std::vector<lamp::firmware::FsManifestFile>& files,
   if (!dir) return false;
   bool haveLsig = false;
   while (const dirent* entry = readdir(dir.get())) {
-    if (entry->d_type != DT_REG) continue;
+    if (entry->d_type != DT_REG && entry->d_type != DT_DIR) continue;
     const int len =
         std::snprintf(path, sizeof(path), "%s/%s", mount, entry->d_name);
     if (len < 0 || len >= static_cast<int>(sizeof(path))) return false;
     struct stat st;
     if (stat(path, &st) != 0) return false;
-    // Canonical name: the basename Arduino's File::name() gives, so it matches
-    // sign_fs.py's flat basenames (the host/device agreement hinge).
+    // Canonical name: the basename, so it matches sign_fs.py's flat basenames
+    // (the host/device agreement hinge).
     const std::string name = pathToFileName(entry->d_name);
     const size_t sz = static_cast<size_t>(st.st_size);
     // A real UI asset can't be empty or exceed the partition; skip ghosts.
