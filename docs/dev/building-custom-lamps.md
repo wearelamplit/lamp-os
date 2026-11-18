@@ -330,7 +330,10 @@ them in the app's editable catalog for this variant.
 that editable catalog is an **internal** descriptor. Set `internal = true` on
 the `ExpressionDescriptor` (`expressions/expression_schema.hpp`); it stays
 registry-backed so `triggerInvocation` can fire it by id, but
-`ExpressionRegistry::serializeCatalog` skips it, so it never reaches the app.
+`ExpressionRegistry::serializeCatalog` skips it, so it never reaches the app or
+Web Config, an expression upsert of it is refused, and a saved entry of it is
+dropped at boot ([`expressions.md`](expressions.md#exprcat-wire-format)). `yawn`
+is internal too, played only by the yawn contagion rules and the serial command.
 `bloom` (`expressions/bloom/bloom_expression.hpp`) is the shipped example: a
 one-shot white-ward luminance swell carrying `.internal = true`, fired
 programmatically as a transient (staff fires it from a friend-arrival

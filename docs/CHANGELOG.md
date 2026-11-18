@@ -32,6 +32,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   wisp reflashed.
 
 ### Changed
+- **Yawn is built in.** The app and Web Config no longer offer Yawn as an
+  expression to add or configure; lamps still yawn on their own, a tired
+  introvert now and then and a lamp yawning back at a peer. A lamp that had
+  Yawn added drops it on update and keeps its other expressions.
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
   status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told
