@@ -63,10 +63,10 @@ OscFeedPacket oscClassifyFeedPacket(const uint8_t* data, size_t len,
                                     const char* feedPrefix, float* out,
                                     size_t cap, size_t& count);
 
-// The most channels a Limbic float layout names.
+// A float layout naming more channels than this is refused.
 inline constexpr size_t kOscLayoutMaxChannels = 16;
 // Amber mixes into red at full and into green at this share (amber read as
-// #FFBF00). Too low reads yellow-orange as red; tune on the bench.
+// #FFBF00). Too low reads amber as red, too high as yellow.
 inline constexpr float kOscAmberGreen = 0.75f;
 
 // A palette message's colours, the format told by its type tags:

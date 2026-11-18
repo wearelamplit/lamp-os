@@ -39,6 +39,12 @@ static bool isApplied(DispatchResult r) {
   }
 }
 
+DispatchResult applyOscSettings(WispConfig& config, OscMode mode,
+                                uint8_t slot) {
+  return config.setOsc(mode, slot) ? DispatchResult::AppliedOscRetarget
+                                   : DispatchResult::AppliedOscSettings;
+}
+
 DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
   if (!payload || len == 0) {
     return DispatchResult::Malformed;
@@ -186,8 +192,7 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     }
     Serial.printf("[wisp.op] setOsc mode=%s slot=%u\n", oscModeName(mode),
                   (unsigned)slot);
-    return config_.setOsc(mode, slot) ? DispatchResult::AppliedOscRetarget
-                                      : DispatchResult::AppliedOscSettings;
+    return applyOscSettings(config_, mode, slot);
   }
 
   if (strcmp(op, "setOffColor") == 0) {

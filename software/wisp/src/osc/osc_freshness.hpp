@@ -1,7 +1,7 @@
-// Liveness of the OSC palette stream. A palette marks it live; the caller's
-// stale window without one marks it stale. The controller holds paint at Off while
-// stale and keeps paint mode, so the next palette resumes painting on its
-// own. Loop task only.
+// Liveness of the OSC palette stream. A palette marks it live; the target's
+// stale window without one marks it stale. The controller holds paint at Off
+// while stale and keeps paint mode, so the next palette resumes painting on
+// its own. Loop task only.
 
 #pragma once
 
@@ -12,6 +12,7 @@
 
 #include "osc/osc_listener.hpp"  // kOscPaletteMaxColors
 #include "osc/osc_role.hpp"
+#include "osc/osc_target.hpp"
 #include "paint/current_palette.hpp"
 
 namespace wisp {
@@ -39,9 +40,11 @@ class OscFreshness {
     if (live_) lastRxMs_ = nowMs;
   }
 
-  // True on the live -> stale edge after `staleMs` with no palette. A
-  // `staleMs` of 0 never stales, so the last palette holds until reset().
-  bool tick(uint32_t nowMs, uint32_t staleMs) {
+  // True on the live -> stale edge after `target`'s stale window with no
+  // palette. A Maestro target never stales, so its last palette holds until
+  // reset().
+  bool tick(uint32_t nowMs, const OscTarget& target) {
+    const uint32_t staleMs = oscTargetStaleMs(target);
     if (!live_ || staleMs == 0 || nowMs - lastRxMs_ < staleMs) return false;
     live_ = false;
     return true;

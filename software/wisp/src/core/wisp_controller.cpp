@@ -367,7 +367,7 @@ void WispController::onOscFeed(uint32_t nowMs) {
 
 void WispController::tickOscLiveness(uint32_t now) {
   if (config_.sourceMode() != wisp::WispSourceMode::Osc) return;
-  if (oscFresh_.tick(now, oscTargetStaleMs(config_.oscTarget()))) {
+  if (oscFresh_.tick(now, config_.oscTarget())) {
     holdOscStream();
     Serial.println(
         "[osc] palette stale — holding lamps at Off, paint mode kept");

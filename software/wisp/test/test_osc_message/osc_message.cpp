@@ -622,6 +622,13 @@ void test_layout_unreadable_refused(void) {
   // More than 50 colours.
   assertRefused(layoutMessage(kLayoutAddr, "w",
                               std::vector<float>(wisp::kOscPaletteMaxColors + 1, 1.0f)));
+  // A layout string with no NUL inside the arguments: `,sf` and 4 bytes.
+  std::vector<uint8_t> open(kLayoutAddr, kLayoutAddr + std::strlen(kLayoutAddr));
+  do open.push_back(0); while (open.size() % 4 != 0);
+  for (char ch : {',', 's', 'f', '\0', 'r', 'g', 'b', 'r'}) {
+    open.push_back(static_cast<uint8_t>(ch));
+  }
+  assertRefused(open);
   // Arguments that run past the tags.
   auto trailing = layoutMessage(kLayoutAddr, "rgb", {0.5f, 0.5f, 0.5f});
   for (int i = 0; i < 4; ++i) trailing.push_back(0);

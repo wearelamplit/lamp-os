@@ -186,7 +186,7 @@ WispConfigFields StatusEmitter::configFields() const {
   c.shuffleSeed = config_->shuffleSeed();
   c.opSeq = config_->opSeq();
   c.swatches = config_->paletteStyle() == PaletteStyle::Swatches;
-  c.oscMode = oscModeName(config_->oscMode());
+  c.oscMode = config_->oscMode();
   c.oscSlot = config_->oscSlot();
   char ethIp[16];
   eth::formatIp(ethIp, sizeof(ethIp));

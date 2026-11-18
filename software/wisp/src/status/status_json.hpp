@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "osc/osc_target.hpp"
+
 namespace wisp {
 
 // Live state: what the wisp is doing right now. Rides wispStatus.
@@ -35,7 +37,7 @@ struct WispConfigFields {
   uint32_t     opSeq = 0;
   char         ip[16] = "";  // where an OSC sender reaches the wisp; "" for none
   bool         swatches = false;
-  const char*  oscMode = nullptr;  // oscModeName; null reports Straylight
+  OscMode      oscMode = OscMode::Straylight;
   uint8_t      oscSlot = 1;
 };
 

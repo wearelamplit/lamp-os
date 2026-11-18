@@ -63,7 +63,7 @@ static wisp::WispConfigFields worstConfig() {
   c.opSeq = 4294967295u;
   std::strcpy(c.ip, "255.255.255.255");
   c.swatches = false;  // "false" is wider than "true"
-  c.oscMode = "straylight";  // the widest mode name
+  c.oscMode = wisp::OscMode::Straylight;  // the widest mode name
   c.oscSlot = 10;
   return c;
 }
@@ -452,7 +452,7 @@ void test_config_worst_case_pinned() {
 
 // The widest mode name is the one the pin fixture uses.
 void test_config_pin_uses_the_widest_osc_mode() {
-  const size_t pinned = std::strlen(worstConfig().oscMode);
+  const size_t pinned = std::strlen(wisp::oscModeName(worstConfig().oscMode));
   for (int m = 0; m < 256; ++m) {
     const char* name = wisp::oscModeName(static_cast<wisp::OscMode>(m));
     TEST_ASSERT_TRUE(std::strlen(name) <= pinned);
@@ -462,7 +462,7 @@ void test_config_pin_uses_the_widest_osc_mode() {
 void test_config_reports_maestro_and_slot() {
   char out[256];
   wisp::WispConfigFields c;
-  c.oscMode = wisp::oscModeName(wisp::OscMode::Maestro);
+  c.oscMode = wisp::OscMode::Maestro;
   c.oscSlot = 3;
   TEST_ASSERT_TRUE(wisp::buildWispConfigJson(c, out, sizeof(out)) > 0);
   JsonDocument d;

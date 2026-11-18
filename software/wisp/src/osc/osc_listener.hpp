@@ -42,7 +42,6 @@ class OscListener {
   int fd_ = -1;
   uint32_t lastOpenAttemptMs_ = 0;
   bool attempted_ = false;
-  // A refused message logs at most once a second.
   RateGate refusedLog_{1000};
   uint8_t rx_[1500];
   // Held off the 8 KB loop stack, since the palette path under handlePacket

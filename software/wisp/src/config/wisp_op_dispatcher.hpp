@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "config/crypto.hpp"
+#include "osc/osc_target.hpp"
 
 namespace wisp {
 
@@ -36,6 +37,10 @@ enum class DispatchResult {
   Malformed,             // JSON parse failed or required field missing
   Rejected,              // auth gate blocked (password set, plaintext not allowed)
 };
+
+// Stores the OSC sub-mode and Maestro slot (`slot` valid per
+// maestroSlotValid) and names the result the controller applies.
+DispatchResult applyOscSettings(WispConfig& config, OscMode mode, uint8_t slot);
 
 class WispOpDispatcher {
  public:
