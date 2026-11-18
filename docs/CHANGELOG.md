@@ -8,6 +8,15 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Added
+- **The app shows where to send OSC.** The third palette source is now called
+  OSC, with the Straylight role picker under it, and shows the wisp's address
+  and port 9000 with a copy button, or says the wisp has no address yet. Needs
+  the wisp on 1.3.8; an older wisp on Ethernet shows its Ethernet address.
+- **Gradient or Swatches for the wisp's palette, in the app.** Under Manual
+  and OSC a Gradient | Swatches switch picks how lamps take the palette; the
+  painted-lamps preview and the palette bar follow it, the bar drawing solid
+  blocks in Swatches as the wisp's ring does. A change the wisp never confirms
+  goes back with "Couldn't reach the wisp." Shows only for a wisp on 1.3.8.
 - **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can
   read a Maestro's live palette slot (1 to 10) instead of Straylight, in
   either colour format the Maestro sends (hex, or a float layout with white
@@ -40,7 +49,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the app to show under the OSC source. Needs the wisp reflashed.
 - **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
   lamp two of the palette's own colours exactly, and a colour listed more
-  often goes to more lamps. Set it with `paint:swatches on|off` on the wisp's
+  than once is on the base of more lamps. Set it with `paint:swatches on|off` on the wisp's
   console. Needs the wisp reflashed.
 
 ### Fixed

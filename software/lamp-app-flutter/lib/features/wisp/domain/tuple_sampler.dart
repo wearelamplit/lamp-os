@@ -93,6 +93,49 @@ LampColor _sampleGradientAt(List<LampColor> stops, int pos) {
   );
 }
 
+/// How lamps take colours from the palette, as the wisp's `swatches` setting
+/// picks: a blend sampled along it, or its entries exactly.
+enum PaletteStyle { gradient, swatches }
+
+const int _kGolden = 0x9E3779B9;
+const int _kSwapSalt = 0xCAFEBABE;
+const int _kMinGap = 0x40000000;
+
+// Entry (pos * n) >> 32 of n, so an entry repeated k times is picked k / n of
+// the time.
+int _entryAt(int pos, int n) => (pos * n) >> 32;
+
+TuplePrediction _sampleSwatches(List<LampColor> palette, int posA, int posB) {
+  final base = palette[_entryAt(posA, palette.length)];
+  final others = [for (final c in palette) if (c != base) c];
+  final shade = others.isEmpty ? base : others[_entryAt(posB, others.length)];
+  return TuplePrediction(base: base, shade: shade);
+}
+
+/// Base and shade at two positions over the full 32-bit span, as the wisp's
+/// `sampleTupleAtPositions` draws them for [style]. Null for an empty
+/// palette.
+TuplePrediction? predictTupleAtPositions({
+  required List<LampColor> palette,
+  required int posA,
+  required int posB,
+  PaletteStyle style = PaletteStyle.gradient,
+}) {
+  if (palette.isEmpty) return null;
+  if (style == PaletteStyle.swatches) {
+    return _sampleSwatches(palette, posA, posB);
+  }
+  final stops = _dedupe(palette);
+  final d = posA > posB ? posA - posB : posB - posA;
+  if (d < _kMinGap) {
+    posB = (posA <= 0xFFFFFFFF - _kMinGap) ? posA + _kMinGap : posA - _kMinGap;
+  }
+  return TuplePrediction(
+    base: _sampleGradientAt(stops, posA),
+    shade: _sampleGradientAt(stops, posB),
+  );
+}
+
 /// Run the same per-MAC sampling the wisp runs. Returns null when the
 /// palette is empty (no authored colors to pick from).
 ///
@@ -103,24 +146,17 @@ TuplePrediction? predictTuple({
   required List<int> mac,
   required List<LampColor> palette,
   int shuffleSeed = 0,
+  PaletteStyle style = PaletteStyle.gradient,
 }) {
   if (mac.length != 6) return null;
-  if (palette.isEmpty) return null;
-  final stops = _dedupe(palette);
-  if (stops.isEmpty) return null;
-
-  const int kGolden   = 0x9E3779B9;
-  const int kSwapSalt = 0xCAFEBABE;
-  const int kMinGap   = 0x40000000;
-
-  int posA = _hashMac(mac, 0       ^ shuffleSeed);
-  int posB = _hashMac(mac, kGolden ^ shuffleSeed);
-  final d = posA > posB ? posA - posB : posB - posA;
-  if (d < kMinGap) {
-    posB = (posA <= 0xFFFFFFFF - kMinGap) ? posA + kMinGap : posA - kMinGap;
-  }
-  final swap = (_hashMac(mac, kSwapSalt ^ shuffleSeed) & 1) != 0;
-  final base  = _sampleGradientAt(stops, swap ? posB : posA);
-  final shade = _sampleGradientAt(stops, swap ? posA : posB);
-  return TuplePrediction(base: base, shade: shade);
+  final p = predictTupleAtPositions(
+    palette: palette,
+    posA: _hashMac(mac, 0 ^ shuffleSeed),
+    posB: _hashMac(mac, _kGolden ^ shuffleSeed),
+    style: style,
+  );
+  // Swatches never swap, so base keeps the weight repetition gives it.
+  if (p == null || style == PaletteStyle.swatches) return p;
+  final swap = (_hashMac(mac, _kSwapSalt ^ shuffleSeed) & 1) != 0;
+  return swap ? TuplePrediction(base: p.shade, shade: p.base) : p;
 }

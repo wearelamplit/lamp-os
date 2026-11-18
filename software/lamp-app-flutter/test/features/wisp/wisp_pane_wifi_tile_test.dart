@@ -146,7 +146,7 @@ void main() {
   });
 
   testWidgets(
-      'outside Straylight the WiFi row says it joins only while following it',
+      'outside OSC the WiFi row says it joins only while the source is OSC',
       (tester) async {
     final c = await _makeContainer(
       wispStatusJson:
@@ -158,7 +158,7 @@ void main() {
     await _tapSettingsTab(tester);
 
     expect(find.byKey(const Key('wifi-config-row')), findsOneWidget);
-    expect(find.textContaining('Joins only while following Straylight'),
+    expect(find.textContaining('Joins only while the source is OSC'),
         findsOneWidget);
     expect(find.textContaining('Not connected'), findsNothing);
   });

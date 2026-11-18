@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../control/domain/lamp_color.dart';
 import '../domain/palette_gradient.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_source_mode.dart';
 
 /// Horizontal bar at the very top of the wisp pane. Stretches edge-to-
@@ -26,6 +27,7 @@ class PaletteGradientBar extends StatelessWidget {
     required this.sourceMode,
     required this.manualPalette,
     required this.offColor,
+    this.style = PaletteStyle.gradient,
     this.height = 36,
     // 30 matches the wisp ring's pixel count; finer is a visual lie and
     // ~8x the per-repaint cost, and the eye can't resolve >30 samples at
@@ -45,6 +47,10 @@ class PaletteGradientBar extends StatelessWidget {
   /// [WispSourceMode.off]. Rendered as a single solid stop.
   final LampColor offColor;
 
+  /// How lamps take colours from the palette. Swatches draws solid blocks,
+  /// as the wisp's ring does, so the bar shows no blend lamps never get.
+  final PaletteStyle style;
+
   /// Vertical extent of the bar in logical pixels.
   final double height;
 
@@ -54,7 +60,9 @@ class PaletteGradientBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final stops = _stopsFor(sourceMode, manualPalette, offColor);
-    final ramp = renderPaletteRamp(stops, pixelCount);
+    final ramp = style == PaletteStyle.swatches
+        ? renderPaletteBlocks(stops, pixelCount)
+        : renderPaletteRamp(stops, pixelCount);
     return SizedBox(
       width: double.infinity,
       height: height,

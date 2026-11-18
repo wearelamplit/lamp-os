@@ -12,6 +12,7 @@ import '../../../core/ble/uuids.dart';
 import '../data/wisp_password_store.dart';
 import '../data/wisp_repository.dart';
 import 'manual_palette_draft.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_config.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
@@ -256,6 +257,24 @@ class WispNotifier extends _$WispNotifier {
   // Every opSeq the wisp reports, from a status or a `wispconfig` read.
   late StreamController<int> _opSeqs;
 
+  // Every `wispconfig` read, with the wisp it was read for and the lamp's
+  // `configLastSeenMs` stamp it was read under.
+  late StreamController<({String? mac, int? stamp, WispConfig config})>
+      _configReads;
+
+  // A palette style sent and not yet confirmed, and the wisp it went to. Laid
+  // over every status from that wisp, so a config read from before the wisp
+  // applied it cannot flip the switch back.
+  PaletteStyle? _pendingStyle;
+  String? _pendingStyleMac;
+  int _styleEpoch = 0;
+
+  /// One attempt's confirm window for a setting that confirms on a config
+  /// read: the op's status, the config 250 ms to 2 s after it, then the
+  /// notify and the section read.
+  @visibleForTesting
+  static Duration debugConfigConfirmWindow = const Duration(seconds: 10);
+
   // FbpBleClient has no internal lock, so two concurrent characteristic
   // reads stall the GATT flow on Android; every read here skips while
   // another is in flight. A skipped config read runs once the link is free;
@@ -305,6 +324,10 @@ class WispNotifier extends _$WispNotifier {
     _settingsWritesReadBack = 0;
     final incoming = _incoming = StreamController<WispStatus>.broadcast();
     final opSeqs = _opSeqs = StreamController<int>.broadcast();
+    final configReads = _configReads = StreamController<
+        ({String? mac, int? stamp, WispConfig config})>.broadcast();
+    _pendingStyle = null;
+    _pendingStyleMac = null;
 
     ref.onDispose(() {
       _disposed = true;
@@ -312,6 +335,7 @@ class WispNotifier extends _$WispNotifier {
       _connSub?.cancel();
       unawaited(incoming.close());
       unawaited(opSeqs.close());
+      unawaited(configReads.close());
       _offColorWriteTimer?.cancel();
       _driftWriteTimer?.cancel();
       _brightnessWriteTimer?.cancel();
@@ -618,15 +642,20 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// [status] with the held config merged in, when the config came from the
-  /// same wisp.
+  /// same wisp, and a palette style still confirming laid over it.
   WispStatus _withHeldConfig(WispStatus status) {
     final config = _config;
-    if (config == null ||
-        status.wispMac == null ||
-        status.wispMac != _configMac) {
-      return status;
+    var out = status;
+    if (config != null &&
+        status.wispMac != null &&
+        status.wispMac == _configMac) {
+      out = status.withConfig(config, seenMs: _lastConfigSeenMs);
     }
-    return status.withConfig(config);
+    final pending = _pendingStyle;
+    if (pending != null && out.wispMac == _pendingStyleMac) {
+      out = out.copyWith(paletteStyle: pending);
+    }
+    return out;
   }
 
   // Bounded wait for an in-flight read, so a caller that needs the section's
@@ -674,6 +703,11 @@ class WispNotifier extends _$WispNotifier {
     _config = config;
     _configMac = forStatus.wispMac;
     _lastConfigSeenMs = forStatus.configLastSeenMs;
+    _configReads.add((
+      mac: forStatus.wispMac,
+      stamp: forStatus.configLastSeenMs,
+      config: config,
+    ));
     if (!emit) return config;
     final cur = state.value;
     if (cur == null) return config;
@@ -819,7 +853,7 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.setOscRole($role) failed: $e\n$st');
       if (_disposed) rethrow;
-      state = prev;
+      state = _withPending(prev);
       rethrow;
     }
   }
@@ -1151,6 +1185,69 @@ class WispNotifier extends _$WispNotifier {
     _readBackAfterWrite();
   }
 
+  /// Set how lamps take colours from the palette. Shows at once and holds,
+  /// over every status and any config read still showing the old style,
+  /// until a config the lamp cached after the send shows it from this wisp,
+  /// resending on a miss. A read of a config cached before the send never
+  /// confirms, since an earlier pick may still land after it. A pick equal
+  /// to the wisp's held setting at the send never confirms early: no config
+  /// of its own need follow, so it resends for the whole budget, covering a
+  /// late earlier pick, and then stands if the held setting is still
+  /// [style]. A pick whose attempts all go unconfirmed stands if the held
+  /// setting matches it by then, else rolls back to the held setting and
+  /// throws. A newer call supersedes this one, which then stops
+  /// resending and returns.
+  Future<void> setPaletteStyle(PaletteStyle style) async {
+    final cur = state.value;
+    final mac = cur?.wispMac;
+    if (cur == null || mac == null) throw StateError('no wisp shown');
+    if (_pendingStyle == style && _pendingStyleMac == mac) return;
+    final sentAfter = cur.configLastSeenMs;
+    final pickBack =
+        _configMac == mac && _config?.paletteStyle == style;
+    final epoch = ++_styleEpoch;
+    _pendingStyle = style;
+    _pendingStyleMac = mac;
+    state = AsyncData(_withHeldConfig(cur));
+    final landed = await _sendConfirmed(
+      send: () async {
+        await _repo.setSwatches(style == PaletteStyle.swatches);
+        _readBackAfterWrite();
+      },
+      confirm: () => pickBack
+          ? Future<bool>.delayed(debugConfigConfirmWindow, () => false)
+          : _confirmStyleRead(mac, style, sentAfter),
+      isSuperseded: () => _styleEpoch != epoch,
+    );
+    if (_disposed || _styleEpoch != epoch) return;
+    _pendingStyle = null;
+    _pendingStyleMac = null;
+    final held = _configMac == mac ? _config?.paletteStyle : null;
+    final now = state.value;
+    if (now != null) state = AsyncData(_withHeldConfig(now));
+    if (!landed && held != style) {
+      throw Exception('wisp setSwatches($style) not confirmed');
+    }
+  }
+
+  /// Resolve true once a read for [mac] of a config the lamp stamped other
+  /// than [sentAfter] shows [style], or false when [debugConfigConfirmWindow]
+  /// elapses first.
+  Future<bool> _confirmStyleRead(
+    String mac,
+    PaletteStyle style,
+    int? sentAfter,
+  ) {
+    return _configReads.stream
+        .firstWhere((r) =>
+            r.mac == mac &&
+            r.stamp != sentAfter &&
+            r.config.paletteStyle == style)
+        .timeout(debugConfigConfirmWindow)
+        .then((_) => true)
+        .catchError((_) => false);
+  }
+
   /// Set the wisp source mode (Off / Manual / Osc).
   /// Optimistically reflects in local state so the pill picker doesn't
   /// lag the tap, then resends until the wisp's wispStatus echoes the mode
@@ -1193,8 +1290,15 @@ class WispNotifier extends _$WispNotifier {
     // Roll optimistic state back and drop the guard so ground truth shows.
     _pendingSourceMode = null;
     _pendingSourceUntil = null;
-    state = prev;
+    state = _withPending(prev);
     throw Exception('wisp setSource($mode) not confirmed');
+  }
+
+  /// [snapshot] with the held config and any palette style still confirming
+  /// laid over it, so restoring a snapshot never drops a newer pick.
+  AsyncValue<WispStatus> _withPending(AsyncValue<WispStatus> snapshot) {
+    final s = snapshot.value;
+    return s == null ? snapshot : AsyncData(_withHeldConfig(s));
   }
 
   /// Resolve true once a wispStatus arrives whose `source` matches [mode]
