@@ -21,6 +21,18 @@ config page, so `ble_control::deinitForWebapp()` tears BLE (NimBLE host + BT
 controller) down on client-connect to give the serve headroom. BLE comes back
 only via a reboot on session end (`webapp::tick()`), never an in-place re-init.
 
+SPIFFS (the web UI files) is mounted only while something reads it. `fs_ota`
+mounts it for one digest pass (the boot digest, `fsVerify` after a web UI
+update over the mesh, the `fsFinalize` recompute) and unmounts it after
+(`DigestPassMount`), unless the web server is up: `startServer` mounts it and
+the server reads from it until the reboot that ends the session
+(`webapp::serverUp`). The mount holds ~4.4 KB, a 2.8 KB cache among it. The
+file walk (`enumerateManifest`) uses `opendir`/`readdir`/`stat` and never has
+two stdio `FILE`s open at once: a second open `FILE` makes newlib allocate a
+448 B glue block it never frees (rule 5), and at boot that block pinned a
+~5.6 KB hole in the largest free block. Each Arduino `File` also carries a
+4 KB stdio buffer while open.
+
 ## The recurring anti-pattern
 
 Fleet-awareness features (crowd-dim, claims, nearby lists, greetings, personality)

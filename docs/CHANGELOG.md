@@ -7,6 +7,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Fixed
+- **More memory free once a lamp has booted.** The lamp checks its web UI
+  files at boot without splitting its memory, and stops holding them open
+  afterwards, so its largest free block at the end of boot is several KB
+  bigger. The web config page and web UI updates over the mesh work as
+  before.
+
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android

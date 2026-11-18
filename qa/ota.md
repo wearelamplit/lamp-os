@@ -189,6 +189,19 @@ tap, opened before the transfer so the open's reset lands on the old image.
     GATT control service stopped`, then `[ota] new partition marked valid`
     about 30 s after the PENDING_VERIFY line, and no `BLE never started`.
 
+## Web UI files
+
+12. **A web UI files update lands and the config page loads.** Two lamps on
+    the same signed firmware version whose web UIs differ: the source carries
+    a signed release web UI (it has `fw.lsig`, so its boot line reads
+    `[fs_ota] online; ... digestReady=1`), the peer any other. Tap both. The
+    source logs `[fwdist] OFFER -> <peer>`, the peer `[fw_receiver] OFFER from
+    <source> ... → ACCEPT`, then `[fs_ota] applied (no reboot); digestReady=1
+    version=0x...`, and the source `[fwdist] RESULT success from <peer>`. Join
+    the peer's Wi-Fi from a phone and open the config page: it loads. Every
+    other lamp in range on that firmware version with a different web UI takes
+    the same update, so power down any whose web UI must stay as it is.
+
 ## Indicator expectations
 
 - **Firmware OTA** — a DIM full-shade fill (~16% physical, own base color when
@@ -249,8 +262,6 @@ tap, opened before the transfer so the open's reset lands on the old image.
   `otaAcceptable()` gate.
 - Multi-hop cascade across 3+ lamps and convergence speed on lossy links
   (known-slow DONE/REQ state-pivot behavior; parked).
-- FS-image (SPIFFS web UI) OTA — same transport, `[fsdist]`/`[fs_ota]` tags;
-  gets incidental coverage only.
 - The rollback of an updated lamp whose BLE never starts (`[ota] BLE never
   started; rolling back`): the bench cannot stop BLE starting. The decision is
   natively tested in `test_ota_mark_valid`; the call it makes is not. The
