@@ -328,15 +328,19 @@ void main() {
 
     // Stamps are the lamp's millis when it cached each report.
     test('the fresher of status and config picks the address', () {
-      WispStatus s({required int status, required int config}) => WispStatus(
+      WispStatus s({
+        required int? status,
+        required int? config,
+        String? ip = '192.168.1.42',
+      }) => WispStatus(
         wispMac: _mac,
         configSplit: true,
         configKnown: true,
         wifiConnected: true,
         ethIp: '10.0.0.5',
-        ip: '192.168.1.42',
+        ip: ip,
         statusLastSeenMs: status,
-        configLastSeenMs: config,
+        heldConfigSeenMs: config,
       );
       // Ethernet dropped: the edge's status was lost, its config arrived.
       final configNewer = s(status: 100, config: 200);
@@ -349,6 +353,11 @@ void main() {
       // Across the lamp's millis wrap.
       final wrapped = s(status: 5, config: 0xFFFFFFF0);
       expect(wrapped.oscSendTo, '10.0.0.5');
+      // A merged config read with no stamp is not taken as the fresher.
+      expect(s(status: 100, config: null).oscSendTo, '10.0.0.5');
+      expect(s(status: 100, config: null).ipDisagreesWithLink, isTrue);
+      // A wisp that predates ip shows its Ethernet address whatever the age.
+      expect(s(status: 100, config: 200, ip: null).oscSendTo, '10.0.0.5');
     });
 
     test('an optimistic copy keeps the held ip', () {
@@ -423,4 +432,99 @@ void main() {
     expect(shown.brightness, 30);
     expect(shown.ip, '192.168.1.42');
   });
+
+  // The lamp stamps each report as it caches it; a config follows its status
+  // by at least 250 ms, and the app reads it one section read later.
+  group('send-to address across link edges', () {
+    Future<(_ConfigHoldBle, ProviderContainer)> open() async {
+      SharedPreferences.setMockInitialValues({});
+      final ble = _ConfigHoldBle();
+      await ble.connect(_devId);
+      ble.seedSection(
+        _devId,
+        'wispstatus',
+        _b(_stamped(wifi: true, status: 100, config: 100)),
+      );
+      ble.seedSection(_devId, 'wispconfig', _b(_config(ip: '192.168.1.42')));
+      final c = ProviderContainer(
+        overrides: [bleClientProvider.overrideWithValue(ble)],
+      );
+      addTearDown(c.dispose);
+      c.listen(wispNotifierProvider(_devId), (_, _) {});
+      await c.read(wispNotifierProvider(_devId).future);
+      await pumpEventQueue();
+      return (ble, c);
+    }
+
+    String shown(ProviderContainer c) =>
+        c.read(wispNotifierProvider(_devId)).value!.oscSendTo;
+
+    test('Ethernet up: the address holds while the new config is read',
+        () async {
+      final (ble, c) = await open();
+      expect(shown(c), '192.168.1.42');
+
+      _notifyStatus(ble, _stamped(ethIp: '10.0.0.5', status: 200, config: 100));
+      await pumpEventQueue();
+      expect(shown(c), '10.0.0.5');
+
+      ble.holdConfig = Completer<void>();
+      ble.seedSection(_devId, 'wispconfig', _b(_config(ip: '10.0.0.5')));
+      _notifyStatus(ble, _stamped(ethIp: '10.0.0.5', status: 200, config: 450));
+      await pumpEventQueue();
+      expect(shown(c), '10.0.0.5', reason: 'config landed, not read yet');
+
+      ble.holdConfig!.complete();
+      await pumpEventQueue();
+      expect(shown(c), '10.0.0.5');
+    });
+
+    test('Ethernet down with its status lost: the new config shows', () async {
+      final (ble, c) = await open();
+      _notifyStatus(ble, _stamped(ethIp: '10.0.0.5', status: 200, config: 100));
+      await pumpEventQueue();
+      expect(shown(c), '10.0.0.5');
+
+      // The lamp still holds the Ethernet status; only the config arrives.
+      ble.seedSection(_devId, 'wispconfig', _b(_config(ip: '192.168.1.42')));
+      _notifyStatus(ble, _stamped(ethIp: '10.0.0.5', status: 200, config: 450));
+      await pumpEventQueue();
+      expect(shown(c), '192.168.1.42');
+    });
+  });
 }
+
+/// Holds `wispconfig` reads while [holdConfig] is set.
+class _ConfigHoldBle extends InMemoryBleClient {
+  Completer<void>? holdConfig;
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) async {
+    if (name == 'wispconfig') await holdConfig?.future;
+    return super.readSection(deviceId, name);
+  }
+}
+
+/// A wisp status as the lamp merges it, with its cache stamps.
+String _stamped({
+  bool wifi = false,
+  String ethIp = '',
+  required int status,
+  required int config,
+}) =>
+    jsonEncode({
+      'wispMac': _mac,
+      'configSplit': true,
+      'source': 'osc',
+      'wifiConnected': wifi,
+      if (ethIp.isNotEmpty) 'ethIp': ethIp,
+      'statusLastSeenMs': status,
+      'configLastSeenMs': config,
+    });
+
+void _notifyStatus(InMemoryBleClient ble, String json) => ble.simulateNotify(
+      _devId,
+      BleUuids.controlService,
+      BleUuids.wispStatus,
+      _b(json),
+    );

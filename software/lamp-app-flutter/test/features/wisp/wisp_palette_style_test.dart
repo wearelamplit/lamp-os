@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -82,6 +83,37 @@ void _notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
 
 Future<void> _wait(Duration d) => Future<void>.delayed(d);
 
+/// Fails every `setSource` write, the first held open while [holdSource] is
+/// set.
+class _FailSourceBle extends InMemoryBleClient {
+  Completer<void>? holdSource;
+
+  @override
+  Future<void> write(
+    String d,
+    String s,
+    String c,
+    Uint8List v, {
+    bool withoutResponse = false,
+    bool allowLongWrite = false,
+  }) async {
+    if (utf8.decode(v, allowMalformed: true).contains('setSource')) {
+      final hold = holdSource;
+      holdSource = null;
+      await hold?.future;
+      throw Exception('source write failed');
+    }
+    return super.write(
+      d,
+      s,
+      c,
+      v,
+      withoutResponse: withoutResponse,
+      allowLongWrite: allowLongWrite,
+    );
+  }
+}
+
 void main() {
   group('setPaletteStyle', () {
     final defaultWindow = WispNotifier.debugConfigConfirmWindow;
@@ -96,8 +128,10 @@ void main() {
       WispNotifier.debugConfigReadBackDelay = defaultReadBack;
     });
 
-    Future<(InMemoryBleClient, ProviderContainer, WispNotifier)> open() async {
-      final ble = InMemoryBleClient();
+    Future<(InMemoryBleClient, ProviderContainer, WispNotifier)> open({
+      InMemoryBleClient? client,
+    }) async {
+      final ble = client ?? InMemoryBleClient();
       await ble.connect(_devId);
       ble.seedSection(_devId, 'wispstatus', _b(_status()));
       ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: false)));
@@ -188,6 +222,86 @@ void main() {
 
       expect(shown(c), PaletteStyle.gradient);
       expect(_swatchOps(ble).where((v) => v), hasLength(1));
+    });
+
+    // Swatches may still land at the wisp after the pick back to Gradient, so
+    // a read of the config the lamp held before that pick proves nothing.
+    test('a pick back is not confirmed by a config cached before it', () async {
+      final (ble, c, n) = await open();
+
+      final first = n.setPaletteStyle(PaletteStyle.swatches);
+      await pumpEventQueue();
+      final second = n.setPaletteStyle(PaletteStyle.gradient);
+      await Future.wait([first, second]);
+
+      expect(_swatchOps(ble).where((v) => !v), hasLength(4),
+          reason: 'Gradient resent for the whole budget');
+      expect(shown(c), PaletteStyle.gradient);
+    });
+
+    String otherWisp(int seen) => jsonEncode({
+          'wispMac': '11:22:33:44:55:66',
+          'configSplit': true,
+          'source': 'manual',
+          'configLastSeenMs': seen,
+        });
+
+    test('a status from another wisp carries no pending pick', () async {
+      final (ble, c, n) = await open();
+
+      final done = n
+          .setPaletteStyle(PaletteStyle.swatches)
+          .catchError((Object _) {});
+      await pumpEventQueue();
+      // A wisp that predates swatches.
+      ble.seedSection(_devId, 'wispconfig', _b(_config()));
+      _notify(ble, otherWisp(500));
+      await pumpEventQueue();
+
+      final now = c.read(wispNotifierProvider(_devId)).value!;
+      expect(now.wispMac, '11:22:33:44:55:66');
+      expect(now.paletteStyle, isNull);
+      await done;
+    });
+
+    test("another wisp's config never confirms a pick", () async {
+      final (ble, _, n) = await open();
+
+      Object? error;
+      final done = n
+          .setPaletteStyle(PaletteStyle.swatches)
+          .catchError((Object e) => error = e);
+      await pumpEventQueue();
+      ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: true)));
+      _notify(ble, otherWisp(500));
+      await done;
+
+      expect(error, isNotNull);
+      expect(_swatchOps(ble), [true, true, true, true]);
+    });
+
+    test('a failed source change keeps a pick still confirming', () async {
+      final ble = _FailSourceBle();
+      final (_, c, n) = await open(client: ble);
+
+      final hold = ble.holdSource = Completer<void>();
+      Object? sourceError;
+      final source = n
+          .setSource(WispSourceMode.osc)
+          .catchError((Object e) => sourceError = e);
+      await pumpEventQueue();
+      final style = n
+          .setPaletteStyle(PaletteStyle.swatches)
+          .catchError((Object _) {});
+      await pumpEventQueue();
+      hold.complete();
+      await source;
+
+      expect(sourceError, isNotNull);
+      final now = c.read(wispNotifierProvider(_devId)).value!;
+      expect(now.source, WispSourceMode.manual);
+      expect(now.paletteStyle, PaletteStyle.swatches);
+      await style;
     });
   });
 

@@ -21,8 +21,8 @@ class PaletteStyleSwitch extends StatelessWidget {
       PaletteStyle.gradient =>
         'Each lamp gets two blends from along the palette.',
       PaletteStyle.swatches =>
-        "Each lamp gets two of the palette's own colours. A colour listed "
-            'more often goes to more lamps.',
+        "Each lamp gets two of the palette's own colours, no blends. List a "
+            'colour more often and more lamps get it as their base.',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

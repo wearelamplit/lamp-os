@@ -60,6 +60,7 @@ class WispStatus {
     this.manualSeq = 0,
     this.ip,
     this.paletteStyle,
+    this.heldConfigSeenMs,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -213,20 +214,25 @@ class WispStatus {
   /// paints only gradients.
   final PaletteStyle? paletteStyle;
 
+  /// The lamp's `configLastSeenMs` stamp the merged config was read under,
+  /// so the config's age can be told against [statusLastSeenMs]. Null until a
+  /// config is merged, or when that read carried no stamp.
+  final int? heldConfigSeenMs;
+
   /// The address an OSC sender should target, from the wisp's own reports:
   /// [ethIp] while the wisp is on Ethernet, since the wisp always picks it
-  /// first, unless a config reached the lamp after this status; else [ip].
-  /// Empty when neither has one.
+  /// first, unless the merged config reached the lamp after this status;
+  /// else [ip]. Empty when neither has one.
   String get oscSendTo =>
       ethIp.isNotEmpty && (ip == null || _statusAfterConfig)
           ? ethIp
           : (ip ?? '');
 
-  // Whether the lamp cached this status no earlier than its latest config,
-  // on the lamp's wrapping 32-bit millis. True when either stamp is absent.
+  // Whether the lamp cached this status no earlier than the merged config, on
+  // the lamp's wrapping 32-bit millis. True when either stamp is absent.
   bool get _statusAfterConfig {
     final s = statusLastSeenMs;
-    final c = configLastSeenMs;
+    final c = heldConfigSeenMs;
     if (s == null || c == null) return true;
     return ((s - c) & 0xFFFFFFFF) < 0x80000000;
   }
@@ -234,8 +240,8 @@ class WispStatus {
   /// True when the wisp sent this status and its link state contradicts the
   /// held [ip]: on Ethernet with another address, a link up with no address,
   /// or an address with no link. A config frame lost after a link edge leaves
-  /// them apart until the next config read. A status older than the lamp's
-  /// latest config never disagrees: the config is the fresher report.
+  /// them apart until the next config read. A status older than the merged
+  /// config never disagrees: the config is the fresher report.
   bool get ipDisagreesWithLink {
     final held = ip;
     if (!fromWisp || !configKnown || held == null) return false;
@@ -365,8 +371,9 @@ class WispStatus {
     );
   }
 
-  /// This status with [config]'s settings, marked [configKnown].
-  WispStatus withConfig(WispConfig config) {
+  /// This status with [config]'s settings, marked [configKnown]. [seenMs] is
+  /// the lamp stamp the config was read under ([heldConfigSeenMs]).
+  WispStatus withConfig(WispConfig config, {int? seenMs}) {
     return _copy(
       ledType: config.ledType,
       pixelCount: config.pixelCount,
@@ -378,6 +385,7 @@ class WispStatus {
       configKnown: true,
       ip: config.ip,
       paletteStyle: config.paletteStyle,
+      heldConfigSeenMs: seenMs,
     );
   }
 
@@ -405,7 +413,7 @@ class WispStatus {
       ledType: ledType,
       pixelCount: pixelCount,
       brightness: brightness,
-      paletteStyle: paletteStyle ?? this.paletteStyle,
+      paletteStyle: paletteStyle ?? _keep,
     );
   }
 
@@ -425,6 +433,7 @@ class WispStatus {
     bool? configKnown,
     Object? ip = _keep,
     Object? paletteStyle = _keep,
+    Object? heldConfigSeenMs = _keep,
   }) {
     return WispStatus(
       wifiConnected: wifiConnected,
@@ -465,6 +474,9 @@ class WispStatus {
       paletteStyle: identical(paletteStyle, _keep)
           ? this.paletteStyle
           : paletteStyle as PaletteStyle?,
+      heldConfigSeenMs: identical(heldConfigSeenMs, _keep)
+          ? this.heldConfigSeenMs
+          : heldConfigSeenMs as int?,
     );
   }
 
@@ -507,7 +519,8 @@ class WispStatus {
           manualId == other.manualId &&
           manualSeq == other.manualSeq &&
           ip == other.ip &&
-          paletteStyle == other.paletteStyle;
+          paletteStyle == other.paletteStyle &&
+          heldConfigSeenMs == other.heldConfigSeenMs;
 
   @override
   int get hashCode => Object.hash(
@@ -536,7 +549,7 @@ class WispStatus {
           brightness,
           configKnown,
           Object.hash(configSplit, configLastSeenMs, manualId, manualSeq, ip,
-              paletteStyle),
+              paletteStyle, heldConfigSeenMs),
         ),
       );
 }

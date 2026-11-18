@@ -185,7 +185,7 @@ class _AddressBox extends StatelessWidget {
           await Clipboard.setData(ClipboardData(text: address));
           if (context.mounted) AppSnackbar.info(context, 'Copied $address');
         },
-        borderRadius: BorderRadius.circular(AppSpace.sm),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpace.md,
@@ -193,7 +193,7 @@ class _AddressBox extends StatelessWidget {
           ),
           decoration: BoxDecoration(
             color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(AppSpace.sm),
+            borderRadius: BorderRadius.circular(AppRadius.card),
             border: Border.all(
               color: colorScheme.primary.withValues(alpha: 0.5),
             ),
