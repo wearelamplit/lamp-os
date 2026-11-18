@@ -1,6 +1,6 @@
 """Static and stubbed checks for release workflows, the release-flash cache, build cache config and docs.
 Run: python3 -m unittest discover -s scripts/tests"""
-import configparser, os, re, shutil, signal, stat, subprocess, tempfile, time, unittest
+import configparser, json, os, re, shutil, signal, stat, subprocess, tempfile, time, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -277,6 +277,67 @@ class BuildLock(unittest.TestCase):
         self.assertGreaterEqual(len(lamp), 7)
         for n, l in lamp:
             self.assertRegex(l, r"with_pio_lock\.sh\"? pio run", f"{n}: {l.strip()}")
+
+
+class AppCommitDefine(unittest.TestCase):
+    SCRIPT = ROOT / "software/lamp-app-flutter/scripts/flutter-with-commit.sh"
+
+    def run_script(self, dirty=False, tracked_edit=False):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "scripts").mkdir()
+            shutil.copy(self.SCRIPT, d / "scripts")
+            (d / "scripts/note").write_text("tracked")
+            (d / "bin").mkdir()
+            stub = d / "bin/flutter"
+            stub.write_text('#!/bin/sh\necho "$@"\n')
+            stub.chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env["PATH"] = f"{d / 'bin'}:{os.environ['PATH']}"
+            g = lambda *a: subprocess.run(["git", "-C", str(d), *a], check=True, capture_output=True, text=True)
+            g("init", "-q")
+            g("add", "-A")
+            g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x")
+            sha = g("rev-parse", "--short", "HEAD").stdout.strip()
+            if dirty:
+                (d / "f").write_text("x")
+            if tracked_edit:
+                (d / "scripts/note").write_text("edited")
+            r = subprocess.run([str(d / "scripts/flutter-with-commit.sh"), "build", "apk"],
+                               capture_output=True, text=True, env=env)
+            return r, sha
+
+    def test_defines_the_head_commit(self):
+        r, sha = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), f"build apk --dart-define=APP_COMMIT={sha}")
+
+    def test_marks_a_dirty_tree(self):
+        r, sha = self.run_script(dirty=True)
+        self.assertEqual(r.stdout.strip(), f"build apk --dart-define=APP_COMMIT={sha}-dirty")
+
+    def test_marks_an_edited_tracked_file(self):
+        r, sha = self.run_script(tracked_edit=True)
+        self.assertEqual(r.stdout.strip(), f"build apk --dart-define=APP_COMMIT={sha}-dirty")
+
+    def test_define_name_matches_the_app(self):
+        app = ROOT / "software/lamp-app-flutter"
+        self.assertIn("APP_COMMIT=", (app / "scripts/flutter-with-commit.sh").read_text())
+        self.assertIn("String.fromEnvironment('APP_COMMIT')",
+                      (app / "lib/features/lamp_shell/presentation/info_screen.dart").read_text())
+
+    def test_build_number_stays_one(self):
+        self.assertRegex((ROOT / "software/lamp-app-flutter/pubspec.yaml").read_text(),
+                         r"(?m)^version: \d+\.\d+\.\d+\+1$")
+
+    def test_every_app_build_task_uses_the_wrapper(self):
+        tasks = json.loads((ROOT / "package.json").read_text())["scripts"]
+        for name, cmd in tasks.items():
+            if re.search(r"(^|[\s&;|(])flutter\s+(-\S+\s+)*(run|build)\b", cmd):
+                self.fail(f"{name} calls flutter directly; use flutter-with-commit.sh")
+            self.assertNotRegex(cmd, r"--build-(number|name)", name)
+        for name in ("app:run", "app:bridge", "app:bridge:ios", "app:install"):
+            self.assertIn("flutter-with-commit.sh", tasks[name], name)
 
 
 if __name__ == "__main__":

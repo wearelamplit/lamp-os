@@ -50,6 +50,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ### Changed
 - **More refused writes show on the debug serial** as `[drop]` lines.
+- **The app is version 1.1.0, and the Info screen names the commit of bench
+  builds.** Builds made with `npm run app:run`, `app:bridge`, `app:bridge:ios`
+  and `app:install` show `App 1.1.0+1 (<sha>)`, with `-dirty` when the tree had
+  uncommitted changes at launch.
 
 ## 1.3.7
 

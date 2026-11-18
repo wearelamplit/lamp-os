@@ -38,6 +38,16 @@ All tasks run from the repo root.
 
 ### App + bridge
 
+App version: `version:` in `software/lamp-app-flutter/pubspec.yaml`, independent
+of the firmware `VERSION`. Edit the part before `+` when the app ships; bench
+builds keep `+1`. The tasks below (`app:run`, `app:bridge`, `app:bridge:ios`,
+`app:install`) go through `software/lamp-app-flutter/scripts/flutter-with-commit.sh`,
+which adds `--dart-define=APP_COMMIT=<short sha>` (`-dirty` appended when the tree
+has uncommitted changes at launch). The stamp is fixed at launch and stays across hot
+reload, hot restart and commits made mid-session. The Info screen shows
+`App <version>+<build> (<sha>)`, or without the sha for a plain `flutter run` or
+IDE build.
+
 | Task | What it does |
 |---|---|
 | `npm run app:run` | `flutter run` against a connected device |

@@ -18,6 +18,17 @@ import '../../firmware/domain/firmware_state.dart';
 import '../../firmware/presentation/firmware_update_panel.dart';
 import '../../control/presentation/lamp_error_page.dart';
 
+/// Short commit of the build, injected by `--dart-define=APP_COMMIT`; empty
+/// for a plain `flutter run` or IDE build.
+final appCommitProvider = Provider<String>(
+  (_) => const String.fromEnvironment('APP_COMMIT'),
+);
+
+String appVersionLabel(PackageInfo info, String commit) {
+  final v = '${info.version}+${info.buildNumber}';
+  return commit.isEmpty ? v : '$v ($commit)';
+}
+
 /// Info tab: Lamplit branding, firmware + app version footer, and the
 /// 5-tap-the-wordmark gesture that unlocks session-only advanced settings.
 ///
@@ -162,7 +173,7 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
             builder: (context, snap) {
               final info = snap.data;
               final v = info != null
-                  ? '${info.version}+${info.buildNumber}'
+                  ? appVersionLabel(info, ref.watch(appCommitProvider))
                   : '...';
               return Text(
                 'App $v',
