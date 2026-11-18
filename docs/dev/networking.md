@@ -458,14 +458,14 @@ surface(1) + sourceKind(1) + fadeDurationMs(2 LE)
 - **Auth**: `command_auth::verify()` runs before dedup-record. See the command_auth section below.
 - **Dedup**: `commandDedup_` 64-slot ring per `(sourceMac, seq)`.
 - **Drain**: Core 1 loop via `PendingCommand` slot → `Lamp::drainCommand()`.
-- **Payload**: `ExpressionInvocation` JSON. `delayMs` in the invocation is honored (enqueued to `pendingTriggers` if non-zero). `sourceMac` propagates to `triggerInvocation` for cascade coalescing.
+- **Payload**: `ExpressionInvocation` JSON. `delayMs` in the invocation is honored (enqueued to `pendingTriggers` if non-zero). `sourceMac` propagates to `triggerInvocation` for cascade coalescing. A tinted flicker burst that also carries `fadeDuration`, played at once, queues a base tint from the same `sourceMac` to follow it ([`moments.md`](moments.md), "Spore tint").
 - **Payload ceiling**: `COMMAND_MAX_PAYLOAD` is 1444 B, derived off the ESP-NOW v2 frame (`ESPNOW_V2_FRAME_MAX` = 1470) less the 18 B fixed head and 8 B tag. MSG_COMMAND is a physical broadcast, so a frame over the classic 250 B limit reaches only v2-capable peers; a v1/classic peer drops the oversized frame per the ESP-NOW contract and silently misses that cascade (graceful, no crash). Big cascades therefore reach only the v2 fleet until every peer runs the v2 firmware; a mixed-fleet capability gate is owed before public beta.
 - **Colors encoding**: `colors` is a single packed lowercase-hex string, 8 chars per color (`"rrggbbww…"`), no `#`, no separators; the key is omitted when empty. A receiver drops a malformed `colors` string whole (length not a multiple of 8, or a non-hex char) and still applies the invocation with its configured palette. A receiver keeps at most the first 8 colours and 12 `parameters` keys it knows (`kMaxExpressionColors` / `kMaxExpressionParams` in `config/config_types.hpp`) and ignores the rest, the same caps a stored expression carries. Example:
 
 ```json
 {"type":"glitchy","target":3,"delayMs":0,"colors":"ff00000000ff0000","parameters":{"durationMin":250,"durationMax":900}}
 ```
-- **Known senders**: cascade fan-out (`ExpressionManager::maybeCascade`), and the app's Test, once it has played on the lamp and when its parameters set `cascadeEnabled`; snafu `Greeting::control()` on peer arrival — sends a fast glitch (`type="glitchy"`, `durationMin=durationMax=12`, `target=SHADE`) colored with the sender's stem first color (`config.base.colors[0]`). Only sent when the peer has a known ESP-NOW MAC (`hasMac=true`).
+- **Known senders**: cascade fan-out (`ExpressionManager::maybeCascade`), and the app's Test, once it has played on the lamp and when its parameters set `cascadeEnabled`; snafu `Greeting::control()` on peer arrival — sends a fast glitch (`type="glitchy"`, `durationMin=durationMax=12`, `target=SHADE`) colored with the sender's stem first color (`config.base.colors[0]`). Only sent when the peer has a known ESP-NOW MAC (`hasMac=true`). A mushroom sends a spore as a broadcast-targeted command signed with the lamp key: `{"type":"flicker","target":2,"colors":"00ff8000","parameters":{"count":12,"durationMax":6000,"fire":0,"opacity":60,"fadeDuration":120}}`.
 
 ### command_auth: shared-key tag on EVENT + COMMAND
 

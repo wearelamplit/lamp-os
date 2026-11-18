@@ -166,7 +166,7 @@ void ShiftyExpression::onUpdate() {
         Serial.printf("[shifty] complete t=%lu\n", (unsigned long)nowMs);
 #endif
         // Cap the counter; the next nextFrame() flips PLAYING_ONCE to
-        // STOPPED and onComplete chains glitchy.
+        // STOPPED, and onComplete runs.
         frames = frame + 1;
       }
       break;

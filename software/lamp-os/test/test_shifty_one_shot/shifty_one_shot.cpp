@@ -42,7 +42,7 @@ struct Rig {
   ShiftyExpression shifty{&fb, 100};
   uint32_t now = 10000;
 
-  Rig(bool transient, uint32_t fillMode) {
+  Rig(bool transient, uint32_t fillMode, bool withFadeBack = true) {
     s_chained.clear();
     for (FrameBuffer* b : {&fb, &other}) {
       b->pixelCount = kPx;
@@ -53,12 +53,13 @@ struct Rig {
     shifty.setBehaviorContext(&ctx);
     set_mock_millis(now);
     shifty.configure({kTint}, 60, 900, TARGET_SHADE);
-    shifty.configureFromParameters({{"fillMode", fillMode},
-                                    {"fadeDuration", kFadeS},
-                                    {"shiftDurationMin", kHoldS},
-                                    {"shiftDurationMax", kHoldS},
-                                    {"durationMax", kBackS},
-                                    {"opacity", 100}});
+    ExpressionParams params{{"fillMode", fillMode},
+                            {"fadeDuration", kFadeS},
+                            {"shiftDurationMin", kHoldS},
+                            {"shiftDurationMax", kHoldS},
+                            {"opacity", 100}};
+    if (withFadeBack) params.set("durationMax", kBackS);
+    shifty.configureFromParameters(params);
     shifty.isTransient = transient;
     shifty.autoTriggerEnabled = !transient;
   }
@@ -115,6 +116,16 @@ void test_a_transient_shifty_chains_no_glitchy() {
   TEST_ASSERT_EQUAL_UINT32(0, s_chained.size());
 }
 
+// A transient without durationMax, an app Test or a peer's copy, fades back
+// over fadeDuration like a configured one.
+void test_a_transient_shifty_without_duration_max_fades_back_over_fade_duration() {
+  Rig r(/*transient=*/true, /*fillMode=*/0, /*withFadeBack=*/false);
+  uint32_t fadeBackMs = 0;
+  const uint32_t cycle = r.runCycle(fadeBackMs);
+  TEST_ASSERT_UINT32_WITHIN(3 * kStepMs, s(kFadeS + kHoldS + kFadeS), cycle);
+  TEST_ASSERT_UINT32_WITHIN(3 * kStepMs, s(kFadeS), fadeBackMs);
+}
+
 // The same keys on a configured shifty: the fade back stays fadeDuration and
 // the cycle still chains glitchy.
 void test_a_configured_shifty_ignores_duration_max_and_chains_glitchy() {
@@ -156,6 +167,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_a_transient_shifty_fades_back_over_duration_max);
   RUN_TEST(test_a_transient_shifty_chains_no_glitchy);
+  RUN_TEST(test_a_transient_shifty_without_duration_max_fades_back_over_fade_duration);
   RUN_TEST(test_a_configured_shifty_ignores_duration_max_and_chains_glitchy);
   RUN_TEST(test_a_transient_bloom_staggers_over_duration_max);
   RUN_TEST(test_max_cycle_bounds_the_real_cycle);

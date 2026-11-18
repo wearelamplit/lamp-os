@@ -8,6 +8,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Added
+- **Mushrooms tint nearby lamps.** When a mushroom spores near a lamp, the
+  lamp sparkles in the strain's colour for 6 s, then the colour blooms over
+  its base, holds 20 s and fades back over up to 100 s. A lamp mid-tint
+  still sparkles at the next spore but doesn't tint again. Older lamps keep
+  playing it as a 2 s sparkle. No change to the mesh messages or the app.
 - **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can
   read a Maestro's live palette slot (1 to 10) instead of Straylight, in
   either colour format the Maestro sends (hex, or a float layout with white
