@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "paint/palette_id.hpp"
 #include "status/status_ring.hpp"
@@ -259,10 +260,10 @@ bool WispConfig::setOsc(OscMode mode, uint8_t slot, const char* address) {
   const OscTarget before = oscTarget();
   oscMode_ = mode;
   oscSlot_ = slot;
-  // `address` may be oscAddress_ itself, and snprintf must not overlap.
-  if (address != oscAddress_) {
-    std::snprintf(oscAddress_, sizeof(oscAddress_), "%s", address);
-  }
+  // `address` may be oscAddress_ itself.
+  char next[sizeof(oscAddress_)];
+  std::snprintf(next, sizeof(next), "%s", address);
+  std::memcpy(oscAddress_, next, sizeof(next));
   if (opened_) {
     prefs_.putUChar(kKeyOscMode, static_cast<uint8_t>(mode));
     prefs_.putUChar(kKeyOscSlot, slot);

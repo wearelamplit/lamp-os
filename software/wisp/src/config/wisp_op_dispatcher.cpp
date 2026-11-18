@@ -197,8 +197,7 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     const char* address = config_.oscAddress();
     JsonVariantConst addressVar = doc["address"];
     if (!addressVar.isNull()) {
-      if (!addressVar.is<const char*>() ||
-          !oscCustomAddressValid(addressVar.as<const char*>())) {
+      if (!oscCustomAddressValid(addressVar.as<const char*>())) {
         Serial.println("[wisp.op] setOsc invalid 'address'");
         return DispatchResult::Malformed;
       }
