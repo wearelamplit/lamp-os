@@ -67,6 +67,32 @@ void OscListener::poll(bool active, uint32_t nowMs) {
 
 void OscListener::handlePacket(const uint8_t* data, size_t len,
                                const char* via) {
+  const OscTarget target = config_.oscTarget();
+  if (target.mode == OscMode::Straylight) {
+    handleStraylight(data, len, via);
+    return;
+  }
+  char address[kOscTargetAddressCap];
+  oscTargetAddress(target, address, sizeof(address));
+  size_t count = 0;
+  const char* refusedTags = nullptr;
+  switch (oscFindColours(data, len, address, colours_, kOscPaletteMaxColors,
+                         count, refusedTags)) {
+    case OscColours::Read:
+      controller_.onOscPalette(colours_, count, via, millis());
+      return;
+    case OscColours::Refused:
+      if (!refusedLog_.request(millis())) return;
+      Serial.printf("[osc] refused %.32s ,%.32s via %s\n", address,
+                    refusedTags ? refusedTags : "", via);
+      return;
+    case OscColours::Absent:
+      return;
+  }
+}
+
+void OscListener::handleStraylight(const uint8_t* data, size_t len,
+                                   const char* via) {
   size_t n = 0;
   switch (oscClassifyFeedPacket(data, len, oscPaletteAddress(config_.oscRole()),
                                 kStraylightAddressPrefix, rgb_,
@@ -81,13 +107,13 @@ void OscListener::handlePacket(const uint8_t* data, size_t len,
   }
   if (n == 0 || n % 3 != 0) return;
   const size_t count = n / 3;
-  PaletteColor colours[kOscPaletteMaxColors];
   for (size_t i = 0; i < count; ++i) {
-    colours[i].r = rgb_[i * 3 + 0];
-    colours[i].g = rgb_[i * 3 + 1];
-    colours[i].b = rgb_[i * 3 + 2];
+    colours_[i].r = rgb_[i * 3 + 0];
+    colours_[i].g = rgb_[i * 3 + 1];
+    colours_[i].b = rgb_[i * 3 + 2];
+    colours_[i].w = 0.0f;
   }
-  controller_.onOscPalette(colours, count, via, millis());
+  controller_.onOscPalette(colours_, count, via, millis());
 }
 
 }  // namespace wisp

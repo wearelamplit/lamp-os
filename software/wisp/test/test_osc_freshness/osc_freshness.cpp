@@ -4,6 +4,11 @@
 
 using wisp::OscFreshness;
 
+namespace {
+const wisp::OscTarget kStraylight{};
+const wisp::OscTarget kMaestro{wisp::OscMode::Maestro, wisp::OscRole::Primary, 3};
+}  // namespace
+
 void setUp() {}
 void tearDown() {}
 
@@ -18,18 +23,18 @@ void test_first_palette_is_live_edge() {
 void test_stale_after_gap_once() {
   OscFreshness f;
   f.onPalette(1000);
-  TEST_ASSERT_FALSE(f.tick(1000 + OscFreshness::kStaleMs - 1));
+  TEST_ASSERT_FALSE(f.tick(1000 + OscFreshness::kStaleMs - 1, kStraylight));
   TEST_ASSERT_TRUE(f.live());
-  TEST_ASSERT_TRUE(f.tick(1000 + OscFreshness::kStaleMs));
+  TEST_ASSERT_TRUE(f.tick(1000 + OscFreshness::kStaleMs, kStraylight));
   TEST_ASSERT_FALSE(f.live());
-  TEST_ASSERT_FALSE(f.tick(1000 + 2 * OscFreshness::kStaleMs));
+  TEST_ASSERT_FALSE(f.tick(1000 + 2 * OscFreshness::kStaleMs, kStraylight));
 }
 
 // A palette after a gap resumes on its own: the stale -> live edge fires again.
 void test_resumes_after_gap() {
   OscFreshness f;
   f.onPalette(0);
-  f.tick(OscFreshness::kStaleMs);
+  f.tick(OscFreshness::kStaleMs, kStraylight);
   TEST_ASSERT_TRUE(f.onPalette(OscFreshness::kStaleMs + 5));
   TEST_ASSERT_TRUE(f.live());
 }
@@ -38,7 +43,7 @@ void test_steady_stream_never_stales() {
   OscFreshness f;
   for (uint32_t t = 0; t < 5 * OscFreshness::kStaleMs; t += 500) {
     f.onPalette(t);
-    TEST_ASSERT_FALSE(f.tick(t + 499));
+    TEST_ASSERT_FALSE(f.tick(t + 499, kStraylight));
   }
   TEST_ASSERT_TRUE(f.live());
 }
@@ -46,8 +51,8 @@ void test_steady_stream_never_stales() {
 void test_millis_wrap() {
   OscFreshness f;
   f.onPalette(0xFFFFFF00u);
-  TEST_ASSERT_FALSE(f.tick(0x00000100u));
-  TEST_ASSERT_TRUE(f.tick(0xFFFFFF00u + OscFreshness::kStaleMs));
+  TEST_ASSERT_FALSE(f.tick(0x00000100u, kStraylight));
+  TEST_ASSERT_TRUE(f.tick(0xFFFFFF00u + OscFreshness::kStaleMs, kStraylight));
 }
 
 void test_reset_drops_live_without_edge() {
@@ -55,7 +60,7 @@ void test_reset_drops_live_without_edge() {
   f.onPalette(0);
   f.reset();
   TEST_ASSERT_FALSE(f.live());
-  TEST_ASSERT_FALSE(f.tick(OscFreshness::kStaleMs * 2));
+  TEST_ASSERT_FALSE(f.tick(OscFreshness::kStaleMs * 2, kStraylight));
   TEST_ASSERT_TRUE(f.onPalette(1));
 }
 
@@ -66,11 +71,11 @@ void test_ten_second_restate_stays_live() {
   uint32_t t = 0;
   for (int i = 0; i < 12; ++i) {
     f.onPalette(t);
-    TEST_ASSERT_FALSE(f.tick(t + 10050));
+    TEST_ASSERT_FALSE(f.tick(t + 10050, kStraylight));
     t += 10050;
   }
   // One restate dropped: the next lands a full cycle late.
-  TEST_ASSERT_FALSE(f.tick(t + 10100));
+  TEST_ASSERT_FALSE(f.tick(t + 10100, kStraylight));
   f.onPalette(t + 10100);
   TEST_ASSERT_TRUE(f.live());
 }
@@ -97,7 +102,7 @@ void test_feed_keeps_held_palette_live() {
   f.onPalette(0);
   for (uint32_t t = 10000; t <= 120000; t += 10000) {
     f.onFeed(t);
-    TEST_ASSERT_FALSE(f.tick(t + 9999));
+    TEST_ASSERT_FALSE(f.tick(t + 9999, kStraylight));
   }
   TEST_ASSERT_TRUE(f.live());
 }
@@ -108,7 +113,7 @@ void test_feed_does_not_make_stale_live() {
   f.onFeed(100);
   TEST_ASSERT_FALSE(f.live());
   f.onPalette(0);
-  TEST_ASSERT_TRUE(f.tick(OscFreshness::kStaleMs));
+  TEST_ASSERT_TRUE(f.tick(OscFreshness::kStaleMs, kStraylight));
   f.onFeed(OscFreshness::kStaleMs + 1);
   TEST_ASSERT_FALSE(f.live());
   TEST_ASSERT_TRUE(f.onPalette(OscFreshness::kStaleMs + 2));
@@ -140,6 +145,28 @@ void test_memo_refuses_an_oversized_palette() {
   TEST_ASSERT_FALSE(memo.hold(one, 1, wisp::OscRole::Primary));
 }
 
+// A Maestro target holds the last palette however long the sender
+// stays quiet, and reset still drops it.
+void test_zero_window_never_stales() {
+  OscFreshness f;
+  f.onPalette(1000);
+  TEST_ASSERT_FALSE(f.tick(1000 + 3600000u, kMaestro));
+  TEST_ASSERT_FALSE(f.tick(1000 + 0x7FFFFFFFu, kMaestro));
+  TEST_ASSERT_TRUE(f.live());
+  f.reset();
+  TEST_ASSERT_FALSE(f.live());
+}
+
+// The window is the target's at each tick: a stream quiet past 30 s under
+// Maestro stales once the target is Straylight.
+void test_window_follows_the_target() {
+  OscFreshness f;
+  f.onPalette(0);
+  TEST_ASSERT_FALSE(f.tick(OscFreshness::kStaleMs, kMaestro));
+  TEST_ASSERT_TRUE(f.live());
+  TEST_ASSERT_TRUE(f.tick(OscFreshness::kStaleMs, kStraylight));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_first_palette_is_live_edge);
@@ -155,5 +182,7 @@ int main(int, char**) {
   RUN_TEST(test_memo_refuses_an_oversized_palette);
   RUN_TEST(test_feed_keeps_held_palette_live);
   RUN_TEST(test_feed_does_not_make_stale_live);
+  RUN_TEST(test_zero_window_never_stales);
+  RUN_TEST(test_window_follows_the_target);
   return UNITY_END();
 }

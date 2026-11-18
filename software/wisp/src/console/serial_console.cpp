@@ -110,6 +110,22 @@ void SerialConsole::handleCommand(const String& cmd) {
     apply_(DispatchResult::AppliedOscRole);
     Serial.printf("[wisp.cmd] osc role = %s (%s)\n", oscRoleName(role),
                   oscPaletteAddress(role));
+  } else if (cmd.startsWith("osc:mode ")) {
+    OscMode mode = OscMode::Straylight;
+    if (!oscModeFromName(cmd.c_str() + 9, mode)) {
+      Serial.println("[wisp.cmd] usage: osc:mode <straylight|maestro>");
+      return;
+    }
+    apply_(applyOscSettings(config_, mode, config_.oscSlot()));
+    Serial.printf("[wisp.cmd] osc mode = %s\n", oscModeName(mode));
+  } else if (cmd.startsWith("osc:slot ")) {
+    uint8_t slot = 0;
+    if (!maestroSlotFromText(cmd.c_str() + 9, slot)) {
+      Serial.println("[wisp.cmd] usage: osc:slot <1-10>");
+      return;
+    }
+    apply_(applyOscSettings(config_, config_.oscMode(), slot));
+    Serial.printf("[wisp.cmd] maestro slot = %u\n", (unsigned)slot);
   } else if (cmd == "paint:swatches on" || cmd == "paint:swatches off") {
     const bool on = cmd.endsWith("on");
     config_.setPaletteStyle(on ? PaletteStyle::Swatches

@@ -171,6 +171,71 @@ void test_corrupt_osc_role_loads_as_primary() {
   TEST_ASSERT_EQUAL_INT((int)wisp::OscRole::Primary, (int)cfg.oscRole());
 }
 
+// A fresh wisp reads Straylight, slot 1, and the stored target is Straylight's
+// own address (P1).
+void test_osc_defaults_to_straylight_slot_1() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(1, cfg.oscSlot());
+  char addr[wisp::kOscTargetAddressCap];
+  wisp::oscTargetAddress(cfg.oscTarget(), addr, sizeof(addr));
+  TEST_ASSERT_EQUAL_STRING("/straylight/palette/primary/colours", addr);
+}
+
+void test_osc_settings_persist() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setOsc(wisp::OscMode::Maestro, 7);
+  wisp::WispConfig reload;
+  reload.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)reload.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(7, reload.oscSlot());
+  const wisp::OscTarget t = reload.oscTarget();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)t.mode);
+  TEST_ASSERT_EQUAL_UINT8(7, t.slot);
+}
+
+// setOsc asks for a hold only in Osc and only when the listened address
+// moves; a resend, even after a reboot reloads the same target, never does.
+void test_set_osc_holds_only_a_live_retarget() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 3));  // source Off
+  cfg.setSourceMode(wisp::WispSourceMode::Manual);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4));
+  cfg.setSourceMode(wisp::WispSourceMode::Osc);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 5));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Straylight, 5));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Straylight, 9));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 9));
+  wisp::WispConfig reboot;
+  reboot.begin();
+  TEST_ASSERT_FALSE(reboot.setOsc(wisp::OscMode::Maestro, 9));
+}
+
+void test_corrupt_osc_settings_load_as_straylight_slot_1() {
+  {
+    Preferences p;
+    p.putUChar("oscMode", 9);
+    p.putUChar("oscSlot", 0);
+  }
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(1, cfg.oscSlot());
+  {
+    Preferences p;
+    p.putUChar("oscMode", 1);
+    p.putUChar("oscSlot", 11);
+  }
+  wisp::WispConfig high;
+  high.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)high.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(1, high.oscSlot());
+}
+
 void test_osc_address_built_per_role() {
   TEST_ASSERT_EQUAL_STRING("/straylight/palette/primary/colours",
                            wisp::oscPaletteAddress(wisp::OscRole::Primary));
@@ -315,6 +380,10 @@ int main(int, char**) {
   RUN_TEST(test_osc_role_defaults_primary_and_persists);
   RUN_TEST(test_corrupt_osc_role_loads_as_primary);
   RUN_TEST(test_osc_address_built_per_role);
+  RUN_TEST(test_osc_defaults_to_straylight_slot_1);
+  RUN_TEST(test_osc_settings_persist);
+  RUN_TEST(test_corrupt_osc_settings_load_as_straylight_slot_1);
+  RUN_TEST(test_set_osc_holds_only_a_live_retarget);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
   RUN_TEST(test_manual_palette_status_echoes_the_save_seq);

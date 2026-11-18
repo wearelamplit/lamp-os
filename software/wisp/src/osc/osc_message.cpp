@@ -1,5 +1,6 @@
 #include "osc/osc_message.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -158,6 +159,186 @@ bool oscFindFloats(const uint8_t* data, size_t len, const char* address,
   const bool ok = oscForEachMessage(data, len, findOne, &ctx);
   count = ctx.count;
   return ok && ctx.found;
+}
+
+namespace {
+
+float clamp01(float v) { return std::clamp(v, 0.0f, 1.0f); }
+
+// The 4-byte numeric argument at `pos` as a float, `i` converted. False on a
+// NaN or infinite float.
+bool readNumber(const OscMessage& msg, char tag, size_t pos, float& out) {
+  const uint32_t raw = readU32(msg.args + pos);
+  if (tag == 'i') {
+    out = static_cast<float>(static_cast<int32_t>(raw));
+    return true;
+  }
+  std::memcpy(&out, &raw, sizeof out);
+  return std::isfinite(out);
+}
+
+void readHex(const OscMessage& msg, size_t n, PaletteColor* out) {
+  for (size_t i = 0; i < n; ++i) {
+    const uint32_t v = readU32(msg.args + i * 4);
+    out[i].r = static_cast<float>((v >> 16) & 0xFF) / 255.0f;
+    out[i].g = static_cast<float>((v >> 8) & 0xFF) / 255.0f;
+    out[i].b = static_cast<float>(v & 0xFF) / 255.0f;
+    out[i].w = 0.0f;
+  }
+}
+
+bool readRgb(const OscMessage& msg, size_t colours, PaletteColor* out) {
+  for (size_t i = 0; i < colours; ++i) {
+    float ch[3];
+    for (size_t k = 0; k < 3; ++k) {
+      const size_t arg = i * 3 + k;
+      if (!readNumber(msg, msg.tags[arg], arg * 4, ch[k])) return false;
+    }
+    out[i].r = clamp01(ch[0]);
+    out[i].g = clamp01(ch[1]);
+    out[i].b = clamp01(ch[2]);
+    out[i].w = 0.0f;
+  }
+  return true;
+}
+
+enum class LayoutChannel : uint8_t { Unused, Red, Green, Blue, White, Amber, Uv };
+
+// The layout's channels into `out`; 0 for an empty or over-long layout.
+size_t parseLayout(const char* s, LayoutChannel* out) {
+  size_t width = 0;
+  while (*s) {
+    if (width == kOscLayoutMaxChannels) return 0;
+    if ((s[0] == 'a' && s[1] == 'm') || (s[0] == 'u' && s[1] == 'v')) {
+      out[width++] = s[0] == 'a' ? LayoutChannel::Amber : LayoutChannel::Uv;
+      s += 2;
+      continue;
+    }
+    switch (*s) {
+      case 'r': out[width] = LayoutChannel::Red; break;
+      case 'g': out[width] = LayoutChannel::Green; break;
+      case 'b': out[width] = LayoutChannel::Blue; break;
+      case 'w': out[width] = LayoutChannel::White; break;
+      case 'a': out[width] = LayoutChannel::Amber; break;
+      case 'u': out[width] = LayoutChannel::Uv; break;
+      default:  out[width] = LayoutChannel::Unused; break;
+    }
+    ++width;
+    ++s;
+  }
+  return width;
+}
+
+bool readLayout(const OscMessage& msg, PaletteColor* out, size_t cap,
+                size_t& count) {
+  const size_t span = stringSpan(msg.args, msg.argsLen, 0);
+  if (span == 0) return false;
+  LayoutChannel channels[kOscLayoutMaxChannels];
+  const size_t width =
+      parseLayout(reinterpret_cast<const char*>(msg.args), channels);
+  if (width == 0) return false;
+  const char* floatTags = msg.tags + 1;
+  size_t n = 0;
+  for (const char* t = floatTags; *t; ++t, ++n) {
+    if (*t != 'f' && *t != 'i') return false;
+  }
+  if (n == 0 || n % width != 0 || msg.argsLen != span + n * 4) return false;
+  const size_t colours = n / width;
+  if (colours > cap) return false;
+  for (size_t i = 0; i < colours; ++i) {
+    float r = 0, g = 0, b = 0, w = 0, amber = 0;
+    for (size_t k = 0; k < width; ++k) {
+      const size_t arg = i * width + k;
+      float v;
+      if (!readNumber(msg, floatTags[arg], span + arg * 4, v)) return false;
+      v = clamp01(v);
+      switch (channels[k]) {
+        case LayoutChannel::Red:   r = v; break;
+        case LayoutChannel::Green: g = v; break;
+        case LayoutChannel::Blue:  b = v; break;
+        case LayoutChannel::White: w = v; break;
+        case LayoutChannel::Amber: amber = v; break;
+        case LayoutChannel::Uv:
+        case LayoutChannel::Unused:
+          break;
+      }
+    }
+    out[i].r = clamp01(r + amber);
+    out[i].g = clamp01(g + kOscAmberGreen * amber);
+    out[i].b = b;
+    out[i].w = w;
+  }
+  count = colours;
+  return true;
+}
+
+}  // namespace
+
+bool oscReadColours(const OscMessage& msg, PaletteColor* out, size_t cap,
+                    size_t& count) {
+  count = 0;
+  if (!msg.tags || !out) return false;
+  if (msg.tags[0] == 's') return readLayout(msg, out, cap, count);
+  size_t n = 0;
+  bool allInt = true;
+  for (const char* t = msg.tags; *t; ++t, ++n) {
+    if (*t != 'f' && *t != 'i') return false;
+    allInt = allInt && *t == 'i';
+  }
+  if (n == 0 || msg.argsLen != n * 4) return false;
+  const size_t colours = allInt ? n : n / 3;
+  if (!allInt && n % 3 != 0) return false;
+  if (colours > cap) return false;
+  if (allInt) {
+    readHex(msg, n, out);
+  } else if (!readRgb(msg, colours, out)) {
+    return false;
+  }
+  count = colours;
+  return true;
+}
+
+namespace {
+
+struct ColoursCtx {
+  const char* address;
+  PaletteColor* out;
+  size_t cap;
+  size_t count;
+  OscColours result;
+  const char* refusedTags;
+};
+
+void findColours(const OscMessage& m, void* raw) {
+  auto* ctx = static_cast<ColoursCtx*>(raw);
+  if (ctx->result == OscColours::Read ||
+      std::strcmp(m.address, ctx->address) != 0) {
+    return;
+  }
+  size_t n = 0;
+  if (oscReadColours(m, ctx->out, ctx->cap, n)) {
+    ctx->count = n;
+    ctx->result = OscColours::Read;
+  } else {
+    ctx->result = OscColours::Refused;
+    ctx->refusedTags = m.tags;
+  }
+}
+
+}  // namespace
+
+OscColours oscFindColours(const uint8_t* data, size_t len, const char* address,
+                          PaletteColor* out, size_t cap, size_t& count,
+                          const char*& refusedTags) {
+  ColoursCtx ctx{address, out, cap, 0, OscColours::Absent, nullptr};
+  count = 0;
+  refusedTags = nullptr;
+  if (!address || !oscForEachMessage(data, len, findColours, &ctx)) {
+    return OscColours::Absent;
+  }
+  count = ctx.count;
+  refusedTags = ctx.refusedTags;
+  return ctx.result;
 }
 
 OscFeedPacket oscClassifyFeedPacket(const uint8_t* data, size_t len,

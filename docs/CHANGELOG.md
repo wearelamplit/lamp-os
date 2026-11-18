@@ -17,6 +17,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   painted-lamps preview and the palette bar follow it, the bar drawing solid
   blocks in Swatches as the wisp's ring does. A change the wisp never confirms
   goes back with "Couldn't reach the wisp." Shows only for a wisp on 1.3.8.
+- **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can
+  read a Maestro's live palette slot (1 to 10) instead of Straylight, in
+  either colour format the Maestro sends (hex, or a float layout with white
+  driving the lamps' white LEDs and amber mixed in as orange). Set it with
+  `osc:mode maestro` and `osc:slot <n>` on the wisp's console, then point the
+  Maestro at the wisp's address, port 9000. Lamps keep the last Maestro
+  palette when it goes quiet. Needs the wisp reflashed.
 
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and

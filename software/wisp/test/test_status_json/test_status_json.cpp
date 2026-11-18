@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <cstdint>
 #include <cstring>
+#include "osc/osc_target.hpp"
 #include "status/status_json.hpp"
 #include "esp_timer.h"
 #include "wire/lamp_protocol.hpp"
@@ -62,6 +63,8 @@ static wisp::WispConfigFields worstConfig() {
   c.opSeq = 4294967295u;
   std::strcpy(c.ip, "255.255.255.255");
   c.swatches = false;  // "false" is wider than "true"
+  c.oscMode = wisp::OscMode::Straylight;  // the widest mode name
+  c.oscSlot = 10;
   return c;
 }
 
@@ -425,7 +428,9 @@ void test_config_carries_every_field_at_defaults() {
   TEST_ASSERT_EQUAL_STRING("", d["ip"].as<const char*>());
   TEST_ASSERT_TRUE(d["swatches"].is<bool>());
   TEST_ASSERT_FALSE(d["swatches"].as<bool>());
-  TEST_ASSERT_EQUAL_size_t(10, d.as<JsonObject>().size());
+  TEST_ASSERT_EQUAL_STRING("straylight", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(1, d["oscSlot"].as<int>());
+  TEST_ASSERT_EQUAL_size_t(12, d.as<JsonObject>().size());
 }
 
 // The widest wispConfig. It must stay at most 255 B, since the builder
@@ -435,12 +440,35 @@ void test_config_worst_case_pinned() {
   wisp::WispConfigFields c = worstConfig();
   c.brightness = 100;
   size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
-  TEST_ASSERT_EQUAL_UINT32(191, n);
+  TEST_ASSERT_EQUAL_UINT32(227, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("GRBW", d["ledType"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT32(4294967295u, d["opSeq"].as<uint32_t>());
   TEST_ASSERT_EQUAL_STRING("255.255.255.255", d["ip"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("straylight", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(10, d["oscSlot"].as<int>());
+}
+
+// The widest mode name is the one the pin fixture uses.
+void test_config_pin_uses_the_widest_osc_mode() {
+  const size_t pinned = std::strlen(wisp::oscModeName(worstConfig().oscMode));
+  for (int m = 0; m < 256; ++m) {
+    const char* name = wisp::oscModeName(static_cast<wisp::OscMode>(m));
+    TEST_ASSERT_TRUE(std::strlen(name) <= pinned);
+  }
+}
+
+void test_config_reports_maestro_and_slot() {
+  char out[256];
+  wisp::WispConfigFields c;
+  c.oscMode = wisp::OscMode::Maestro;
+  c.oscSlot = 3;
+  TEST_ASSERT_TRUE(wisp::buildWispConfigJson(c, out, sizeof(out)) > 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_STRING("maestro", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(3, d["oscSlot"].as<int>());
 }
 
 // A buffer too small for the document yields 0, never a truncated frame.
@@ -510,6 +538,8 @@ int main(int, char**) {
   RUN_TEST(test_config_carries_every_field_at_defaults);
   RUN_TEST(test_config_worst_case_pinned);
   RUN_TEST(test_config_reports_swatches_when_set);
+  RUN_TEST(test_config_pin_uses_the_widest_osc_mode);
+  RUN_TEST(test_config_reports_maestro_and_slot);
   RUN_TEST(test_send_to_ip_prefers_ethernet_then_sta);
   RUN_TEST(test_config_too_small_buffer_returns_zero);
   RUN_TEST(test_builders_write_char_first);
