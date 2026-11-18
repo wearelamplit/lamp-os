@@ -39,6 +39,11 @@ static bool isApplied(DispatchResult r) {
   }
 }
 
+// An op's echo seq: an integer in 1..65535, else 0, which clears the echo.
+static uint16_t echoSeq(JsonVariantConst v) {
+  return v.is<uint16_t>() ? v.as<uint16_t>() : uint16_t{0};
+}
+
 DispatchResult applyOscSettings(WispConfig& config, OscMode mode,
                                 uint8_t slot, const char* address) {
   if (!address || (address[0] != '\0' && !oscCustomAddressValid(address)) ||
@@ -279,10 +284,7 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
       }
       parsed.push_back(c);
     }
-    // Anything but an integer in 1..65535 is no seq, which clears the echo.
-    JsonVariantConst seqField = doc["seq"];
-    const uint16_t seq =
-        seqField.is<uint16_t>() ? seqField.as<uint16_t>() : uint16_t{0};
+    const uint16_t seq = echoSeq(doc["seq"]);
     Serial.printf("[wisp.op] setManualPalette colors=%u seq=%u\n",
                   (unsigned)parsed.size(), (unsigned)seq);
     config_.setManualPalette(parsed, seq);
@@ -342,8 +344,9 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
       Serial.println("[wisp.op] setSwatches missing/invalid 'swatches'");
       return DispatchResult::Malformed;
     }
-    config_.setPaletteStyle(v.as<bool>() ? PaletteStyle::Swatches
-                                         : PaletteStyle::Gradient);
+    config_.setPaletteStyle(
+        v.as<bool>() ? PaletteStyle::Swatches : PaletteStyle::Gradient,
+        echoSeq(doc["seq"]));
     return DispatchResult::AppliedSwatches;
   }
 

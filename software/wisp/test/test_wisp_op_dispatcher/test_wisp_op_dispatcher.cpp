@@ -13,6 +13,7 @@
 #include <mbedtls/md.h>
 
 #include "../test_osc_address/osc_address_cases.hpp"
+#include "status/status_json.hpp"
 
 // CHAR_WISP_OP UUID 5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b40, byte-reversed (LE).
 static const uint8_t kWispOpSaltLE[16] = {
@@ -701,11 +702,79 @@ void test_set_swatches_sealed_bumps_op_seq() {
     wisp::crypto::RecentNonces nonces;
     d.setNonces(&nonces);
     const auto sealed = sealWispOp("testpass", 0x03,
-        R"({"char":"wispOp","op":"setSwatches","swatches":true})");
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":9})");
     TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches,
         (int)d.dispatch(sealed.data(), sealed.size()));
     TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
     TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+    TEST_ASSERT_EQUAL_UINT16(9, cfg.swatchesSeq());
+}
+
+// The status's swatchesSeq as the wisp builds it from the config.
+static uint32_t statusSwatchesSeq(const wisp::WispConfig& cfg) {
+    wisp::WispStatusFields f{};
+    f.source = "manual";
+    f.swatchesSeq = cfg.swatchesSeq();
+    char out[512];
+    TEST_ASSERT_TRUE(wisp::buildWispStatusJson(f, out, sizeof(out), 0) > 0);
+    JsonDocument doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, out));
+    return doc["swatchesSeq"].isNull() ? 0 : doc["swatchesSeq"].as<uint32_t>();
+}
+
+// After pick A then pick B, the status names B; a late copy of A lands
+// as A's number, so a reader waiting on B tells the two apart.
+void test_set_swatches_echoes_the_seq_of_the_last_applied_pick() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    const char* pickA = R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":41})";
+    const char* pickB = R"({"char":"wispOp","op":"setSwatches","swatches":false,"seq":42})";
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickA));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickB));
+    TEST_ASSERT_EQUAL_UINT32(42, statusSwatchesSeq(cfg));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)cfg.paletteStyle());
+
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickA));
+    TEST_ASSERT_EQUAL_UINT32(41, statusSwatchesSeq(cfg));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+    TEST_ASSERT_EQUAL_UINT32(0, cfg.opSeq());
+}
+
+// No seq, or one that is not an integer in 1..65535, means none: the op
+// sets its style and clears the previous echo.
+void test_set_swatches_without_valid_seq_clears_echo() {
+    const char* ops[] = {
+        R"({"char":"wispOp","op":"setSwatches","swatches":true})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":0})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":70000})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":-1})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":"42"})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":4.5})",
+    };
+    for (const char* op : ops) {
+        wisp::WispConfig cfg;
+        cfg.begin();
+        wisp::WispOpDispatcher d(cfg);
+        dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":false,"seq":42})");
+        TEST_ASSERT_EQUAL_UINT16(42, cfg.swatchesSeq());
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::AppliedSwatches,
+                                      (int)dispatchStr(d, op), op);
+        TEST_ASSERT_EQUAL_UINT16_MESSAGE(0, cfg.swatchesSeq(), op);
+        TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+    }
+}
+
+// A style op that sets nothing leaves the echo of the last one that did.
+void test_malformed_swatches_op_keeps_echo() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":42})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","seq":7})"));
+    TEST_ASSERT_EQUAL_UINT16(42, cfg.swatchesSeq());
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
 }
 
 void test_set_osc_maestro_applies_and_reloads() {
@@ -1083,6 +1152,9 @@ int main(int, char**) {
     RUN_TEST(test_set_swatches_needs_a_bool);
     RUN_TEST(test_set_swatches_plaintext_rejected_with_password);
     RUN_TEST(test_set_swatches_sealed_bumps_op_seq);
+    RUN_TEST(test_set_swatches_echoes_the_seq_of_the_last_applied_pick);
+    RUN_TEST(test_set_swatches_without_valid_seq_clears_echo);
+    RUN_TEST(test_malformed_swatches_op_keeps_echo);
     RUN_TEST(test_set_osc_maestro_applies_and_reloads);
     RUN_TEST(test_set_osc_without_slot_keeps_slot);
     RUN_TEST(test_set_osc_invalid_changes_nothing);

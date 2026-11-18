@@ -45,6 +45,9 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   if (f.manualSeq != 0) {
     doc["manualSeq"] = f.manualSeq;
   }
+  if (f.swatchesSeq != 0) {
+    doc["swatchesSeq"] = f.swatchesSeq;
+  }
 
   const bool isOff = f.source && std::strcmp(f.source, "off") == 0;
 

@@ -321,13 +321,14 @@ void WispConfig::bumpShuffleSeed() {
   Serial.printf("[wisp.cfg] shuffleSeed <= %u\n", (unsigned)shuffleSeed_);
 }
 
-void WispConfig::setPaletteStyle(PaletteStyle style) {
+void WispConfig::setPaletteStyle(PaletteStyle style, uint16_t seq) {
   paletteStyle_ = style;
+  swatchesSeq_ = seq;
   if (opened_) {
     prefs_.putUChar(kKeySwatches, static_cast<uint8_t>(style));
   }
-  Serial.printf("[wisp.cfg] swatches <= %d\n",
-                (int)(style == PaletteStyle::Swatches));
+  Serial.printf("[wisp.cfg] swatches <= %d seq=%u\n",
+                (int)(style == PaletteStyle::Swatches), (unsigned)seq);
 }
 
 void WispConfig::setDrift(uint32_t intervalMs, uint8_t fadePct) {

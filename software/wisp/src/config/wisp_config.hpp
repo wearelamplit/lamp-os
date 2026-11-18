@@ -99,9 +99,12 @@ class WispConfig {
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
 
-  // How lamps take colours from the palette, in every source mode.
+  // How lamps take colours from the palette, in every source mode. [seq] is
+  // the app's setSwatches seq (1..65535) echoed in the status until the next
+  // style change; 0 for none. RAM-only.
   PaletteStyle paletteStyle() const { return paletteStyle_; }
-  void setPaletteStyle(PaletteStyle style);
+  uint16_t swatchesSeq() const { return swatchesSeq_; }
+  void setPaletteStyle(PaletteStyle style, uint16_t seq = 0);
 
   // Color drift interval (ms), and the Fade setting (0..100) that sets each
   // drift step's fade length (see driftFadeMs).
@@ -152,6 +155,7 @@ class WispConfig {
   ManualPaletteColor offColor_ = {255, 150, 50, 0};
   uint8_t shuffleSeed_ = 0;
   PaletteStyle paletteStyle_ = PaletteStyle::Gradient;
+  uint16_t swatchesSeq_ = 0;
   uint32_t driftIntervalMs_ = 120000;
   uint8_t driftFadePct_ = 50;
   String name_;
