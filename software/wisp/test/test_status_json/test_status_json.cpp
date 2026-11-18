@@ -65,6 +65,7 @@ static wisp::WispConfigFields worstConfig() {
   c.swatches = false;  // "false" is wider than "true"
   c.oscMode = wisp::OscMode::Straylight;  // the widest mode name
   c.oscSlot = 10;
+  c.oscAddr = "/0123456789abcd";  // kOscCustomAddressMaxLen bytes
   return c;
 }
 
@@ -430,7 +431,9 @@ void test_config_carries_every_field_at_defaults() {
   TEST_ASSERT_FALSE(d["swatches"].as<bool>());
   TEST_ASSERT_EQUAL_STRING("straylight", d["oscMode"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(1, d["oscSlot"].as<int>());
-  TEST_ASSERT_EQUAL_size_t(12, d.as<JsonObject>().size());
+  TEST_ASSERT_TRUE(d["oscAddr"].is<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", d["oscAddr"].as<const char*>());
+  TEST_ASSERT_EQUAL_size_t(13, d.as<JsonObject>().size());
 }
 
 // The widest wispConfig. It must stay at most 255 B, since the builder
@@ -440,7 +443,7 @@ void test_config_worst_case_pinned() {
   wisp::WispConfigFields c = worstConfig();
   c.brightness = 100;
   size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
-  TEST_ASSERT_EQUAL_UINT32(227, n);
+  TEST_ASSERT_EQUAL_UINT32(255, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("GRBW", d["ledType"].as<const char*>());
@@ -448,6 +451,47 @@ void test_config_worst_case_pinned() {
   TEST_ASSERT_EQUAL_STRING("255.255.255.255", d["ip"].as<const char*>());
   TEST_ASSERT_EQUAL_STRING("straylight", d["oscMode"].as<const char*>());
   TEST_ASSERT_EQUAL_INT(10, d["oscSlot"].as<int>());
+  TEST_ASSERT_EQUAL_STRING(worstConfig().oscAddr, d["oscAddr"].as<const char*>());
+}
+
+// The pin fixture's address is as long as the rule allows.
+void test_config_pin_uses_the_longest_custom_address() {
+  TEST_ASSERT_EQUAL_size_t(wisp::kOscCustomAddressMaxLen,
+                           std::strlen(worstConfig().oscAddr));
+  TEST_ASSERT_TRUE(wisp::oscCustomAddressValid(worstConfig().oscAddr));
+}
+
+// Every address the rule takes serializes unescaped, so the widest config
+// holding any of them stays at most 255 B and every lamp takes it (P5).
+void test_config_fits_with_every_custom_address_byte() {
+  char out[256];
+  char addr[wisp::kOscCustomAddressMaxLen + 1];
+  for (int b = 1; b < 256; ++b) {
+    std::memset(addr, b, sizeof(addr) - 1);
+    addr[0] = '/';
+    addr[sizeof(addr) - 1] = '\0';
+    if (!wisp::oscCustomAddressValid(addr)) continue;
+    wisp::WispConfigFields c = worstConfig();
+    c.brightness = 100;
+    c.oscAddr = addr;
+    const size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
+    TEST_ASSERT_TRUE_MESSAGE(n > 0 && n <= 255, addr);
+    JsonDocument d;
+    TEST_ASSERT_FALSE(deserializeJson(d, out));
+    TEST_ASSERT_EQUAL_STRING(addr, d["oscAddr"].as<const char*>());
+  }
+}
+
+void test_config_reports_custom_and_address() {
+  char out[256];
+  wisp::WispConfigFields c;
+  c.oscMode = wisp::OscMode::Custom;
+  c.oscAddr = "/lamp/palette";
+  TEST_ASSERT_TRUE(wisp::buildWispConfigJson(c, out, sizeof(out)) > 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_STRING("custom", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", d["oscAddr"].as<const char*>());
 }
 
 // The widest mode name is the one the pin fixture uses.
@@ -540,6 +584,9 @@ int main(int, char**) {
   RUN_TEST(test_config_reports_swatches_when_set);
   RUN_TEST(test_config_pin_uses_the_widest_osc_mode);
   RUN_TEST(test_config_reports_maestro_and_slot);
+  RUN_TEST(test_config_pin_uses_the_longest_custom_address);
+  RUN_TEST(test_config_fits_with_every_custom_address_byte);
+  RUN_TEST(test_config_reports_custom_and_address);
   RUN_TEST(test_send_to_ip_prefers_ethernet_then_sta);
   RUN_TEST(test_config_too_small_buffer_returns_zero);
   RUN_TEST(test_builders_write_char_first);

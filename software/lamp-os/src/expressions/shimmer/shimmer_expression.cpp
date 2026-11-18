@@ -39,11 +39,15 @@ void ShimmerExpression::configureFromParameters(
 
   configureOpacity(parameters);
 
-  const uint32_t count = getParam(parameters, "count", 0);
-  const uint32_t burstMs = getParam(parameters, "durationMax", 0);
-  const bool burst = count > 0 && burstMs > 0;
-  burstCount_ = burst ? static_cast<uint16_t>(std::min<uint32_t>(count, zone_.size())) : 0;
-  burstMs_ = burst ? clampBurstMs(burstMs) : 0;
+  const bool burst = burstParams(parameters);
+  burstCount_ = burst ? static_cast<uint16_t>(
+                            std::min<uint32_t>(getParam(parameters, "count", 0), zone_.size()))
+                      : 0;
+  burstMs_ = burst ? clampBurstMs(getParam(parameters, "durationMax", 0)) : 0;
+}
+
+bool ShimmerExpression::burstParams(const ExpressionParams& parameters) {
+  return getParam(parameters, "count", 0) > 0 && getParam(parameters, "durationMax", 0) > 0;
 }
 
 void ShimmerExpression::onTrigger() {

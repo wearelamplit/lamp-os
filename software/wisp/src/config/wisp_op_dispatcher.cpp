@@ -40,9 +40,14 @@ static bool isApplied(DispatchResult r) {
 }
 
 DispatchResult applyOscSettings(WispConfig& config, OscMode mode,
-                                uint8_t slot) {
-  return config.setOsc(mode, slot) ? DispatchResult::AppliedOscRetarget
-                                   : DispatchResult::AppliedOscSettings;
+                                uint8_t slot, const char* address) {
+  if (!address || (address[0] != '\0' && !oscCustomAddressValid(address)) ||
+      (mode == OscMode::Custom && address[0] == '\0')) {
+    return DispatchResult::Malformed;
+  }
+  return config.setOsc(mode, slot, address)
+             ? DispatchResult::AppliedOscRetarget
+             : DispatchResult::AppliedOscSettings;
 }
 
 DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
@@ -190,9 +195,25 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
       }
       slot = static_cast<uint8_t>(slotVar.as<int>());
     }
-    Serial.printf("[wisp.op] setOsc mode=%s slot=%u\n", oscModeName(mode),
-                  (unsigned)slot);
-    return applyOscSettings(config_, mode, slot);
+    const char* address = config_.oscAddress();
+    JsonVariantConst addressVar = doc["address"];
+    if (!addressVar.isNull()) {
+      // A JSON string can carry \u0000; the C string would end there and
+      // pass the rule on what precedes it. A sent "" would clear the address.
+      const JsonString sent = addressVar.as<JsonString>();
+      address = sent.c_str() && sent.size() > 0 &&
+                        std::strlen(sent.c_str()) == sent.size()
+                    ? sent.c_str()
+                    : nullptr;
+    }
+    const DispatchResult res = applyOscSettings(config_, mode, slot, address);
+    if (res == DispatchResult::Malformed) {
+      Serial.println("[wisp.op] setOsc invalid 'address', or custom with none");
+      return res;
+    }
+    Serial.printf("[wisp.op] setOsc mode=%s slot=%u address='%s'\n",
+                  oscModeName(mode), (unsigned)slot, config_.oscAddress());
+    return res;
   }
 
   if (strcmp(op, "setOffColor") == 0) {

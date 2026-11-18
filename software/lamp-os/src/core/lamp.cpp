@@ -245,6 +245,7 @@ lamp::FadeOutBehavior shadeFadeOutBehavior;
 lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
 lamp::ExpressionManager expressionManager;
+lamp::SporeTint sporeTint;
 lamp::ExpressionObserverRegistry expressionObserverRegistry;
 lamp::ArrivalNotifier arrivalNotifier;
 lamp::Config config;
@@ -1269,6 +1270,7 @@ void lamp::Lamp::tick() {
   // a remote cascade arrived) whose animations have finished. AFTER tick so
   // the final frame of the animation is drawn before removal.
   expressionManager.gcTransients();
+  sporeTint.tick(expressionManager);
   expressionManager.tickCascade(millis());
   expressionManager.retireStale(millis());
 

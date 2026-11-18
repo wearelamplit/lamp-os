@@ -33,6 +33,7 @@ void ShiftyExpression::configureFromParameters(const ExpressionParams& parameter
   shiftDurationMinMs = shiftDurationMin * kMsPerSecond;
   shiftDurationMaxMs = shiftDurationMax * kMsPerSecond;
   fadeDurationMs = fadeDuration * kMsPerSecond;
+  transientFadeBackMs_ = getParam(parameters, "durationMax", 0) * kMsPerSecond;
 
   const uint16_t window = windowSize();
   zone_ = resolveZone(parameters, window);
@@ -87,8 +88,9 @@ void ShiftyExpression::populatePixelStartOffsets(bool fadingBack) {
   const uint16_t n = zone_.size();
   pixelStartOffsetMs_.assign(static_cast<size_t>(fb->pixelCount), 0u);
   maxAppliedOffsetMs_ = 0;
-  if (n == 0 || fadeDurationMs < 2) return;
-  const uint32_t maxOffset = fadeDurationMs / 2;
+  const uint32_t fadeMs = phaseFadeMs();
+  if (n == 0 || fadeMs < 2) return;
+  const uint32_t maxOffset = fadeMs / 2;
   const uint32_t denom = (n > 1u) ? static_cast<uint32_t>(n - 1) : 1u;
   for (uint16_t j = 0; j < n; j++) {
     const int idx = static_cast<int>(zone_.posMin) + static_cast<int>(j);
@@ -108,6 +110,11 @@ void ShiftyExpression::populatePixelStartOffsets(bool fadingBack) {
     pixelStartOffsetMs_[static_cast<size_t>(idx)] = offset;
     if (offset > maxAppliedOffsetMs_) maxAppliedOffsetMs_ = offset;
   }
+}
+
+uint32_t ShiftyExpression::phaseFadeMs() const {
+  return state == FADING_BACK && isTransient && transientFadeBackMs_ > 0 ? transientFadeBackMs_
+                                                                         : fadeDurationMs;
 }
 
 uint32_t ShiftyExpression::getRandomShiftDuration() {
@@ -132,7 +139,7 @@ void ShiftyExpression::onUpdate() {
 
   // Directional fills stagger each pixel's fade start; the window must outlast
   // the last-staged pixel or the edges freeze mid-fade (0 for uniform).
-  const uint32_t fadeWindowMs = fadeDurationMs + maxAppliedOffsetMs_;
+  const uint32_t fadeWindowMs = phaseFadeMs() + maxAppliedOffsetMs_;
 
   switch (state) {
     case FADING_TO_PALETTE:
@@ -159,7 +166,7 @@ void ShiftyExpression::onUpdate() {
         Serial.printf("[shifty] complete t=%lu\n", (unsigned long)nowMs);
 #endif
         // Cap the counter; the next nextFrame() flips PLAYING_ONCE to
-        // STOPPED and onComplete chains glitchy.
+        // STOPPED, and onComplete runs.
         frames = frame + 1;
       }
       break;
@@ -174,20 +181,21 @@ void ShiftyExpression::onUpdate() {
   // don't consult the factor.
   if (state == FADING_TO_PALETTE || state == FADING_BACK) {
     const uint32_t elapsed = uptimeSince(fadeStartMs);
-    cachedFadeAtEnd_ = (elapsed >= fadeDurationMs);
+    const uint32_t fadeMs = phaseFadeMs();
+    cachedFadeAtEnd_ = (elapsed >= fadeMs);
     // When cachedFadeAtEnd_ is true, draw() short-circuits to the end color
     // and never reads cachedFadeFactor_, so a divide-by-zero in
-    // computeLinearFactor (when fadeDurationMs == 0) is unreachable here.
+    // computeLinearFactor (when fadeMs == 0) is unreachable here.
     cachedFadeFactor_ = cachedFadeAtEnd_
                             ? 0u
-                            : computeLinearFactor(easeStep(elapsed, fadeDurationMs, easing_),
-                                                  fadeDurationMs);
+                            : computeLinearFactor(easeStep(elapsed, fadeMs, easing_), fadeMs);
   }
 }
 
 void ShiftyExpression::onComplete() {
-  // Always trigger glitch on unshift if glitchy is available and the fade back just finished
-  if (state == IDLE) {
+  // A configured shift chains glitchy once its fade back finishes; a one-shot
+  // transient ends on its own.
+  if (state == IDLE && !isTransient) {
     if (context_ && context_->expressionManager) {
 #ifdef LAMP_DEBUG
       Serial.println("[shifty] onComplete IDLE → triggerExpression(glitchy)");
@@ -246,7 +254,8 @@ void ShiftyExpression::draw() {
         }
       } else {
         const uint32_t elapsed = uptimeSince(fadeStartMs);
-        const uint32_t perFade = (fadeDurationMs > 1u) ? fadeDurationMs / 2u : 1u;
+        const uint32_t fadeMs = phaseFadeMs();
+        const uint32_t perFade = (fadeMs > 1u) ? fadeMs / 2u : 1u;
         for (int i = zone_.posMin; i <= zone_.posMax; i++) {
           if (i >= fb->pixelCount) break;
           const Color live = fb->buffer[i];

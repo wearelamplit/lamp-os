@@ -11,11 +11,12 @@ namespace lamp {
 
 // Make-less descriptor data the .cpp composes via withMake(); native-test
 // seam so test_builtin_descriptors pins the production catalog.
+inline constexpr uint8_t kShiftyFillBloom = 3;
 inline constexpr EnumOption kShiftyFillOpts[] = {
   { .value = 0, .label = "Uniform" },
   { .value = 1, .label = "Up"      },
   { .value = 2, .label = "Down"    },
-  { .value = 3, .label = "Bloom"   },
+  { .value = kShiftyFillBloom, .label = "Bloom" },
 };
 inline constexpr ParamSpec kShiftyParams[] = {
   {
@@ -106,6 +107,11 @@ class ShiftyExpression : public Expression {
   uint32_t shiftDurationMinMs = 300000;  // 5 min default
   uint32_t shiftDurationMaxMs = 600000;  // 10 min default
   uint32_t fadeDurationMs = 60000;
+  // A transient fades back over `durationMax` seconds when set, so a one-shot
+  // tint can linger after a short fade in; 0, or a configured instance, fades
+  // back over fadeDuration.
+  uint32_t transientFadeBackMs_ = 0;
+  uint32_t phaseFadeMs() const;
 
   // Runtime state
   // Phase starts on lamp::uptimeMs(), since home mode can freeze a shift for
@@ -153,6 +159,14 @@ class ShiftyExpression : public Expression {
    */
   void configureFromParameters(const ExpressionParams& parameters) override;
   static const ExpressionDescriptor& classDescriptor();
+
+  // The longest one shift cycle runs, fade in through fade back, at these
+  // lengths and fill. A directional fill stretches each fade by up to half.
+  static constexpr uint32_t maxCycleMs(uint32_t fadeMs, uint32_t holdMs, uint32_t fadeBackMs,
+                                       uint8_t fillMode) {
+    const uint32_t stretch = fillMode == 0 ? 0 : 1;
+    return fadeMs + stretch * (fadeMs / 2) + holdMs + fadeBackMs + stretch * (fadeBackMs / 2);
+  }
   const ExpressionDescriptor& descriptor() const override;
 
   void draw() override;
