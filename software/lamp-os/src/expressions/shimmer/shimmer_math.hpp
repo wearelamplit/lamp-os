@@ -230,10 +230,12 @@ inline Color shimmerPaint(Color anchor, float heat, const FireStyle& s,
 // A burst is a one-shot trigger: `count` cells spark at once, rise for the
 // first half of `burstMs`, fall for the second, and the instance completes at
 // burstMs. Six step constants span the burst so a spark reaches ~95% of its
-// target and falls back to ~5% of it.
+// target and falls back to ~5% of it. A burst longer than kBurstSwellMaxMs
+// keeps that burst's rise and fall and holds its stars at peak between them.
 inline constexpr uint32_t kBurstStepsPerBurst = 6;
 inline constexpr uint32_t kBurstMinMs = 100;
-inline constexpr uint32_t kBurstMaxMs = 2000;
+inline constexpr uint32_t kBurstSwellMaxMs = 2000;
+inline constexpr uint32_t kBurstMaxMs = 10000;
 
 // Heat at which a Twinkle cell paints its own anchor (brightness gain and floor
 // mix cancel) on any channel below full scale. A burst leaves cooler cells
@@ -244,10 +246,12 @@ inline uint32_t clampBurstMs(uint32_t ms) {
   return std::clamp(ms, kBurstMinMs, kBurstMaxMs);
 }
 inline uint32_t burstStepMs(uint32_t burstMs) {
-  return std::max<uint32_t>(1, burstMs / kBurstStepsPerBurst);
+  return std::max<uint32_t>(1, std::min(burstMs, kBurstSwellMaxMs) / kBurstStepsPerBurst);
 }
 inline bool burstFalling(uint32_t elapsedMs, uint32_t burstMs) {
-  return elapsedMs >= burstMs / 2;
+  const uint32_t fallFromMs =
+      burstMs <= kBurstSwellMaxMs ? burstMs / 2 : burstMs - kBurstSwellMaxMs / 2;
+  return elapsedMs >= fallFromMs;
 }
 inline bool burstDone(uint32_t elapsedMs, uint32_t burstMs) {
   return elapsedMs >= burstMs;
