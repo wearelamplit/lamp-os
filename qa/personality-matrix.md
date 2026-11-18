@@ -169,11 +169,13 @@ toward A, B and C Ambivert. Yawn is built in (no app or Web Config entry),
 so A is the yawn source: make A an introvert and tire it (three greetings
 inside 5 min, `[social] introvert tired`). A logs `[fondness] yawn tired
 p=35%` about every 90 s while tired, and none once rested. `yawn.set
-tiredYawnPct 100` on A makes every roll fire: each time A yawns, B logs
-`[fondness] yawn from <A> hop 1 p=<n>%` (about 60 times 8/(8 + lamps near))
-and, on `fired`, yawns ~0.5 s later; C logs nothing for A (it may log
-`hop 2` for B's yawn-back). `yawn.set yawnRollCooldownMs 600000` on B: A's
-next yawn about 90 s later logs `cooldown` on B. `yawn.set yawn.smitten 100` on B makes B yawn back every roll;
+tiredYawnPct 100` on A makes every roll fire. B rolls once per peer per
+`yawnRollCooldownMs` (5 min): A's first yawn logs `[fondness] yawn from <A>
+hop 1 p=<n>%` on B (about 60 times 8/(8 + lamps near)) and, on `fired`, B
+yawns ~0.5 s later; A's next three yawns log `cooldown`. C logs nothing for
+A (it may log `hop 2` for B's yawn-back). `yawn.set yawnRollCooldownMs
+60000` on B makes every A yawn roll; set it back to 300000 and `cooldown`
+returns. `yawn.set yawn.smitten 100` on B makes B yawn back every roll;
 when B's yawn reaches A inside A's minute floor A logs `self`. Home mode on
 for B: no `[fondness] yawn` line on B. `yawn.get` confirms the numbers; a
 reboot restores them.
@@ -197,7 +199,8 @@ reboot restores them.
   after; one hint per window, faint, toward stop 0, scene unchanged after;
   neither line in home mode.
 - M8: tired lines on A only while it is tired; B logs yawn-back lines for A
-  and C none for A; `cooldown` on B inside the 10 min window; `self` on A for B's yawn; no yawn line in home mode.
+  and C none for A; `cooldown` on B for A's yawns inside the 5 min window
+  and none at 1 min; `self` on A for B's yawn; no yawn line in home mode.
 
 ## Not covered here
 
