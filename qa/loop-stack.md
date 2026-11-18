@@ -82,14 +82,16 @@ real payloads (2–4 levels).
 
 **C. Web-server start on the loop task.**
 ```
-loopTask → Lamp::setup [528] (today) / Lamp::tick → webapp::tick [32] (post-redesign)
-         → webapp::begin [256] → { SPIFFS.begin → SPIFFS_mount (prebuilt, deep) ;
-                                    new AsyncWebServer [80] ; MDNS.begin → mdns init (prebuilt) }
+loopTask → Lamp::tick [32] → webapp::tick [32]
+         → { startServer → { SPIFFS.begin → SPIFFS_mount (prebuilt, deep) ;
+                             new AsyncWebServer [80] } ;
+             MDNS.begin → mdns init (prebuilt) }
 ```
-≈ **2.6 KB** analytically, but the SPIFFS-mount + mdns-init prebuilt tail is
-unquantified and has real appetite — **treat as MEASURE, not compute.** The
-pending webui redesign moves `webapp::begin` from `setup()` into `webapp::tick()`;
-either way it runs on `loopTask`, so the ceiling must cover it.
+The SPIFFS-mount + mdns-init prebuilt tail is unquantified and has real
+appetite, so **treat this chain as MEASURE, not compute.** `fs_ota`'s digest
+passes run the same SPIFFS mount on `loopTask` too (`Lamp::setup →
+fs_ota::begin` at boot, `drainFirmwareControl → fsVerify` after a web UI
+update), through `esp_vfs_spiffs_register`.
 
 **D. Render pipeline / greeting / personality.** `Compositor::tick` → virtual
 `control()`/`draw()` → color/gradient math. All frames 32–192 B; heap-backed

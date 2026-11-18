@@ -411,9 +411,8 @@ static void onWsEvent(AsyncWebSocket* /*srv*/, AsyncWebSocketClient* /*client*/,
 static void onApStaConnected(arduino_event_id_t) { s_pendingServerStart = true; }
 static void onApStaDisconnected(arduino_event_id_t) { s_pendingServerStop = true; }
 
-// Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
-// silently wiped. A genuinely blank/corrupt partition just yields no UI (BLE
-// still works); production USB flash always lays down a valid image.
+// Never auto-format, so an FS-OTA'd image that mounts inconsistent is never
+// silently wiped. A blank or corrupt partition just serves no UI.
 static void mountUiFiles() {
   SPIFFS.begin(/*formatOnFail=*/false, kUiFsBasePath);
 }

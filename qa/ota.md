@@ -196,13 +196,23 @@ tap, opened before the transfer so the open's reset lands on the old image.
     every line below is `LAMP_DEBUG`-only) whose web UIs differ: the source
     carries a signed web UI (it has `fw.lsig`, so its boot line reads
     `[fs_ota] online; ... digestReady=1`), the peer any other, such as a dev
-    one from `npm run lamp:flashfs`. Tap both. The
-    source logs `[fwdist] OFFER -> <peer>`, the peer `[fw_receiver] OFFER from
-    <source> ... → ACCEPT`, then `[fs_ota] applied (no reboot); digestReady=1
-    version=0x...`, and the source `[fwdist] RESULT success from <peer>`. Join
-    the peer's Wi-Fi from a phone and open the config page: it loads. Every
-    other lamp in range on that firmware version with a different web UI takes
-    the same update, so power down any whose web UI must stay as it is.
+    one from `npm run lamp:flashfs`. Give the source its signed web UI with
+    `npm run ui:build`, then in `software/lamp-os`
+    `LAMP_FIRMWARE_CHANNEL=beta PLATFORMIO_UPLOAD_PORT=<port> pio run -e
+    upesy_wroom_standard -t uploadfs` (`sign_fs.py` stamps `fw.lsig` with the
+    root `VERSION`). That stamp must equal the running firmware's version, or
+    the source logs `digestReady=1` and never offers. Run the peer on
+    `scripts/bench_cmd.py <peer-port> --stdin -o <log>` in place of the tap
+    and type `heap.get` before the transfer. The source logs `[fwdist] OFFER
+    -> <peer>`, the peer `[fw_receiver] OFFER from <source> ... → ACCEPT`,
+    then `[fs_ota] applied (no reboot); digestReady=1 version=0x...`, and the
+    source `[fwdist] RESULT success from <peer>`. Type `heap.get` again
+    before anyone joins the peer's Wi-Fi: `free` is not ~4.4 KB (one SPIFFS
+    mount) below the first reading.
+    Then join the peer's Wi-Fi from a phone and open the config page: it
+    loads. Every other lamp in range on that firmware version with a different
+    web UI takes the same update, so power down any whose web UI must stay as
+    it is.
 
 ## Indicator expectations
 
@@ -270,7 +280,8 @@ tap, opened before the transfer so the open's reset lands on the old image.
   same goes for the halt on a malformed `HwConfig` (compiled in, so no bench
   build reaches it) and for the restart after IDF refuses a rollback.
 - A filesystem offer sent or taken while unverified: `test_ota_offer` pins
-  the send gate, and the rig has no pair of lamps whose web UIs differ.
+  the send gate, and no row combines row 10's unverified window with row
+  12's pair of lamps whose web UIs differ.
 - A hang in an updated lamp's setup: `loopwd.hangsetup` restarts the lamp as
   it arms, so the hang lands on the old image. Row 8's loop hang takes the
   same reset path.

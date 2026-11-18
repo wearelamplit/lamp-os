@@ -611,12 +611,12 @@ void FirmwareReceiver::onDoneOnLoop(const PendingFirmwareControl& ctrl,
     // Pause so the broadcast leaves the radio before the CPU resets.
     delay(kPostResultPauseMs);
     // exitQuiet before reboot (firmware path) and before returning to Idle
-    // (FS path, which remounts without rebooting). Release the hold so the FS
+    // (FS path, which applies without rebooting). Release the hold so the FS
     // path leaves quiet accounting balanced; the firmware path reboots past it.
     ::lamp::ota_quiet_mode::exitQuiet();
     quietHold_.release();
-    // FS image OTA finalizes without a reboot: SPIFFS is only read by the
-    // onboarding webapp, which mounts it when it serves. Firmware OTA reboots.
+    // FS image OTA finalizes without a reboot, because every reader of the
+    // web UI files mounts them after the write. Firmware OTA reboots.
     if (fsHooks_ && fsHooks_->finalize) {
       fsHooks_->finalize();
       state_ = State::Idle;
