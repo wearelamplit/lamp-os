@@ -5,53 +5,6 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
-
-### Fixed
-- **Saving a wisp palette with white on many colours keeps the white on all of
-  them.** The last colour could lose its white before.
-- **The wisp palette editor never shows an empty or out-of-date palette as
-  the wisp's own.** The wisp now says which palette it stores, an empty one
-  included, and the editor waits for a read that matches. After the lamp
-  reconnects it shows "Reading palette from wisp…" until the wisp's next
-  status, since another phone may have changed the palette meanwhile. Needs
-  the wisp reflashed.
-- **A wisp palette save shows saved only once the wisp has stored that
-  save.** The wisp echoes each save back, and the app waits for that echo,
-  even if the wisp switched to Osc or Off meanwhile; an empty save no longer
-  waits on an extra status read. Needs the wisp reflashed.
-- **A wisp setting that never reached the wisp stops showing.** A few
-  seconds after you change a wisp's drift, brightness or LED strip, the app
-  reads the wisp's settings back, so a change the wisp didn't get goes back
-  to what the wisp runs.
-- **A lamp that just booted or just found a new wisp shows "Reading palette
-  from wisp…"** until the wisp's own status arrives, so Save can't write the
-  lamp's empty palette over the wisp's.
-- **A wisp palette Save never writes over a palette the app hasn't read.**
-  While the editor shows "Reading palette from wisp…" (after a reconnect, or
-  a new display wisp, until the wisp's next status) Save sends nothing, and a
-  save already resending stops; a palette sheet left open greys its Save
-  under "Reading palette from wisp…" until the palette is read, keeping your
-  edits. The wisp screen also redraws when only the palette's state
-  changes, so the loading line shows without another tap.
-- **The wisp settings screen fills in even when the lamp missed the wisp's
-  settings.** The app asks the wisp again and keeps reading until they
-  arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
-
-### Changed
-- **A wisp's Manual palette holds up to 16 colours**, the most a Straylight
-  palette carries (the editor held 10). Needs the wisp reflashed.
-- **The wisp palette editor needs the wisp reflashed.** A wisp on 1.3.8 or
-  older doesn't say which palette it stores, so the editor shows "Reading
-  palette from wisp…" for it and Save sends nothing.
-- **A wrong current password on a wisp takes up to 10 s to report.** The app
-  waits that long for the wisp to confirm a password change.
-- **The wisp's status no longer repeats its settings**, which keeps it inside
-  the lamp's Bluetooth limit. The app reads them only from the wisp's
-  settings message. Update the app on every phone that opens a wisp first:
-  an older app shows default settings or never loads them. Through a lamp
-  older than 1.2.8 the wisp's settings don't show.
-
 ## 1.3.8
 
 ### Added
@@ -94,6 +47,35 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   machine-wide build lock); `lamp:flash:release` always downloads a fresh
   `beta`/`stable`; release tags include the wisp image; the lamp build's
   compile cache is actually off.
+- **Saving a wisp palette with white on many colours keeps the white on all of
+  them.** The last colour could lose its white before.
+- **The wisp palette editor never shows an empty or out-of-date palette as
+  the wisp's own.** The wisp now says which palette it stores, an empty one
+  included, and the editor waits for a read that matches. After the lamp
+  reconnects it shows "Reading palette from wisp…" until the wisp's next
+  status, since another phone may have changed the palette meanwhile. Needs
+  the wisp reflashed.
+- **A wisp palette save shows saved only once the wisp has stored that
+  save.** The wisp echoes each save back, and the app waits for that echo,
+  even if the wisp switched to Osc or Off meanwhile; an empty save no longer
+  waits on an extra status read. Needs the wisp reflashed.
+- **A wisp setting that never reached the wisp stops showing.** A few
+  seconds after you change a wisp's drift, brightness or LED strip, the app
+  reads the wisp's settings back, so a change the wisp didn't get goes back
+  to what the wisp runs.
+- **A lamp that just booted or just found a new wisp shows "Reading palette
+  from wisp…"** until the wisp's own status arrives, so Save can't write the
+  lamp's empty palette over the wisp's.
+- **A wisp palette Save never writes over a palette the app hasn't read.**
+  While the editor shows "Reading palette from wisp…" (after a reconnect, or
+  a new display wisp, until the wisp's next status) Save sends nothing, and a
+  save already resending stops; a palette sheet left open greys its Save
+  under "Reading palette from wisp…" until the palette is read, keeping your
+  edits. The wisp screen also redraws when only the palette's state
+  changes, so the loading line shows without another tap.
+- **The wisp settings screen fills in even when the lamp missed the wisp's
+  settings.** The app asks the wisp again and keeps reading until they
+  arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
 
 ### Changed
 - **More refused writes show on the debug serial** as `[drop]` lines.
@@ -101,6 +83,18 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   builds.** Builds made with `npm run app:run`, `app:bridge`, `app:bridge:ios`
   and `app:install` show `App 1.1.0+1 (<sha>)`, with `-dirty` when the tree had
   uncommitted changes at launch.
+- **A wisp's Manual palette holds up to 16 colours**, the most a Straylight
+  palette carries (the editor held 10). Needs the wisp reflashed.
+- **The wisp palette editor needs the wisp reflashed.** A wisp on 1.3.8 or
+  older doesn't say which palette it stores, so the editor shows "Reading
+  palette from wisp…" for it and Save sends nothing.
+- **A wrong current password on a wisp takes up to 10 s to report.** The app
+  waits that long for the wisp to confirm a password change.
+- **The wisp's status no longer repeats its settings**, which keeps it inside
+  the lamp's Bluetooth limit. The app reads them only from the wisp's
+  settings message. Update the app on every phone that opens a wisp first:
+  an older app shows default settings or never loads them. Through a lamp
+  older than 1.2.8 the wisp's settings don't show.
 
 ## 1.3.7
 
