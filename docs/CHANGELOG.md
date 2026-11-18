@@ -29,7 +29,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   what to set on the Maestro ("send palette slot 3 to 192.168.1.42, port
   9000"), with the send-to address under both. A change shows at once and
   goes back with "Couldn't reach the wisp." if the wisp never confirms it.
-  Shows only for a wisp on 1.3.8.
+  Needs the wisp reflashed with the Maestro firmware above; an older wisp
+  shows the Straylight role picker and asks to be updated.
 
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and

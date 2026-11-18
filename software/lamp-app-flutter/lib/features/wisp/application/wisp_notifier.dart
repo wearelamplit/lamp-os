@@ -263,7 +263,7 @@ class WispNotifier extends _$WispNotifier {
       _configReads;
 
   final _stylePick = _ConfigPick<PaletteStyle>();
-  final _oscPick = _ConfigPick<OscPick>();
+  final _oscPick = _ConfigPick<_OscPick>();
 
   /// One attempt's confirm window for a setting that confirms on a config
   /// read: the op's status, the config 250 ms to 2 s after it, then the
@@ -1203,7 +1203,7 @@ class WispNotifier extends _$WispNotifier {
   Future<void> setMaestroSlot(int slot) =>
       _sendOsc((mode: OscMode.maestro, slot: slot));
 
-  Future<void> _sendOsc(OscPick osc) => _sendConfigPick(
+  Future<void> _sendOsc(_OscPick osc) => _sendConfigPick(
         pick: _oscPick,
         value: osc,
         shows: (c) =>
@@ -1223,7 +1223,9 @@ class WispNotifier extends _$WispNotifier {
   /// still shows it. A pick whose attempts all go unconfirmed stands if the
   /// held config shows it by then, else rolls back to the held setting and
   /// throws. A newer pick on the same [pick] supersedes this one, which then
-  /// stops resending and returns.
+  /// stops resending and returns. Once another wisp is shown it stops
+  /// resending, since the lamp would relay the op to that wisp, and counts
+  /// as unconfirmed.
   Future<void> _sendConfigPick<T extends Object>({
     required _ConfigPick<T> pick,
     required T value,
@@ -1249,7 +1251,8 @@ class WispNotifier extends _$WispNotifier {
       confirm: () => pickBack
           ? Future<bool>.delayed(debugConfigConfirmWindow, () => false)
           : _confirmConfigRead(mac, sentAfter, shows),
-      isSuperseded: () => pick.epoch != epoch,
+      isSuperseded: () =>
+          pick.epoch != epoch || state.value?.wispMac != mac,
     );
     if (_disposed || pick.epoch != epoch) return;
     pick.clear();
@@ -1579,8 +1582,8 @@ class WispNotifier extends _$WispNotifier {
 
 }
 
-/// An OSC sender pick: a null [slot] keeps the wisp's stored Maestro slot.
-typedef OscPick = ({OscMode mode, int? slot});
+/// An OSC sender pick. A null [slot] keeps the wisp's stored Maestro slot.
+typedef _OscPick = ({OscMode mode, int? slot});
 
 /// A wisp setting sent and not yet confirmed, and the wisp it went to. Laid
 /// over every status from that wisp, so a config read from before the wisp

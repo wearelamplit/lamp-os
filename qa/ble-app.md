@@ -327,7 +327,8 @@ home at the pick and take the palette when it lands; the wisp's serial
 prints `[osc] now /palette/live/3`. Tap Straylight and back: the slot is kept.
 Power the wisp off and tap Straylight: within 45 s the switch goes back to
 Maestro with "Couldn't reach the wisp. Try again." A wisp before the Maestro
-firmware shows the role picker alone, no switch.
+firmware shows the role picker and "Update this wisp to use Maestro.", no
+switch.
 
 ## Pass criteria
 

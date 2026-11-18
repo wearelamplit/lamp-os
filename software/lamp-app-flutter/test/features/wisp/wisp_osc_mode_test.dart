@@ -272,6 +272,38 @@ void main() {
       await done;
     });
 
+    // The lamp relays every resend to the wisp it shows now.
+    test('a pick stops resending once another wisp is shown', () async {
+      final (ble, _, n) = await open();
+
+      Object? error;
+      final done = n
+          .setOscMode(OscMode.maestro)
+          .catchError((Object e) => error = e);
+      await pumpEventQueue();
+      _notify(ble, _status(seen: 500, mac: '11:22:33:44:55:66'));
+      await done;
+
+      expect(_oscOps(ble), hasLength(1));
+      expect(
+        error,
+        isNotNull,
+        reason: 'never confirmed by the wisp it went to',
+      );
+    });
+
+    test('the same pick again while it confirms sends nothing more', () async {
+      final (ble, _, n) = await open();
+
+      final first = n.setMaestroSlot(7).catchError((Object _) {});
+      await pumpEventQueue();
+      await n.setMaestroSlot(7);
+      await pumpEventQueue();
+
+      expect(_oscOps(ble), hasLength(1));
+      await first;
+    });
+
     test('a brightness drag keeps the held sender and slot', () async {
       final (ble, c, n) = await open(config: _config(mode: 'maestro', slot: 3));
 
@@ -378,6 +410,7 @@ void main() {
       expect(modeSwitch, findsNothing);
       expect(find.text('Maestro'), findsNothing);
       expect(rolePicker, findsOneWidget);
+      expect(find.text('Update this wisp to use Maestro.'), findsOneWidget);
       expect(find.textContaining('Waiting for Straylight'), findsOneWidget);
       expect(sendTo, findsOneWidget);
     });
@@ -391,6 +424,7 @@ void main() {
 
         expect(selected(tester), {OscMode.straylight});
         expect(rolePicker, findsOneWidget);
+        expect(find.byKey(const Key('wisp-osc-update-wisp')), findsNothing);
         expect(slotPicker, findsNothing);
         expect(find.textContaining('Waiting for Straylight'), findsOneWidget);
         expect(sendTo, findsOneWidget);

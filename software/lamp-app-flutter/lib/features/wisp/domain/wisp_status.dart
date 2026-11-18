@@ -217,7 +217,7 @@ class WispStatus {
   final PaletteStyle? paletteStyle;
 
   /// Which OSC sender the wisp listens to, from its `wispConfig`. Null until
-  /// a config carrying it is merged: a wisp that predates it follows only
+  /// a config carrying it is merged. A wisp that predates it follows only
   /// Straylight.
   final OscMode? oscMode;
 

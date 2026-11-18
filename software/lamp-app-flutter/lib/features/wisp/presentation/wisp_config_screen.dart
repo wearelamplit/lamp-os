@@ -234,6 +234,14 @@ class _SourcesTabState extends State<_SourcesTab> {
           current: status.oscRole,
           onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
         ),
+      if (status.oscMode == null) ...[
+        const SizedBox(height: AppSpace.sm),
+        Text(
+          'Update this wisp to use Maestro.',
+          key: const Key('wisp-osc-update-wisp'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
       if (mode == OscMode.maestro)
         MaestroSlotPicker(
           current: status.oscSlot,
