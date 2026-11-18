@@ -31,6 +31,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the wisp's console; the wisp reports the address in its settings. Needs the
   wisp reflashed.
 
+- **The wisp numbers each Gradient/Swatches pick.** A `setSwatches` from
+  the app can carry a number the wisp echoes in its status as `swatchesSeq`,
+  so the app can tell its latest pick landed rather than a late copy of an
+  earlier one. Needs the wisp reflashed; an older app's pick works as before.
+
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
