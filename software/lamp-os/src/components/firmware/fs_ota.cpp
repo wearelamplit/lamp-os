@@ -65,7 +65,8 @@ constexpr size_t kPassMaxFiles = 1;
 // Mounts the web UI files for one digest pass and unmounts them after, so no
 // mount heap outlives the pass. Mounts through IDF directly, since an Arduino
 // FS mount creates a mutex that is never freed. A mount the web server holds
-// is reused and left in place.
+// is reused and left in place. Loop task only, where the web server also
+// mounts, so the server never mounts while a pass holds its own mount.
 class DigestPassMount {
  public:
   DigestPassMount() {
@@ -136,7 +137,7 @@ bool enumerateManifest(std::vector<lamp::firmware::FsManifestFile>& files,
         std::snprintf(path, sizeof(path), "%s/%s", mount, entry->d_name);
     if (len < 0 || len >= static_cast<int>(sizeof(path))) return false;
     struct stat st;
-    if (stat(path, &st) != 0) return false;
+    if (stat(path, &st) != 0) continue;
     // Canonical name: the basename, so it matches sign_fs.py's flat basenames
     // (the host/device agreement hinge).
     const std::string name = pathToFileName(entry->d_name);
