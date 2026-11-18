@@ -123,8 +123,10 @@ void test_slot_from_text() {
   TEST_ASSERT_EQUAL_UINT8(1, slot);
   TEST_ASSERT_TRUE(wisp::maestroSlotFromText("10", slot));
   TEST_ASSERT_EQUAL_UINT8(10, slot);
-  for (const char* bad : {"0", "11", "3x", "x3", "", " 3", "-1", "+3",
-                          "99999999999", "4294967299"}) {
+  // "1/" and "0:" hold bytes just outside '0'..'9' that a digit check
+  // without both bounds would read as 9 and 10.
+  for (const char* bad : {"0", "11", "3x", "x3", "", " 3", "-1", "+3", "1/",
+                          "0:", "99999999999", "4294967299"}) {
     slot = 42;
     TEST_ASSERT_FALSE_MESSAGE(wisp::maestroSlotFromText(bad, slot), bad);
     TEST_ASSERT_EQUAL_UINT8(42, slot);
