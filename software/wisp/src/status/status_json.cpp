@@ -48,7 +48,7 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
 
   const bool isOff = f.source && std::strcmp(f.source, "off") == 0;
 
-  // Add-if-fits in priority order. offColor, oscRole and paletteIdPrefix
+  // Add-if-fits in priority order. offColor and oscRole
   // lead: a dropped offColor silently renders the app's amber default and a
   // dropped oscRole shows the wrong role selected. oscRole rides in every
   // mode so the app shows the right role the moment Osc is picked.
