@@ -31,6 +31,7 @@
 #include "core/moments.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
+#include "expressions/spore_tint.hpp"
 #include "util/alloc_boundary.hpp"
 #include "util/dropped_write_log.hpp"
 
@@ -581,6 +582,7 @@ void Lamp::drainCommand() {
     // static: the 1444 B payload is too big for the loop-task stack; this drain
     // is the slot's only consumer and runs only on Core 1.
     static lamp::PendingCommand cmd;
+    static lamp::SporeTint sporeTint;
     if (lamp::pendingSlots.command.drain(pendingMux, cmd)) {
       // Refused here too so a delayed cascade is never booked to fire after
       // home mode ends.
@@ -592,7 +594,7 @@ void Lamp::drainCommand() {
       lamp::ExpressionInvocation inv;
       if (!lamp::parseInvocation(doc.as<JsonObjectConst>(), inv)) return;
       if (inv.delayMs == 0) {
-        expressionManager.triggerInvocation(inv, cmd.sourceMac);
+        lamp::playReceivedCommand(expressionManager, sporeTint, inv, cmd.sourceMac);
       } else {
         lamp::enqueueDelayedInvocation(inv, cmd.sourceMac, inv.delayMs);
       }

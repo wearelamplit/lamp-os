@@ -158,6 +158,14 @@ class ShiftyExpression : public Expression {
    */
   void configureFromParameters(const ExpressionParams& parameters) override;
   static const ExpressionDescriptor& classDescriptor();
+
+  // The longest one shift cycle runs, fade in through fade back, at these
+  // lengths and fill: a directional fill stretches each fade by up to half.
+  static constexpr uint32_t maxCycleMs(uint32_t fadeMs, uint32_t holdMs, uint32_t fadeBackMs,
+                                       uint8_t fillMode) {
+    const uint32_t stretch = fillMode == 0 ? 0 : 1;
+    return fadeMs + stretch * (fadeMs / 2) + holdMs + fadeBackMs + stretch * (fadeBackMs / 2);
+  }
   const ExpressionDescriptor& descriptor() const override;
 
   void draw() override;

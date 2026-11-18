@@ -557,10 +557,6 @@ bool ExpressionManager::replayAndAnnounce(const ExpressionInvocation& inv,
   return true;
 }
 
-// Evict a one-shot cascade even when isAnimationComplete() never fires; a
-// stuck completion signal would otherwise latch it on the compositor forever.
-static constexpr uint32_t kTransientMaxLifetimeMs = 180000;
-
 void ExpressionManager::gcTransients() {
   if (transientExpressions_.empty()) return;
   const uint32_t nowMs = millis();
@@ -577,7 +573,7 @@ void ExpressionManager::gcTransients() {
     const bool complete = skippedAtHome ||
                           (it->expression && (it->expression->isAnimationComplete() ||
                                               it->expression->retired()));
-    const bool expired = nowMs - it->createdMs >= kTransientMaxLifetimeMs;
+    const bool expired = nowMs - it->createdMs >= TransientSlots::kMaxLifetimeMs;
     if (complete || expired) {
       if (expired && !complete) {
         Serial.printf("[expr] WARN transient reaped expired type=%s age=%lums (never completed)\n",

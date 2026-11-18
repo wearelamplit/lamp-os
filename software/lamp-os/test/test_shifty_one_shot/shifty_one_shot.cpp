@@ -138,11 +138,26 @@ void test_a_transient_bloom_staggers_over_duration_max() {
   TEST_ASSERT_UINT32_WITHIN(3 * kStepMs, s(kBackS) / 2, fadeBackMs);
 }
 
+// maxCycleMs bounds the real cycle: exact for a uniform fill, and no more
+// than the bound for a staggered one.
+void test_max_cycle_bounds_the_real_cycle() {
+  for (uint32_t fill : {0u, 3u}) {
+    Rig r(/*transient=*/true, fill);
+    uint32_t fadeBackMs = 0;
+    const uint32_t cycle = r.runCycle(fadeBackMs);
+    const uint32_t bound = ShiftyExpression::maxCycleMs(s(kFadeS), s(kHoldS), s(kBackS), fill);
+    TEST_ASSERT_TRUE(cycle <= bound + 2 * kStepMs);
+    TEST_ASSERT_TRUE(cycle + s(kBackS) / 10 > bound);
+    if (fill == 0) TEST_ASSERT_UINT32_WITHIN(2 * kStepMs, bound, cycle);
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_a_transient_shifty_fades_back_over_duration_max);
   RUN_TEST(test_a_transient_shifty_chains_no_glitchy);
   RUN_TEST(test_a_configured_shifty_ignores_duration_max_and_chains_glitchy);
   RUN_TEST(test_a_transient_bloom_staggers_over_duration_max);
+  RUN_TEST(test_max_cycle_bounds_the_real_cycle);
   return UNITY_END();
 }
