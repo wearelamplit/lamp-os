@@ -1,5 +1,5 @@
-// Liveness of the OSC palette stream. A palette marks it live; the stale
-// window without one marks it stale. The controller holds paint at Off while
+// Liveness of the OSC palette stream. A palette marks it live; the caller's
+// stale window without one marks it stale. The controller holds paint at Off while
 // stale and keeps paint mode, so the next palette resumes painting on its
 // own. Loop task only.
 
@@ -23,9 +23,6 @@ class OscFreshness {
   // pulse home on every restate cycle.
   static constexpr uint32_t kStaleMs = 30000;
 
-  // 0 never stales: the stream holds its last palette until it is reset.
-  void setStaleMs(uint32_t ms) { staleMs_ = ms; }
-
   // Records a palette arrival. True on the stale -> live edge.
   bool onPalette(uint32_t nowMs) {
     lastRxMs_ = nowMs;
@@ -42,9 +39,10 @@ class OscFreshness {
     if (live_) lastRxMs_ = nowMs;
   }
 
-  // True on the live -> stale edge.
-  bool tick(uint32_t nowMs) {
-    if (!live_ || staleMs_ == 0 || nowMs - lastRxMs_ < staleMs_) return false;
+  // True on the live -> stale edge after `staleMs` with no palette. A
+  // `staleMs` of 0 never stales, so the last palette holds until reset().
+  bool tick(uint32_t nowMs, uint32_t staleMs) {
+    if (!live_ || staleMs == 0 || nowMs - lastRxMs_ < staleMs) return false;
     live_ = false;
     return true;
   }
@@ -55,7 +53,6 @@ class OscFreshness {
  private:
   bool live_ = false;
   uint32_t lastRxMs_ = 0;
-  uint32_t staleMs_ = kStaleMs;
 };
 
 // The last OSC palette applied and the role it came from, so a repeat only

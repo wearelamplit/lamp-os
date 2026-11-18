@@ -436,6 +436,22 @@ void test_bundle_takes_first_readable_colours(void) {
                         (int)findColours(b, addr, c, n));
   TEST_ASSERT_EQUAL_UINT(1, n);
   assertColour(0, 1, 0, 0, c[0]);
+
+  // A readable message, then a refused one and another readable one: the
+  // first still wins.
+  const auto other = hexMessage(addr, {0x0000FF, 0x0000FF});
+  std::vector<uint8_t> b2 = {'#', 'b', 'u', 'n', 'd', 'l', 'e', 0,
+                             0, 0, 0, 0, 0, 0, 0, 1};
+  for (const auto* m : {&good, &bad, &other}) {
+    const uint32_t sz = static_cast<uint32_t>(m->size());
+    b2.push_back(sz >> 24); b2.push_back(sz >> 16);
+    b2.push_back(sz >> 8);  b2.push_back(sz);
+    b2.insert(b2.end(), m->begin(), m->end());
+  }
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscColours::Read,
+                        (int)findColours(b2, addr, c, n));
+  TEST_ASSERT_EQUAL_UINT(1, n);
+  assertColour(0, 1, 0, 0, c[0]);
 }
 
 void test_slip_frame_with_escapes(void) {

@@ -241,7 +241,8 @@ void WispConfig::setOscRole(OscRole role) {
   Serial.printf("[wisp.cfg] oscRole <= %s\n", oscRoleName(role));
 }
 
-void WispConfig::setOsc(OscMode mode, uint8_t slot) {
+bool WispConfig::setOsc(OscMode mode, uint8_t slot) {
+  const OscTarget before = oscTarget();
   oscMode_ = mode;
   oscSlot_ = slot;
   if (opened_) {
@@ -250,6 +251,8 @@ void WispConfig::setOsc(OscMode mode, uint8_t slot) {
   }
   Serial.printf("[wisp.cfg] osc <= %s slot %u\n", oscModeName(mode),
                 (unsigned)slot);
+  return sourceMode_ == WispSourceMode::Osc &&
+         oscTargetResets(before, oscTarget());
 }
 
 void WispConfig::setManualPalette(

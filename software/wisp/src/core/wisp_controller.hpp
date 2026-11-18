@@ -12,7 +12,6 @@
 #include "config/wisp_op_dispatcher.hpp"  // DispatchResult
 #include "osc/osc_freshness.hpp"
 #include "osc/osc_listener.hpp"  // kOscPaletteMaxColors
-#include "osc/osc_target.hpp"
 #include "status/status_ring.hpp"  // kMaxRingPixels
 #include "util/rate_gate.hpp"
 
@@ -39,7 +38,6 @@ class WispController {
 
   // Safe at boot (from NVS), on every mode flip and on a repeat of the
   // current mode, which leaves lamps as they are (a live Osc stream is kept).
-  // The first call is boot and seeds the OSC target from config.
   void applySourceModeTransition(WispSourceMode mode);
 
   // Apply the DispatchResult from a CONTROL_OP. MeshRouter result callback.
@@ -95,7 +93,7 @@ class WispController {
   // Last mode applySourceModeTransition ran, for the Osc re-select check.
   WispSourceMode appliedMode_ = WispSourceMode::Off;
   bool haveAppliedMode_ = false;
-  OscStreamGate oscGate_;
+  OscFreshness oscFresh_;
   RateGate oscPaintGate_{kOscPaintIntervalMs};
   // A role change applies the new role's first palette.
   OscPaletteMemo oscLast_;

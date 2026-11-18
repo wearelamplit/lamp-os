@@ -18,7 +18,6 @@ constexpr uint32_t kOpenRetryMs = 5000;
 // drains a full mailbox in one pass and still bounds loop-task time when a
 // sender floods the port.
 constexpr int kMaxPacketsPerPoll = 8;
-constexpr uint32_t kRefusedLogIntervalMs = 1000;
 }  // namespace
 
 void OscListener::open(uint32_t nowMs) {
@@ -82,17 +81,11 @@ void OscListener::handlePacket(const uint8_t* data, size_t len,
     case OscColours::Read:
       controller_.onOscPalette(colours_, count, via, millis());
       return;
-    case OscColours::Refused: {
-      const uint32_t now = millis();
-      if (refusedLogged_ && now - lastRefusedLogMs_ < kRefusedLogIntervalMs) {
-        return;
-      }
-      refusedLogged_ = true;
-      lastRefusedLogMs_ = now;
+    case OscColours::Refused:
+      if (!refusedLog_.request(millis())) return;
       Serial.printf("[osc] refused %.32s ,%.32s via %s\n", address,
                     refusedTags ? refusedTags : "", via);
       return;
-    }
     case OscColours::Absent:
       return;
   }

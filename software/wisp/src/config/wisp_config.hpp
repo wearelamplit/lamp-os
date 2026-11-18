@@ -62,9 +62,12 @@ class WispConfig {
   void setOscRole(OscRole role);
 
   // The OSC sub-mode and Maestro slot. `slot` must pass maestroSlotValid.
+  // setOsc is true when the source is Osc and the listened address moved
+  // (oscTargetResets), so the caller holds lamps at Off until its first
+  // palette.
   OscMode oscMode() const { return oscMode_; }
   uint8_t oscSlot() const { return oscSlot_; }
-  void setOsc(OscMode mode, uint8_t slot);
+  bool setOsc(OscMode mode, uint8_t slot);
   OscTarget oscTarget() const { return {oscMode_, oscRole_, oscSlot_}; }
 
   // Replace-only; empty is valid (lamps revert to their own behavior).

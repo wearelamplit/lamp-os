@@ -1,5 +1,7 @@
 #include "osc/osc_target.hpp"
 
+#include "osc/osc_freshness.hpp"
+
 #include <cstdio>
 #include <cstring>
 
@@ -12,11 +14,6 @@ constexpr size_t kOscModeCount = sizeof(kOscModeNames) / sizeof(kOscModeNames[0]
 
 // A Maestro target reads `/palette/live/<slot>`.
 constexpr char kMaestroAddressPrefix[] = "/palette/live/";
-
-bool resets(const OscTarget& from, const OscTarget& to) {
-  if (from.mode != to.mode) return true;
-  return to.mode == OscMode::Maestro && from.slot != to.slot;
-}
 
 }  // namespace
 
@@ -32,6 +29,18 @@ bool maestroSlotValid(int slot) {
 
 uint8_t coerceMaestroSlot(int raw) {
   return maestroSlotValid(raw) ? static_cast<uint8_t>(raw) : kMaestroSlotMin;
+}
+
+bool maestroSlotFromText(const char* text, uint8_t& out) {
+  if (!text || !*text) return false;
+  int slot = 0;
+  for (const char* c = text; *c; ++c) {
+    if (*c < '0' || *c > '9' || slot > kMaestroSlotMax) return false;
+    slot = slot * 10 + (*c - '0');
+  }
+  if (!maestroSlotValid(slot)) return false;
+  out = static_cast<uint8_t>(slot);
+  return true;
 }
 
 const char* oscModeName(OscMode mode) {
@@ -66,15 +75,9 @@ uint32_t oscTargetStaleMs(const OscTarget& target) {
   return target.mode == OscMode::Straylight ? OscFreshness::kStaleMs : 0;
 }
 
-void OscStreamGate::seed(const OscTarget& target) {
-  target_ = target;
-  fresh_.setStaleMs(oscTargetStaleMs(target));
-}
-
-bool OscStreamGate::apply(const OscTarget& target, bool sourceIsOsc) {
-  const bool hold = sourceIsOsc && resets(target_, target);
-  seed(target);
-  return hold;
+bool oscTargetResets(const OscTarget& from, const OscTarget& to) {
+  if (from.mode != to.mode) return true;
+  return to.mode == OscMode::Maestro && from.slot != to.slot;
 }
 
 }  // namespace wisp

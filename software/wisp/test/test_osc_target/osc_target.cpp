@@ -2,19 +2,17 @@
 
 #include <cstring>
 
+#include "osc/osc_freshness.hpp"
 #include "osc/osc_target.hpp"
 
 using wisp::OscMode;
 using wisp::OscRole;
-using wisp::OscStreamGate;
 using wisp::OscTarget;
 
 void setUp() {}
 void tearDown() {}
 
 namespace {
-
-constexpr uint32_t kHourMs = 3600000;
 
 OscTarget straylight(OscRole role) {
   OscTarget t;
@@ -36,11 +34,6 @@ void assertAddress(const char* want, const OscTarget& t) {
   char out[wisp::kOscTargetAddressCap];
   wisp::oscTargetAddress(t, out, sizeof(out));
   TEST_ASSERT_EQUAL_STRING(want, out);
-}
-
-// Makes the gate's stream live at `nowMs`.
-void goLive(OscStreamGate& g, uint32_t nowMs) {
-  g.freshness().onPalette(nowMs);
 }
 
 }  // namespace
@@ -90,81 +83,53 @@ void test_corrupt_raw_values_coerce() {
   TEST_ASSERT_EQUAL_UINT8(1, wisp::coerceMaestroSlot(255));
 }
 
-// Boot never holds, and the seeded target's window is the one in force.
-void test_seed_never_holds_and_sets_window() {
-  OscStreamGate g;
-  g.seed(maestro(3));
-  goLive(g, 1000);
-  TEST_ASSERT_FALSE(g.freshness().tick(1000 + kHourMs));
-  TEST_ASSERT_TRUE(g.freshness().live());
-
-  OscStreamGate s;
-  s.seed(maestro(3));
-  s.seed(straylight(OscRole::Primary));
-  goLive(s, 1000);
-  TEST_ASSERT_TRUE(s.freshness().tick(1000 + wisp::OscFreshness::kStaleMs));
-}
-
 // A resend of the stored target never resets the stream.
 void test_same_target_keeps() {
-  OscStreamGate g;
-  g.seed(maestro(3));
-  TEST_ASSERT_FALSE(g.apply(maestro(3), true));
-  TEST_ASSERT_FALSE(g.apply(maestro(3), true));
-  g.seed(straylight(OscRole::Tertiary));
-  TEST_ASSERT_FALSE(g.apply(straylight(OscRole::Tertiary), true));
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(maestro(3), maestro(3)));
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(straylight(OscRole::Tertiary),
+                                          straylight(OscRole::Tertiary)));
 }
 
-void test_slot_change_holds() {
-  OscStreamGate g;
-  g.seed(maestro(1));
-  TEST_ASSERT_TRUE(g.apply(maestro(10), true));
-  TEST_ASSERT_TRUE(g.apply(maestro(2), true));
+void test_slot_change_resets() {
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(maestro(1), maestro(10)));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(maestro(10), maestro(2)));
 }
 
-void test_mode_change_holds_both_ways() {
-  OscStreamGate g;
-  g.seed(straylight(OscRole::Primary));
-  TEST_ASSERT_TRUE(g.apply(maestro(1), true));
-  TEST_ASSERT_TRUE(g.apply(straylight(OscRole::Primary), true));
+void test_mode_change_resets_both_ways() {
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(straylight(OscRole::Primary), maestro(1)));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(maestro(1), straylight(OscRole::Primary)));
 }
 
-// A Straylight role change keeps the old role painting (today's rule).
-void test_straylight_role_change_keeps() {
-  OscStreamGate g;
-  g.seed(straylight(OscRole::Primary));
-  TEST_ASSERT_FALSE(g.apply(straylight(OscRole::Fill), true));
+// A Straylight role change keeps the old role painting (today's rule), and
+// the stored Maestro slot is not part of a Straylight target.
+void test_straylight_role_or_slot_change_keeps() {
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(straylight(OscRole::Primary),
+                                          straylight(OscRole::Fill)));
+  OscTarget slot7 = straylight(OscRole::Primary);
+  slot7.slot = 7;
+  TEST_ASSERT_FALSE(
+      wisp::oscTargetResets(straylight(OscRole::Primary), slot7));
 }
 
 // In Maestro the role is not part of the target.
 void test_maestro_role_change_keeps() {
-  OscStreamGate g;
-  g.seed(maestro(5, OscRole::Primary));
-  TEST_ASSERT_FALSE(g.apply(maestro(5, OscRole::Secondary), true));
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(maestro(5, OscRole::Primary),
+                                          maestro(5, OscRole::Secondary)));
 }
 
-// Off or Manual: the target is stored but nothing holds, and the window
-// follows it, so entering Osc later starts on the right footing.
-void test_not_osc_never_holds_and_records() {
-  OscStreamGate g;
-  g.seed(straylight(OscRole::Primary));
-  TEST_ASSERT_FALSE(g.apply(maestro(6), false));
-  TEST_ASSERT_FALSE(g.apply(maestro(6), true));
-  TEST_ASSERT_TRUE(g.apply(maestro(7), true));
-  goLive(g, 0);
-  TEST_ASSERT_FALSE(g.freshness().tick(kHourMs));
-}
-
-// The window follows every apply, not only the seed.
-void test_apply_sets_window() {
-  OscStreamGate g;
-  g.seed(maestro(2));
-  g.apply(straylight(OscRole::Secondary), true);
-  goLive(g, 500);
-  TEST_ASSERT_TRUE(g.freshness().tick(500 + wisp::OscFreshness::kStaleMs));
-  g.apply(maestro(2), true);
-  goLive(g, 500);
-  TEST_ASSERT_FALSE(g.freshness().tick(500 + kHourMs));
+void test_slot_from_text() {
+  uint8_t slot = 0;
+  TEST_ASSERT_TRUE(wisp::maestroSlotFromText("1", slot));
+  TEST_ASSERT_EQUAL_UINT8(1, slot);
+  TEST_ASSERT_TRUE(wisp::maestroSlotFromText("10", slot));
+  TEST_ASSERT_EQUAL_UINT8(10, slot);
+  for (const char* bad : {"0", "11", "3x", "x3", "", " 3", "-1", "+3",
+                          "99999999999", "4294967299"}) {
+    slot = 42;
+    TEST_ASSERT_FALSE_MESSAGE(wisp::maestroSlotFromText(bad, slot), bad);
+    TEST_ASSERT_EQUAL_UINT8(42, slot);
+  }
+  TEST_ASSERT_FALSE(wisp::maestroSlotFromText(nullptr, slot));
 }
 
 int main(int, char**) {
@@ -174,13 +139,11 @@ int main(int, char**) {
   RUN_TEST(test_stale_window_per_mode);
   RUN_TEST(test_mode_names_round_trip);
   RUN_TEST(test_corrupt_raw_values_coerce);
-  RUN_TEST(test_seed_never_holds_and_sets_window);
   RUN_TEST(test_same_target_keeps);
-  RUN_TEST(test_slot_change_holds);
-  RUN_TEST(test_mode_change_holds_both_ways);
-  RUN_TEST(test_straylight_role_change_keeps);
+  RUN_TEST(test_slot_change_resets);
+  RUN_TEST(test_mode_change_resets_both_ways);
+  RUN_TEST(test_straylight_role_or_slot_change_keeps);
   RUN_TEST(test_maestro_role_change_keeps);
-  RUN_TEST(test_not_osc_never_holds_and_records);
-  RUN_TEST(test_apply_sets_window);
+  RUN_TEST(test_slot_from_text);
   return UNITY_END();
 }

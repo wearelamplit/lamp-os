@@ -10,7 +10,7 @@ lamp. (For the project pitch, hardware build, and contribution flow, see the
 Three components under [`software/`](../../software/) — the lamp firmware
 (ESP32-WROOM), the wisp infrastructure node (Seeed XIAO ESP32-C6), and the
 Flutter control app — linked by BLE GATT, an ESP-NOW mesh, and the wisp's
-Straylight OSC feed. The one-screen map of components, links, data flows, and where each
+Straylight or Maestro OSC feed. The one-screen map of components, links, data flows, and where each
 subsystem lives is [`architecture.md`](architecture.md). **Start there** for
 orientation.
 

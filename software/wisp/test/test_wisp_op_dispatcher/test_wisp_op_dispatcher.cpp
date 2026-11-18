@@ -765,6 +765,24 @@ void test_set_osc_invalid_changes_nothing() {
     TEST_ASSERT_EQUAL_UINT8(10, cfg.oscSlot());
 }
 
+// In Osc, a setOsc that moves the listened address says so; a resend and a
+// change made outside Osc do not.
+void test_set_osc_reports_a_live_retarget() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    const char* slot3 = R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":3})";
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, slot3));
+    cfg.setSourceMode(wisp::WispSourceMode::Osc);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, slot3));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":4})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"straylight"})"));
+}
+
 // setOsc is config like any other: sealed once a password is set.
 void test_set_osc_plaintext_rejected_with_password() {
     wisp::WispConfig cfg;
@@ -879,6 +897,7 @@ int main(int, char**) {
     RUN_TEST(test_set_osc_without_slot_keeps_slot);
     RUN_TEST(test_set_osc_invalid_changes_nothing);
     RUN_TEST(test_set_osc_plaintext_rejected_with_password);
+    RUN_TEST(test_set_osc_reports_a_live_retarget);
     RUN_TEST(test_set_osc_sealed_bumps_op_seq);
     return UNITY_END();
 }

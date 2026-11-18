@@ -18,18 +18,18 @@ void test_first_palette_is_live_edge() {
 void test_stale_after_gap_once() {
   OscFreshness f;
   f.onPalette(1000);
-  TEST_ASSERT_FALSE(f.tick(1000 + OscFreshness::kStaleMs - 1));
+  TEST_ASSERT_FALSE(f.tick(1000 + OscFreshness::kStaleMs - 1, OscFreshness::kStaleMs));
   TEST_ASSERT_TRUE(f.live());
-  TEST_ASSERT_TRUE(f.tick(1000 + OscFreshness::kStaleMs));
+  TEST_ASSERT_TRUE(f.tick(1000 + OscFreshness::kStaleMs, OscFreshness::kStaleMs));
   TEST_ASSERT_FALSE(f.live());
-  TEST_ASSERT_FALSE(f.tick(1000 + 2 * OscFreshness::kStaleMs));
+  TEST_ASSERT_FALSE(f.tick(1000 + 2 * OscFreshness::kStaleMs, OscFreshness::kStaleMs));
 }
 
 // A palette after a gap resumes on its own: the stale -> live edge fires again.
 void test_resumes_after_gap() {
   OscFreshness f;
   f.onPalette(0);
-  f.tick(OscFreshness::kStaleMs);
+  f.tick(OscFreshness::kStaleMs, OscFreshness::kStaleMs);
   TEST_ASSERT_TRUE(f.onPalette(OscFreshness::kStaleMs + 5));
   TEST_ASSERT_TRUE(f.live());
 }
@@ -38,7 +38,7 @@ void test_steady_stream_never_stales() {
   OscFreshness f;
   for (uint32_t t = 0; t < 5 * OscFreshness::kStaleMs; t += 500) {
     f.onPalette(t);
-    TEST_ASSERT_FALSE(f.tick(t + 499));
+    TEST_ASSERT_FALSE(f.tick(t + 499, OscFreshness::kStaleMs));
   }
   TEST_ASSERT_TRUE(f.live());
 }
@@ -46,8 +46,8 @@ void test_steady_stream_never_stales() {
 void test_millis_wrap() {
   OscFreshness f;
   f.onPalette(0xFFFFFF00u);
-  TEST_ASSERT_FALSE(f.tick(0x00000100u));
-  TEST_ASSERT_TRUE(f.tick(0xFFFFFF00u + OscFreshness::kStaleMs));
+  TEST_ASSERT_FALSE(f.tick(0x00000100u, OscFreshness::kStaleMs));
+  TEST_ASSERT_TRUE(f.tick(0xFFFFFF00u + OscFreshness::kStaleMs, OscFreshness::kStaleMs));
 }
 
 void test_reset_drops_live_without_edge() {
@@ -55,7 +55,7 @@ void test_reset_drops_live_without_edge() {
   f.onPalette(0);
   f.reset();
   TEST_ASSERT_FALSE(f.live());
-  TEST_ASSERT_FALSE(f.tick(OscFreshness::kStaleMs * 2));
+  TEST_ASSERT_FALSE(f.tick(OscFreshness::kStaleMs * 2, OscFreshness::kStaleMs));
   TEST_ASSERT_TRUE(f.onPalette(1));
 }
 
@@ -66,11 +66,11 @@ void test_ten_second_restate_stays_live() {
   uint32_t t = 0;
   for (int i = 0; i < 12; ++i) {
     f.onPalette(t);
-    TEST_ASSERT_FALSE(f.tick(t + 10050));
+    TEST_ASSERT_FALSE(f.tick(t + 10050, OscFreshness::kStaleMs));
     t += 10050;
   }
   // One restate dropped: the next lands a full cycle late.
-  TEST_ASSERT_FALSE(f.tick(t + 10100));
+  TEST_ASSERT_FALSE(f.tick(t + 10100, OscFreshness::kStaleMs));
   f.onPalette(t + 10100);
   TEST_ASSERT_TRUE(f.live());
 }
@@ -97,7 +97,7 @@ void test_feed_keeps_held_palette_live() {
   f.onPalette(0);
   for (uint32_t t = 10000; t <= 120000; t += 10000) {
     f.onFeed(t);
-    TEST_ASSERT_FALSE(f.tick(t + 9999));
+    TEST_ASSERT_FALSE(f.tick(t + 9999, OscFreshness::kStaleMs));
   }
   TEST_ASSERT_TRUE(f.live());
 }
@@ -108,7 +108,7 @@ void test_feed_does_not_make_stale_live() {
   f.onFeed(100);
   TEST_ASSERT_FALSE(f.live());
   f.onPalette(0);
-  TEST_ASSERT_TRUE(f.tick(OscFreshness::kStaleMs));
+  TEST_ASSERT_TRUE(f.tick(OscFreshness::kStaleMs, OscFreshness::kStaleMs));
   f.onFeed(OscFreshness::kStaleMs + 1);
   TEST_ASSERT_FALSE(f.live());
   TEST_ASSERT_TRUE(f.onPalette(OscFreshness::kStaleMs + 2));
@@ -144,22 +144,20 @@ void test_memo_refuses_an_oversized_palette() {
 // stays quiet, and reset still drops it.
 void test_zero_window_never_stales() {
   OscFreshness f;
-  f.setStaleMs(0);
   f.onPalette(1000);
-  TEST_ASSERT_FALSE(f.tick(1000 + 3600000u));
-  TEST_ASSERT_FALSE(f.tick(1000 + 0x7FFFFFFFu));
+  TEST_ASSERT_FALSE(f.tick(1000 + 3600000u, 0));
+  TEST_ASSERT_FALSE(f.tick(1000 + 0x7FFFFFFFu, 0));
   TEST_ASSERT_TRUE(f.live());
   f.reset();
   TEST_ASSERT_FALSE(f.live());
 }
 
-// The window set is the one in force, wider or narrower than the default.
-void test_window_is_settable() {
+// The caller's window is the one in force, narrower than Straylight's too.
+void test_window_is_the_callers() {
   OscFreshness f;
-  f.setStaleMs(5000);
   f.onPalette(0);
-  TEST_ASSERT_FALSE(f.tick(4999));
-  TEST_ASSERT_TRUE(f.tick(5000));
+  TEST_ASSERT_FALSE(f.tick(4999, 5000));
+  TEST_ASSERT_TRUE(f.tick(5000, 5000));
 }
 
 int main(int, char**) {
@@ -178,6 +176,6 @@ int main(int, char**) {
   RUN_TEST(test_feed_keeps_held_palette_live);
   RUN_TEST(test_feed_does_not_make_stale_live);
   RUN_TEST(test_zero_window_never_stales);
-  RUN_TEST(test_window_is_settable);
+  RUN_TEST(test_window_is_the_callers);
   return UNITY_END();
 }

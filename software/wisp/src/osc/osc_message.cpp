@@ -1,5 +1,6 @@
 #include "osc/osc_message.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -162,7 +163,7 @@ bool oscFindFloats(const uint8_t* data, size_t len, const char* address,
 
 namespace {
 
-float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+float clamp01(float v) { return std::clamp(v, 0.0f, 1.0f); }
 
 // The 4-byte numeric argument at `pos` as a float, `i` converted. False on a
 // NaN or infinite float.

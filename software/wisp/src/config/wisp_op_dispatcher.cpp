@@ -23,6 +23,7 @@ static bool isApplied(DispatchResult r) {
     case DispatchResult::AppliedSourceChange:
     case DispatchResult::AppliedOscRole:
     case DispatchResult::AppliedOscSettings:
+    case DispatchResult::AppliedOscRetarget:
     case DispatchResult::AppliedManualPalette:
     case DispatchResult::AppliedOffColor:
     case DispatchResult::AppliedShuffle:
@@ -185,8 +186,8 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     }
     Serial.printf("[wisp.op] setOsc mode=%s slot=%u\n", oscModeName(mode),
                   (unsigned)slot);
-    config_.setOsc(mode, slot);
-    return DispatchResult::AppliedOscSettings;
+    return config_.setOsc(mode, slot) ? DispatchResult::AppliedOscRetarget
+                                      : DispatchResult::AppliedOscSettings;
   }
 
   if (strcmp(op, "setOffColor") == 0) {

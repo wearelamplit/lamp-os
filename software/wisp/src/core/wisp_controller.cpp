@@ -39,14 +39,13 @@ void WispController::pushManualPaletteToCurrent() {
 }
 
 bool WispController::sourceLive() const {
-  return config_.sourceMode() == wisp::WispSourceMode::Osc &&
-         oscGate_.freshness().live();
+  return config_.sourceMode() == wisp::WispSourceMode::Osc && oscFresh_.live();
 }
 
 bool WispController::effectiveOff() const {
   const wisp::WispSourceMode mode = config_.sourceMode();
   return mode == wisp::WispSourceMode::Off ||
-         (mode == wisp::WispSourceMode::Osc && !oscGate_.freshness().live());
+         (mode == wisp::WispSourceMode::Osc && !oscFresh_.live());
 }
 
 // Fill `pixels` (pre-gamma RGB, length px*3) from the current source state.
@@ -164,7 +163,7 @@ void WispController::applyLedConfig() {
 }
 
 void WispController::resetOscStream() {
-  oscGate_.freshness().reset();
+  oscFresh_.reset();
   oscPaintGate_.reset();
   oscLast_.clear();
   palette_.clear();
@@ -183,11 +182,10 @@ void WispController::pushOscPaint() {
 }
 
 void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
-  if (!haveAppliedMode_) oscGate_.seed(config_.oscTarget());
   // Re-selecting Osc (an app resend after a lost confirm, or src:osc) must
   // not drop a live stream.
   if (mode == wisp::WispSourceMode::Osc && haveAppliedMode_ &&
-      appliedMode_ == mode && oscGate_.freshness().live()) {
+      appliedMode_ == mode && oscFresh_.live()) {
     paint_.setPaintMode(true);
     renderRing();
     return;
@@ -252,16 +250,15 @@ void WispController::applyOpResult(DispatchResult res) {
       // lands; onOscPalette keys its dedup on the role.
       status_.triggerOnChange();
       break;
-    case wisp::DispatchResult::AppliedOscSettings: {
-      const OscTarget target = config_.oscTarget();
-      if (oscGate_.apply(target,
-                         config_.sourceMode() == wisp::WispSourceMode::Osc)) {
-        holdOscStream();
-        char address[kOscTargetAddressCap];
-        oscTargetAddress(target, address, sizeof(address));
-        Serial.printf("[osc] now %s — holding lamps at Off until its first "
-                      "palette\n", address);
-      }
+    case wisp::DispatchResult::AppliedOscSettings:
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::AppliedOscRetarget: {
+      holdOscStream();
+      char address[kOscTargetAddressCap];
+      oscTargetAddress(config_.oscTarget(), address, sizeof(address));
+      Serial.printf("[osc] now %s — holding lamps at Off until its first "
+                    "palette\n", address);
       status_.triggerOnChange();
       break;
     }
@@ -325,14 +322,14 @@ void WispController::onOscPalette(const PaletteColor* colours, size_t count,
   if (config_.sourceMode() != wisp::WispSourceMode::Osc) return;
   if (count == 0 || count > kOscPaletteMaxColors) return;
   if (isBlankPalette(colours, count)) {
-    if (oscGate_.freshness().live()) {
+    if (oscFresh_.live()) {
       holdOscStream();
       Serial.printf("[osc] blank palette via %s — holding lamps at Off\n",
                     via);
     }
     return;
   }
-  const bool resumed = oscGate_.freshness().onPalette(nowMs);
+  const bool resumed = oscFresh_.onPalette(nowMs);
   const bool changed = oscLast_.hold(colours, count, config_.oscRole());
   if (!resumed && !changed) return;
 
@@ -365,18 +362,18 @@ void WispController::onOscPalette(const PaletteColor* colours, size_t count,
 
 void WispController::onOscFeed(uint32_t nowMs) {
   if (config_.sourceMode() != wisp::WispSourceMode::Osc) return;
-  oscGate_.freshness().onFeed(nowMs);
+  oscFresh_.onFeed(nowMs);
 }
 
 void WispController::tickOscLiveness(uint32_t now) {
   if (config_.sourceMode() != wisp::WispSourceMode::Osc) return;
-  if (oscGate_.freshness().tick(now)) {
+  if (oscFresh_.tick(now, oscTargetStaleMs(config_.oscTarget()))) {
     holdOscStream();
     Serial.println(
         "[osc] palette stale — holding lamps at Off, paint mode kept");
     return;
   }
-  if (oscGate_.freshness().live() && oscPaintGate_.due(now)) pushOscPaint();
+  if (oscFresh_.live() && oscPaintGate_.due(now)) pushOscPaint();
 }
 
 }  // namespace wisp

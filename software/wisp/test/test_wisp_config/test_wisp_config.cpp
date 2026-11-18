@@ -196,6 +196,25 @@ void test_osc_settings_persist() {
   TEST_ASSERT_EQUAL_UINT8(7, t.slot);
 }
 
+// setOsc asks for a hold only in Osc and only when the listened address
+// moves; a resend, even after a reboot reloads the same target, never does.
+void test_set_osc_holds_only_a_live_retarget() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 3));  // source Off
+  cfg.setSourceMode(wisp::WispSourceMode::Manual);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4));
+  cfg.setSourceMode(wisp::WispSourceMode::Osc);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 5));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Straylight, 5));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Straylight, 9));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 9));
+  wisp::WispConfig reboot;
+  reboot.begin();
+  TEST_ASSERT_FALSE(reboot.setOsc(wisp::OscMode::Maestro, 9));
+}
+
 void test_corrupt_osc_settings_load_as_straylight_slot_1() {
   {
     Preferences p;
@@ -364,6 +383,7 @@ int main(int, char**) {
   RUN_TEST(test_osc_defaults_to_straylight_slot_1);
   RUN_TEST(test_osc_settings_persist);
   RUN_TEST(test_corrupt_osc_settings_load_as_straylight_slot_1);
+  RUN_TEST(test_set_osc_holds_only_a_live_retarget);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
   RUN_TEST(test_manual_palette_status_echoes_the_save_seq);
