@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lamp_app/core/ble/ble_client.dart';
 import 'package:lamp_app/core/ble/ble_timing.dart';
@@ -24,13 +25,14 @@ class _TimedClient extends InMemoryBleClient {
   final _Clock clock;
   final List<({int ms, bool fails})> connectCosts;
   void Function()? whileConnecting;
+  Object failure = StateError('connect');
 
   @override
   Future<void> connect(String deviceId) async {
     final c = connectCosts.removeAt(0);
     clock.advance(c.ms);
     whileConnecting?.call();
-    if (c.fails) throw StateError('connect');
+    if (c.fails) throw failure;
     await super.connect(deviceId);
   }
 }
@@ -157,7 +159,7 @@ void main() {
         expect(events.single.note, 'aborted');
         expect(events.single.ms, 7000);
         expect(events.single.totalMs, isNull);
-        bleTimings.sectionRead('x', 'lamp', Duration.zero, ok: true);
+        bleTimings.sectionRead('x', 'lamp', Duration.zero);
         expect(
           firstReads(),
           isEmpty,
@@ -208,10 +210,10 @@ void main() {
       final oldReadStart = clock.t;
       clock.advance(500);
       bleTimings.connectSucceeded('y', Duration.zero, Duration.zero, 1, 4);
-      bleTimings.sectionRead('y', 'lamp', oldReadStart, ok: true);
+      bleTimings.sectionRead('y', 'lamp', oldReadStart);
       expect(firstReads(), isEmpty);
       clock.advance(10);
-      bleTimings.sectionRead('y', 'lamp', clock.t, ok: true);
+      bleTimings.sectionRead('y', 'lamp', clock.t);
       expect(firstReads().length, 1);
     });
 
@@ -236,7 +238,7 @@ void main() {
       bleTimings.connectSucceeded('dev', Duration.zero, Duration.zero, 1, 4);
       await c.disconnect('dev');
       clock.advance(10);
-      bleTimings.sectionRead('dev', 'lamp', clock.t, ok: true);
+      bleTimings.sectionRead('dev', 'lamp', clock.t);
       expect(firstReads(), isEmpty);
     });
   });
@@ -291,7 +293,7 @@ void main() {
             .timeout(const Duration(seconds: 2));
       } catch (_) {}
       clock.advance(10);
-      bleTimings.sectionRead('x', 'lamp', clock.t, ok: true);
+      bleTimings.sectionRead('x', 'lamp', clock.t);
       expect(firstReads(), isEmpty);
     });
 
@@ -303,7 +305,7 @@ void main() {
             .timeout(const Duration(seconds: 2));
       } catch (_) {}
       clock.advance(10);
-      bleTimings.sectionRead('x', 'lamp', clock.t, ok: true);
+      bleTimings.sectionRead('x', 'lamp', clock.t);
       expect(firstReads(), isEmpty);
     });
   });
@@ -359,6 +361,81 @@ void main() {
     bleTimings.sink = (_) => throw StateError('sink');
     final ble = _TimedClient(clock, [(ms: 10, fails: false)]);
     expect(await connectWithRetry(ble, 'x', owner: Object()), isTrue);
+  });
+
+  group('failure reason', () {
+    test(
+      'a failed connect attempt carries the fbp code and description',
+      () async {
+        final ble =
+            _TimedClient(clock, [
+                (ms: 300, fails: true),
+                (ms: 50, fails: false),
+              ])
+              ..failure = fbp.FlutterBluePlusException(
+                fbp.ErrorPlatform.android,
+                'connect',
+                133,
+                'ANDROID_SPECIFIC_ERROR gatt error',
+              );
+        await connectWithRetry(
+          ble,
+          'x',
+          owner: Object(),
+          backoff: Duration.zero,
+        );
+        expect(
+          events[0].toString(),
+          '[ble_timing] connect id=x fail attempt=1/4 ms=300 '
+          'reason=FlutterBluePlusException:133:ANDROID_SPECIFIC_ERROR_gatt_error',
+        );
+        expect(events[1].reason, isNull);
+        expect(events[1].toString(), isNot(contains('reason=')));
+      },
+    );
+
+    test('a generic failure carries its type and no spaces', () async {
+      final ble = _TimedClient(clock, [(ms: 700, fails: true)]);
+      await expectLater(
+        connectWithRetry(ble, 'x', owner: Object(), attempts: 1),
+        throwsStateError,
+      );
+      expect(events.single.reason, 'StateError');
+      expect(events.single.toString(), endsWith(' reason=StateError'));
+    });
+
+    test('a missing code or description renders as a dash', () {
+      expect(
+        bleFailureReason(
+          fbp.FlutterBluePlusException(
+            fbp.ErrorPlatform.android,
+            'connect',
+            null,
+            null,
+          ),
+        ),
+        'FlutterBluePlusException:-:-',
+      );
+    });
+
+    test('a failed discover carries the reason', () async {
+      await expectLater(
+        DiscoveryCache<int>().resolve(
+          'x',
+          () async => throw TimeoutException('t'),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(events.single.reason, 'TimeoutException');
+    });
+
+    test('a failed first read carries the reason', () {
+      bleTimings.connectSucceeded('x', clock.t, clock.t, 1, 4);
+      events.clear();
+      bleTimings.sectionRead('x', 'lamp', clock.t, error: StateError('r'));
+      expect(events.single.ok, isFalse);
+      expect(events.single.reason, 'StateError');
+    });
   });
 
   test('an event renders as one greppable line', () {

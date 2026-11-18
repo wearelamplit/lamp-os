@@ -1,4 +1,6 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart'
+    show FlutterBluePlusException;
 
 enum BleTimingPhase { scanSeen, connect, discover, firstRead }
 
@@ -15,6 +17,7 @@ class BleTimingEvent {
     this.section,
     this.scanSession,
     this.note,
+    this.reason,
   });
 
   final BleTimingPhase phase;
@@ -43,6 +46,9 @@ class BleTimingEvent {
   /// when the link came up but the caller had given up.
   final String? note;
 
+  /// Why a failed phase failed, from [bleFailureReason].
+  final String? reason;
+
   @override
   String toString() {
     final f = <String>[
@@ -57,9 +63,26 @@ class BleTimingEvent {
       ?note,
       if (totalMs != null) 'total_ms=$totalMs',
       if (sinceLinkMs != null) 'since_link_ms=$sinceLinkMs',
+      if (reason != null) 'reason=$reason',
     ];
     return f.join(' ');
   }
+}
+
+/// A single-token reason for a failed phase: `Type:code:description`, with
+/// `-` for a missing code or description. The code and description come from
+/// a [FlutterBluePlusException] (Android status such as 133); any other error
+/// gives its type alone.
+String bleFailureReason(Object error) {
+  String clean(Object? v) {
+    final t = v?.toString().trim().replaceAll(RegExp(r'\s+'), '_') ?? '';
+    return t.isEmpty ? '-' : (t.length > 48 ? t.substring(0, 48) : t);
+  }
+
+  if (error is FlutterBluePlusException) {
+    return 'FlutterBluePlusException:${clean(error.code)}:${clean(error.description)}';
+  }
+  return error.runtimeType.toString();
 }
 
 void _debugPrintEvent(BleTimingEvent e) => debugPrint(e.toString());
@@ -116,6 +139,7 @@ class BleTimings {
     Duration attemptStart,
     int attempt,
     int attempts,
+    Object error,
   ) {
     _emit(
       BleTimingEvent(
@@ -125,6 +149,7 @@ class BleTimings {
         ok: false,
         attempt: attempt,
         attempts: attempts,
+        reason: bleFailureReason(error),
       ),
     );
   }
@@ -174,8 +199,14 @@ class BleTimings {
   /// The link to [deviceId] went down; no first read is owed for it.
   void linkDown(String deviceId) => _linkUp.remove(deviceId);
 
-  void discovered(String deviceId, Duration started, {bool ok = true}) => _emit(
-    BleTimingEvent(BleTimingPhase.discover, deviceId, _since(started), ok: ok),
+  void discovered(String deviceId, Duration started, {Object? error}) => _emit(
+    BleTimingEvent(
+      BleTimingPhase.discover,
+      deviceId,
+      _since(started),
+      ok: error == null,
+      reason: error == null ? null : bleFailureReason(error),
+    ),
   );
 
   /// A section read started at [readStart] finished. Counts as the first read
@@ -184,7 +215,7 @@ class BleTimings {
     String deviceId,
     String section,
     Duration readStart, {
-    required bool ok,
+    Object? error,
   }) {
     final up = _linkUp[deviceId];
     if (up == null || up > readStart) return;
@@ -194,7 +225,8 @@ class BleTimings {
         BleTimingPhase.firstRead,
         deviceId,
         _since(readStart),
-        ok: ok,
+        ok: error == null,
+        reason: error == null ? null : bleFailureReason(error),
         section: section,
         sinceLinkMs: _since(up),
       ),

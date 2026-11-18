@@ -12,8 +12,8 @@ class DiscoveryCache<S> {
     final S found;
     try {
       found = await discover();
-    } catch (_) {
-      bleTimings.discovered(deviceId, started, ok: false);
+    } catch (e) {
+      bleTimings.discovered(deviceId, started, error: e);
       rethrow;
     }
     bleTimings.discovered(deviceId, started);

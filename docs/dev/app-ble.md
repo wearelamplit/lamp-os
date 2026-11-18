@@ -61,6 +61,12 @@ app.
 | `discover ... ok\|fail ms=` | a cold `discoverServices`, success or failure (`DiscoveryCache` miss; none on a bridge client) |
 | `firstRead ... section= ms= since_link_ms=` | the first `readSectionVia` after a `connectWithRetry` link. `ms` is the read from the `readSectionVia` call, so it includes waiting behind an earlier section read on the same lamp. `since_link_ms` includes auth and the cold discover, since they run first. A busy answer counts as the first read |
 
+A failed `connect`, `discover` or `firstRead` line ends with
+`reason=<Type>:<code>:<description>` (`bleFailureReason`). Code and description
+come from a `FlutterBluePlusException` (the Android status, e.g. 133, with
+spaces turned to `_`, `-` when absent); any other error gives its type alone,
+e.g. `reason=TimeoutException`. Successful lines carry no `reason`.
+
 Every scan start or restart opens a new `scan_session` (counted from 1 per app
 run); a lamp is timed once per session from that session's own start, so a
 restarted scan shows a lamp again with a fresh, small `ms`.

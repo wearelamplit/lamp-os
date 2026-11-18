@@ -5,6 +5,14 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Changed
+- **A failed `ble_timing` line now says why.** Failed connect, discover and
+  first-read lines end with `reason=<Type>:<code>:<description>` (the Android
+  status such as 133 when the stack gives one), so a failed attempt can be told
+  apart from a timeout or a disconnect race. Connect behaviour is unchanged.
+
 ## 1.3.8
 
 ### Added

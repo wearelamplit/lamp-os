@@ -48,8 +48,8 @@ Future<bool> connectWithRetry(
     final wasUp = ble.isConnected(deviceId);
     try {
       await ble.connect(deviceId);
-    } catch (_) {
-      bleTimings.connectFailed(deviceId, attemptStart, i + 1, attempts);
+    } catch (e) {
+      bleTimings.connectFailed(deviceId, attemptStart, i + 1, attempts, e);
       if (i == attempts - 1) {
         await release();
         rethrow;

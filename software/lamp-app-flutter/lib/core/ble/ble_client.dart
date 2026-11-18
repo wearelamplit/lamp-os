@@ -145,8 +145,9 @@ Future<Uint8List> readSectionVia(
 
   final result = _pageSessions.run(deviceId, run);
   result.then(
-    (_) => bleTimings.sectionRead(deviceId, name, readStart, ok: true),
-    onError: (_) => bleTimings.sectionRead(deviceId, name, readStart, ok: false),
+    (_) => bleTimings.sectionRead(deviceId, name, readStart),
+    onError: (Object e) =>
+        bleTimings.sectionRead(deviceId, name, readStart, error: e),
   );
   return result;
 }
