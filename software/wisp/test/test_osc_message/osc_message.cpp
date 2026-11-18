@@ -121,7 +121,8 @@ std::vector<uint8_t> typedMessage(const char* address, const char* tags,
 }
 
 // A Limbic float-layout message: `layout` as an OSC string, then `floats`
-// f-tagged (or `tags` after the 's', when given).
+// f-tagged (or `tags` after the 's', when given; an `s` there is an empty
+// string).
 std::vector<uint8_t> layoutMessage(const char* address, const char* layout,
                                    const std::vector<float>& floats,
                                    const char* tags = nullptr) {
@@ -141,6 +142,9 @@ std::vector<uint8_t> layoutMessage(const char* address, const char* layout,
       std::memcpy(&bits, &floats[fi++], sizeof bits);
     } else if (t == 'i') {
       bits = static_cast<uint32_t>(static_cast<int32_t>(floats[fi++]));
+    } else if (t == 's') {
+      for (int k = 0; k < 4; ++k) out.push_back(0);  // an empty string
+      continue;
     } else {
       continue;
     }
@@ -613,6 +617,7 @@ void test_layout_unreadable_refused(void) {
   // A layout with no floats, a second string, an unknown tag.
   assertRefused(layoutMessage(kLayoutAddr, "rgb", {}));
   assertRefused(layoutMessage(kLayoutAddr, "rgb", {0.5f, 0.5f}, "ffs"));
+  assertRefused(layoutMessage(kLayoutAddr, "rgb", {0.5f, 0.5f}, "fsf"));
   assertRefused(layoutMessage(kLayoutAddr, "rgb", {0.5f, 0.5f}, "fTf"));
   // More than 50 colours.
   assertRefused(layoutMessage(kLayoutAddr, "w",
