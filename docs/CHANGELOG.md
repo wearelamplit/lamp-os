@@ -40,9 +40,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ### Changed
 - **A wisp's Manual palette holds up to 16 colours**, the most a Straylight
-  palette carries (the editor held 10). A wisp holding a longer palette keeps
-  its first 16, and the editor says when it shows only the first 16 of one.
-  Needs the wisp reflashed.
+  palette carries (the editor held 10). Needs the wisp reflashed.
 - **The wisp palette editor needs the wisp reflashed.** A wisp on 1.3.8 or
   older doesn't say which palette it stores, so the editor shows "Reading
   palette from wisp…" for it and Save sends nothing.

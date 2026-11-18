@@ -50,16 +50,6 @@ class ManualPaletteEditor extends ConsumerWidget {
             ),
           ),
         ),
-        if (notifier.manualPaletteTrimmed)
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpace.sm),
-            child: Text(
-              'The wisp holds ${notifier.savedManualPalette.length} colors. '
-              'The editor keeps the first '
-              '${WispRepository.kManualPaletteMaxColors}; save to store them.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
         if (notifier.manualPaletteWriteFailed)
           Padding(
             padding: const EdgeInsets.only(top: AppSpace.sm),

@@ -288,10 +288,7 @@ behaves as on 1.3.8.
 P16 — **a Manual palette holds 16 colours.** Same setup as P14. In the
 editor add colours: the `+` stops at 16. Save 16 colours with white on each:
 the wisp's serial prints `setManualPalette colors=16`, the save confirms, and
-the wisp's ring shows all 16. A wisp holding more than 16 takes a raw
-`CHAR_WISP_OP` write, since no released app sends more than 10; the app and
-wisp tests cover that case (the editor shows the first 16 with a note and
-Save live, and the wisp loads a longer stored palette as its first 16).
+the wisp's ring shows all 16.
 
 P17 — **a settings change the wisp never gets is read back.** Same setup as
 P14, the lamp on the new wisp. Open the Settings tab, move brightness, and
