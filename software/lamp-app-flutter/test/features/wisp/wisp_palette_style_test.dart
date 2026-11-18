@@ -42,13 +42,15 @@ const _claimed = '10:20:30:40:50:60';
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
-String _status({String source = 'manual', int seen = 100}) => jsonEncode({
-  'wispMac': _mac,
-  'configSplit': true,
-  'source': source,
-  'manualId': WispRepository.statusManualId(const [_red, _blue]),
-  'configLastSeenMs': seen,
-});
+String _status({String source = 'manual', int seen = 100, int? echo}) =>
+    jsonEncode({
+      'wispMac': _mac,
+      'configSplit': true,
+      'source': source,
+      'manualId': WispRepository.statusManualId(const [_red, _blue]),
+      'configLastSeenMs': seen,
+      'swatchesSeq': ?echo,
+    });
 
 /// A `wispConfig` with [swatches] as given; null leaves the key out, as a
 /// wisp that predates it sends.
@@ -72,6 +74,16 @@ List<bool> _swatchOps(InMemoryBleClient ble) => [
       'swatches': final bool v,
     })
       v,
+];
+
+/// Each `setSwatches` sent, with its `seq`.
+List<(bool, int?)> _swatchSends(InMemoryBleClient ble) => [
+  for (final w in ble.writesTo(_devId, BleUuids.wispOp))
+    if (jsonDecode(utf8.decode(w)) case {
+      'op': 'setSwatches',
+      'swatches': final bool v,
+    } && final op)
+      (v, op['seq'] as int?),
 ];
 
 void _notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
@@ -142,10 +154,11 @@ void main() {
 
     Future<(InMemoryBleClient, ProviderContainer, WispNotifier)> open({
       InMemoryBleClient? client,
+      int? echo,
     }) async {
       final ble = client ?? InMemoryBleClient();
       await ble.connect(_devId);
-      ble.seedSection(_devId, 'wispstatus', _b(_status()));
+      ble.seedSection(_devId, 'wispstatus', _b(_status(echo: echo)));
       ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: false)));
       final c = ProviderContainer(
         overrides: [bleClientProvider.overrideWithValue(ble)],
@@ -317,6 +330,111 @@ void main() {
       await done;
 
       expect(_swatchOps(ble), [true, true, true, true]);
+      expect(shown(c), PaletteStyle.swatches);
+    });
+
+    group('on a wisp that echoes swatchesSeq', () {
+      final defaultSeqStart = WispNotifier.debugSeqStart;
+      setUp(() => WispNotifier.debugSeqStart = () => 100);
+      tearDown(() => WispNotifier.debugSeqStart = defaultSeqStart);
+
+      void wispOn(InMemoryBleClient ble, bool swatches, int seen, int echo) {
+        ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: swatches)));
+        _notify(ble, _status(seen: seen, echo: echo));
+      }
+
+      test('after A then B, a late echo of A ends on B', () async {
+        final (ble, c, n) = await open();
+
+        final a = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        final b = n.setPaletteStyle(PaletteStyle.gradient);
+        await pumpEventQueue();
+        expect(_swatchSends(ble), [(true, 100), (false, 101)]);
+
+        wispOn(ble, false, 200, 101);
+        await Future.wait([a, b]);
+        expect(_swatchSends(ble), hasLength(2), reason: 'B confirmed on 101');
+
+        // A's late copy lands at the wisp.
+        wispOn(ble, true, 300, 100);
+        await pumpEventQueue();
+        expect(shown(c), PaletteStyle.gradient);
+        expect(_swatchSends(ble).last, (false, 101), reason: 'B sent again');
+
+        wispOn(ble, false, 400, 101);
+        await _wait(WispNotifier.debugConfigConfirmWindow * 2);
+        expect(shown(c), PaletteStyle.gradient);
+        expect(_swatchSends(ble), hasLength(3));
+      });
+
+      test('a stale echo of the last seq does not confirm a new pick',
+          () async {
+        WispNotifier.debugSeqStart = () => 42;
+        final (ble, c, n) = await open(echo: 42);
+
+        final done = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        final seq = _swatchSends(ble).single.$2;
+        expect(seq, isNotNull);
+        expect(seq, isNot(42));
+
+        _notify(ble, _status(echo: 42));
+        await _wait(WispNotifier.debugConfigConfirmWindow * 1.5);
+        expect(_swatchSends(ble).length, greaterThan(1),
+            reason: 'unconfirmed, so resent');
+
+        wispOn(ble, true, 200, seq!);
+        await done;
+        expect(shown(c), PaletteStyle.swatches);
+      });
+
+      // Another phone's pick of the same style lands; this one has not.
+      test('a config showing the pick does not confirm it', () async {
+        final (ble, c, n) = await open(echo: 7);
+
+        final done = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        wispOn(ble, true, 200, 9);
+        await _wait(WispNotifier.debugConfigConfirmWindow * 1.5);
+        expect(_swatchSends(ble).length, greaterThan(1));
+
+        wispOn(ble, true, 300, 100);
+        await done;
+        expect(shown(c), PaletteStyle.swatches);
+      });
+
+      test('the pick shows while the wisp echoes it, over a lagging config',
+          () async {
+        final (ble, c, n) = await open(echo: 7);
+
+        final done = n.setPaletteStyle(PaletteStyle.swatches);
+        await pumpEventQueue();
+        _notify(ble, _status(echo: 100));
+        await done;
+        expect(_swatchSends(ble), hasLength(1));
+        expect(shown(c), PaletteStyle.swatches, reason: 'config not yet read');
+
+        // Another phone picks Gradient.
+        wispOn(ble, false, 200, 9);
+        await pumpEventQueue();
+        expect(shown(c), PaletteStyle.gradient);
+        expect(_swatchSends(ble), hasLength(1), reason: 'not ours to undo');
+      });
+    });
+
+    test('a wisp without swatchesSeq confirms the pick on its config',
+        () async {
+      final (ble, c, n) = await open();
+
+      final done = n.setPaletteStyle(PaletteStyle.swatches);
+      await pumpEventQueue();
+      expect(_swatchSends(ble).single.$2, isNotNull, reason: 'seq sent');
+
+      ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: true)));
+      _notify(ble, _status(seen: 200));
+      await done;
+      expect(_swatchSends(ble), hasLength(1));
       expect(shown(c), PaletteStyle.swatches);
     });
 

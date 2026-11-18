@@ -58,6 +58,7 @@ class WispStatus {
     this.configLastSeenMs,
     this.manualId,
     this.manualSeq = 0,
+    this.swatchesSeq = 0,
     this.ip,
     this.paletteStyle,
     this.oscMode,
@@ -205,6 +206,11 @@ class WispStatus {
   /// echoed until the next save; 0 when that save carried none, the wisp
   /// rebooted since, or the status does not carry it. Equality only.
   final int manualSeq;
+
+  /// The `seq` of the last `setSwatches` the wisp applied, echoed until the
+  /// next one; 0 when that op carried none, the wisp rebooted since, or the
+  /// status does not carry it. Equality only.
+  final int swatchesSeq;
 
   /// The wisp's OSC send-to address from its `wispConfig`: `""` while it has
   /// none, null until a config carrying it is merged (a wisp that predates
@@ -379,6 +385,7 @@ class WispStatus {
       configLastSeenMs: asInt(json['configLastSeenMs']),
       manualId: json['manualId'] is String ? json['manualId'] as String : null,
       manualSeq: asInt(json['manualSeq']) ?? 0,
+      swatchesSeq: asInt(json['swatchesSeq']) ?? 0,
     );
   }
 
@@ -489,6 +496,7 @@ class WispStatus {
       configLastSeenMs: configLastSeenMs,
       manualId: manualId,
       manualSeq: manualSeq,
+      swatchesSeq: swatchesSeq,
       ip: identical(ip, _keep) ? this.ip : ip as String?,
       paletteStyle: identical(paletteStyle, _keep)
           ? this.paletteStyle
@@ -539,6 +547,7 @@ class WispStatus {
           configLastSeenMs == other.configLastSeenMs &&
           manualId == other.manualId &&
           manualSeq == other.manualSeq &&
+          swatchesSeq == other.swatchesSeq &&
           ip == other.ip &&
           paletteStyle == other.paletteStyle &&
           oscMode == other.oscMode &&
@@ -571,8 +580,8 @@ class WispStatus {
           opSeq,
           brightness,
           configKnown,
-          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq, ip,
-              paletteStyle, oscMode, oscSlot, heldConfigSeenMs),
+          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq,
+              swatchesSeq, ip, paletteStyle, oscMode, oscSlot, heldConfigSeenMs),
         ),
       );
 }

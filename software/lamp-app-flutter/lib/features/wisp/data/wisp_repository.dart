@@ -160,12 +160,14 @@ class WispRepository {
   }
 
   /// How lamps take colours from the palette, in every source mode. Persisted
-  /// in wisp NVS and echoed as `swatches` in its `wispConfig`.
-  Future<void> setSwatches(bool swatches) async {
+  /// in wisp NVS and echoed as `swatches` in its `wispConfig`. [seq], 1..65535,
+  /// is echoed as the status's `swatchesSeq` until the next `setSwatches`.
+  Future<void> setSwatches(bool swatches, {int? seq}) async {
     await _writeOp({
       'char': 'wispOp',
       'op': 'setSwatches',
       'swatches': swatches,
+      'seq': ?seq,
     });
   }
 
