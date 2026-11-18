@@ -63,6 +63,9 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   expressionManager.begin(&shade, &base);
 
   self.registerExpressions(expressionManager.registry());
+  if (expressionManager.registry().dropInternal(config.expressions) > 0) {
+    config.invalidateExpressionsSection();
+  }
 
   if (!lamp::any(features, lamp::Features::SocialBehavior)) {
     fondnessEngine.setNearSource([]() -> const std::vector<lamp::NearbyCopy>& {

@@ -147,8 +147,8 @@ struct ExpressionDescriptor {
   // Plain fn-ptr keeps the descriptor a constexpr literal (no heap, constexpr-safe).
   Expression* (*make)(FrameBuffer*) = nullptr;
   // Framework-only expression: registry-backed so triggerInvocation can fire
-  // it, but omitted from serializeCatalog so it never surfaces in the app's
-  // editable catalog.
+  // it, but never a configured expression. serializeCatalog omits it, an
+  // upsert of it is refused, and a saved entry of it is dropped at boot.
   bool internal = false;
   // TARGET_BOTH builds one instance bound to the base that runs base then
   // shade as one strip, rather than one instance per surface.

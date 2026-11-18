@@ -381,10 +381,11 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
       Serial.printf("[expr] upsert %s over caps, extras dropped\n",
                     cfg.type.c_str());
     }
-    // A type this variant does not register never renders; storing it only
-    // spends a record and NVS.
-    if (!::expressionManager.registry().find(cfg.type.c_str())) {
-      Serial.printf("[expr] upsert type=%s rejected: not on this lamp\n",
+    // A type this variant does not register never renders, and an internal
+    // one plays only when the lamp fires it; storing either only spends a
+    // record and NVS.
+    if (!::expressionManager.registry().configurable(cfg.type.c_str())) {
+      Serial.printf("[expr] upsert type=%s rejected: not configurable on this lamp\n",
                     cfg.type.c_str());
       return;
     }

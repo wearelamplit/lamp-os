@@ -45,16 +45,8 @@ inline constexpr ExpressionDescriptor kYawnDescriptorData{
   .id       = "yawn",
   .name     = "Yawn",
   .colors   = { .max = 0 },
-  .interval = RangeSpec{
-    .min    = 300,
-    .max    = 18000,
-    .step   = 30,
-    .unit   = "s",
-    .defLo  = 1800,
-    .defHi  = 7200,
-    .help   = kIntervalHelp,
-  },
   .params        = kYawnParams,
+  .internal      = true,
   .spansSurfaces = true,
 };
 

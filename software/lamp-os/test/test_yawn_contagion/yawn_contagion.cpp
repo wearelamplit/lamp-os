@@ -77,6 +77,8 @@ class Probe : public Expression {
 // The real yawn's descriptor data, so one fire spans both surfaces as one
 // transient, built as a probe that paints nothing.
 constexpr ExpressionDescriptor kYawnProbe = withMake(kYawnDescriptorData, &makeExpr<Probe>);
+// Yawn is built in, so every yawn played below is an internal type playing.
+static_assert(kYawnProbe.internal);
 const ExpressionDescriptor& Probe::descriptor() const { return kYawnProbe; }
 
 const uint8_t kPeerMac[6] = {1, 2, 3, 4, 5, 6};

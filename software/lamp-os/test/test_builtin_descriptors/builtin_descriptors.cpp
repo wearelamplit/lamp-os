@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include "expressions/breathing/breathing_expression.hpp"
@@ -519,6 +520,70 @@ void test_no_variant_registers_the_moment_sentinel() {
   }
 }
 
+// The base set as Lamp::registerExpressions registers it.
+static ExpressionRegistry baseSetRegistry() {
+  ExpressionRegistry reg;
+#define X(N) reg.add(k##N##DescriptorData);
+  LAMPOS_BASE_EXPRESSIONS(X)
+#undef X
+  return reg;
+}
+
+static bool catalogLists(const JsonDocument& catalog, const char* id) {
+  for (JsonObjectConst e : catalog["expressions"].as<JsonArrayConst>()) {
+    if (std::strcmp(e["id"].as<const char*>(), id) == 0) return true;
+  }
+  return false;
+}
+
+// Yawn is built in: registered so the lamp plays it, absent from the catalog
+// the app and Web Config list expressions from.
+void test_yawn_is_registered_but_not_listed() {
+  const ExpressionRegistry reg = baseSetRegistry();
+  JsonDocument catalog;
+  deserializeJson(catalog, reg.serializeCatalog());
+  TEST_ASSERT_NOT_NULL(reg.find(kYawnDescriptorData.id));
+  TEST_ASSERT_FALSE(catalogLists(catalog, kYawnDescriptorData.id));
+  TEST_ASSERT_TRUE(catalogLists(catalog, kPulseDescriptorData.id));
+}
+
+// A person can configure exactly the registered types the catalog lists, so an
+// upsert of yawn or of an unregistered type is refused.
+void test_configurable_types_are_the_listed_ones() {
+  ExpressionRegistry reg = baseSetRegistry();
+  reg.add(kBloomDescriptorData);
+  JsonDocument catalog;
+  deserializeJson(catalog, reg.serializeCatalog());
+  for (const ExpressionDescriptor* d : reg.all()) {
+    TEST_ASSERT_EQUAL_MESSAGE(catalogLists(catalog, d->id), reg.configurable(d->id), d->id);
+  }
+  TEST_ASSERT_FALSE(reg.configurable(kYawnDescriptorData.id));
+  TEST_ASSERT_FALSE(reg.configurable("nope"));
+}
+
+// A lamp with yawn saved loads without it and keeps every other entry in
+// order, an unregistered type included.
+void test_saved_internal_entries_drop_at_load() {
+  ExpressionRegistry reg = baseSetRegistry();
+  reg.add(kBloomDescriptorData);
+  ExpressionSettings saved;
+  const std::pair<const char*, uint8_t> entries[] = {
+      {"glitchy", 1}, {"yawn", 1}, {"nope", 2}, {"bloom", 3}, {"yawn", 2}, {"pulse", 2}};
+  for (const auto& [type, target] : entries) {
+    ExpressionConfig c;
+    c.type = type;
+    c.target = target;
+    saved.expressions.push_back(c);
+  }
+  TEST_ASSERT_EQUAL_size_t(3, reg.dropInternal(saved));
+  const char* kept[] = {"glitchy", "nope", "pulse"};
+  TEST_ASSERT_EQUAL_size_t(3, saved.expressions.size());
+  for (size_t i = 0; i < 3; ++i) {
+    TEST_ASSERT_EQUAL_STRING(kept[i], saved.expressions[i].type.c_str());
+  }
+  TEST_ASSERT_EQUAL_size_t(0, reg.dropInternal(saved));
+}
+
 // The table is append-only: an index already written to a lamp's NVS must
 // keep naming the same key.
 void test_param_key_table_prefix_is_pinned() {
@@ -540,6 +605,9 @@ int main(int, char**) {
   RUN_TEST(test_every_descriptor_key_has_a_stored_index);
   RUN_TEST(test_param_key_table_prefix_is_pinned);
   RUN_TEST(test_no_variant_registers_the_moment_sentinel);
+  RUN_TEST(test_yawn_is_registered_but_not_listed);
+  RUN_TEST(test_configurable_types_are_the_listed_ones);
+  RUN_TEST(test_saved_internal_entries_drop_at_load);
   RUN_TEST(test_every_type_fits_the_parameter_cap);
   RUN_TEST(test_all_five_ids_present);
   RUN_TEST(test_continuous_flags);
