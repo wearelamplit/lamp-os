@@ -295,7 +295,7 @@ void main() {
 
     test('a pick stops resending once another wisp is heard, '
         'though a pending source change holds its status off', () async {
-      final (ble, _, n) = await open();
+      final (ble, c, n) = await open();
 
       unawaited(n.setSource(WispSourceMode.manual).catchError((Object _) {}));
       await pumpEventQueue();
@@ -304,6 +304,46 @@ void main() {
       _notify(ble, _status(seen: 500, mac: '11:22:33:44:55:66'));
       await done;
 
+      expect(shown(c).wispMac, _mac, reason: 'the other wisp was held off');
+      expect(_oscOps(ble), hasLength(1));
+    });
+
+    // The lamp's first status read lands before its auth, so build waits and
+    // then takes the status a notify brought meanwhile.
+    test('a wisp heard while build waits still stops a pick', () async {
+      WispNotifier.debugConfigConfirmWindow = const Duration(seconds: 2);
+      final ble = InMemoryBleClient();
+      await ble.connect(_devId);
+      await ble.write(
+        _devId,
+        BleUuids.controlService,
+        BleUuids.wispStatus,
+        Uint8List(0),
+      );
+      final c = ProviderContainer(
+        overrides: [bleClientProvider.overrideWithValue(ble)],
+      );
+      addTearDown(c.dispose);
+      c.listen(wispNotifierProvider(_devId), (_, _) {});
+      final built = c.read(wispNotifierProvider(_devId).future);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      _notify(ble, _status());
+      await pumpEventQueue();
+      final n = c.read(wispNotifierProvider(_devId).notifier);
+
+      unawaited(n.setSource(WispSourceMode.manual).catchError((Object _) {}));
+      await pumpEventQueue();
+      final done = n.setOscMode(OscMode.maestro).catchError((Object _) {});
+      await pumpEventQueue();
+      _notify(ble, _status(seen: 500, mac: '11:22:33:44:55:66'));
+      await built;
+      await done;
+
+      expect(
+        c.read(wispNotifierProvider(_devId)).value!.wispMac,
+        _mac,
+        reason: 'the other wisp was held off',
+      );
       expect(_oscOps(ble), hasLength(1));
     });
 

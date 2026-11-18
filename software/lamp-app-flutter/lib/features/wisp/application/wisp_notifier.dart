@@ -393,8 +393,7 @@ class WispNotifier extends _$WispNotifier {
       // cover that window. Kept tight (2x1.5s) so a genuinely wisp-less lamp
       // resolves fast rather than sitting in loading; the notify subscription
       // (already attached above) catches anything slower.
-      var initial = _applySourceWriteGuard(await _repo.readStatus()) ??
-          WispStatus.empty;
+      var initial = await _readStatusNoted() ?? WispStatus.empty;
       if (_disposed) return WispStatus.empty;
       for (var attempt = 0; !initial.present && attempt < 2; attempt++) {
         await Future.delayed(const Duration(milliseconds: 1500));
@@ -406,11 +405,9 @@ class WispNotifier extends _$WispNotifier {
           initial = live;
           break;
         }
-        initial = _applySourceWriteGuard(await _repo.readStatus()) ??
-            WispStatus.empty;
+        initial = await _readStatusNoted() ?? WispStatus.empty;
         if (_disposed) return WispStatus.empty;
       }
-      _notePaletteStatus(initial);
       // Palette rides its own reliable section read, decoupled from the
       // notify-clobbered status char. Awaited before _loadClaims so the two
       // BLE reads don't collide on FbpBleClient's lockless flow.
@@ -618,6 +615,14 @@ class WispNotifier extends _$WispNotifier {
       '[wisp_notifier] notify lamp=$lampId '
       'wispMac=${next.wispMac} present=${next.present} source=${next.source}',
     );
+  }
+
+  // A build read, noted as `_onIncoming` notes a notify: before the
+  // source-write guard, so a status it holds off still names its wisp.
+  Future<WispStatus?> _readStatusNoted() async {
+    final raw = await _repo.readStatus();
+    _notePaletteStatus(raw);
+    return _applySourceWriteGuard(raw);
   }
 
   Future<void> _rereadStatusSection() async {
