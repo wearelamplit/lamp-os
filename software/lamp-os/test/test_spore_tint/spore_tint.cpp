@@ -291,9 +291,16 @@ void test_a_stalled_loop_still_starts_one_tint() {
   r.advance(3000);
   r.now += 5000;
   set_mock_millis(r.now);
+  const uint32_t stallEnd = r.now;
   TEST_ASSERT_TRUE(r.play(parse(kGolden), kOtherMushroom));
   r.advance(30000);
   TEST_ASSERT_EQUAL_size_t(1, r.tintStartsMs.size());
+  // The first spore's tint, started on the passes right after the stall.
+  TEST_ASSERT_TRUE(r.tintStartsMs[0] - stallEnd <= 2 * kStepMs);
+  ExpressionInvocation same;
+  same.type = "shifty";
+  same.target = TARGET_BASE;
+  TEST_ASSERT_FALSE(r.manager.triggerInvocation(same, kMushroom));
 }
 
 // A tint refused when its time comes (home mode refusing peers) is dropped and
@@ -342,6 +349,8 @@ void test_lamp_shaped_commands_book_no_tint() {
   ExpressionInvocation otherType = parse(kGolden);
   otherType.type = "shifty";
   for (const ExpressionInvocation& inv : {firefliesBeat(), untinted, noBurst, otherType}) {
+    ExpressionInvocation tint;
+    TEST_ASSERT_FALSE(SporeTint::tintFor(inv, tint));
     Rig r;
     TEST_ASSERT_TRUE(r.play(inv, kMushroom));
     const size_t shiftyAtPlay = r.running("shifty");
