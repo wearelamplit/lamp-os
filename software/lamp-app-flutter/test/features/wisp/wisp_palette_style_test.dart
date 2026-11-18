@@ -83,6 +83,17 @@ void _notify(InMemoryBleClient ble, String json) => ble.simulateNotify(
 
 Future<void> _wait(Duration d) => Future<void>.delayed(d);
 
+/// Holds `wispconfig` reads while [holdConfig] is set.
+class _HoldConfigBle extends InMemoryBleClient {
+  Completer<void>? holdConfig;
+
+  @override
+  Future<Uint8List> readSection(String deviceId, String name) async {
+    if (name == 'wispconfig') await holdConfig?.future;
+    return super.readSection(deviceId, name);
+  }
+}
+
 /// Fails every `setSource` and `setOscRole` write, the first held open while
 /// [holdSource] is set.
 class _FailSourceBle extends InMemoryBleClient {
@@ -286,6 +297,27 @@ void main() {
       expect(now.oscRole, OscRole.primary);
       expect(now.paletteStyle, PaletteStyle.swatches);
       await style;
+    });
+
+    // The lamp already holds a Swatches config from before this pick that the
+    // app has not read; an earlier pick may still land over it.
+    test('a pick is not confirmed by a config cached before it', () async {
+      final ble = _HoldConfigBle();
+      final (_, c, n) = await open(client: ble);
+
+      final hold = ble.holdConfig = Completer<void>();
+      ble.seedSection(_devId, 'wispconfig', _b(_config(swatches: true)));
+      _notify(ble, _status(seen: 200));
+      await pumpEventQueue();
+      expect(shown(c), PaletteStyle.gradient, reason: 'its read is held');
+
+      final done = n.setPaletteStyle(PaletteStyle.swatches);
+      await pumpEventQueue();
+      hold.complete();
+      await done;
+
+      expect(_swatchOps(ble), [true, true, true, true]);
+      expect(shown(c), PaletteStyle.swatches);
     });
 
     String otherWisp(int seen) => jsonEncode({

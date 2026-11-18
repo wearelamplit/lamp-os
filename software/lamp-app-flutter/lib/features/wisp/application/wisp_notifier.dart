@@ -1193,8 +1193,9 @@ class WispNotifier extends _$WispNotifier {
   /// to the wisp's held setting at the send never confirms early: no config
   /// of its own need follow, so it resends for the whole budget, covering a
   /// late earlier pick, and then stands if the held setting is still
-  /// [style]. Any other pick that goes unconfirmed rolls back to the held
-  /// setting and throws. A newer call supersedes this one, which then stops
+  /// [style]. A pick whose attempts all go unconfirmed stands if the held
+  /// setting matches it by then, else rolls back to the held setting and
+  /// throws. A newer call supersedes this one, which then stops
   /// resending and returns.
   Future<void> setPaletteStyle(PaletteStyle style) async {
     final cur = state.value;
