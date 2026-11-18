@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <cstdint>
 #include <cstring>
+#include "osc/osc_target.hpp"
 #include "status/status_json.hpp"
 #include "esp_timer.h"
 #include "wire/lamp_protocol.hpp"
@@ -10,7 +11,7 @@ constexpr size_t CAP = 230;
 
 // The guaranteed core at worst-case field widths. Every other field sheds
 // before it, so a cap below it still yields this frame.
-constexpr size_t CORE_PIN = 188;
+constexpr size_t CORE_PIN = 208;
 
 // The widest lastSeenMs a wisp can send: esp_timer_get_time() / 1000 at the
 // top of its int64 range.
@@ -34,7 +35,7 @@ static wisp::WispStatusFields worstCase() {
       /*name=*/"12345678901234567890", /*hasPassword=*/true,
       /*wifiChannelMismatch=*/true, /*wifiApChannel=*/11,
       /*ethIp=*/"255.255.255.255", /*manualId=*/"abcdef12",
-      /*manualSeq=*/65535 };
+      /*manualSeq=*/65535, /*swatchesSeq=*/65535 };
 }
 
 // Defaults everywhere, Manual mode.
@@ -62,19 +63,23 @@ static wisp::WispConfigFields worstConfig() {
   c.opSeq = 4294967295u;
   std::strcpy(c.ip, "255.255.255.255");
   c.swatches = false;  // "false" is wider than "true"
+  c.oscMode = wisp::OscMode::Straylight;  // the widest mode name
+  c.oscSlot = 10;
+  c.oscAddr = "/0123456789abcd";  // kOscCustomAddressMaxLen bytes
   return c;
 }
 
 // Guaranteed core at pathological widths: 16-digit lastSeenMs, widest
 // source, both bools false (wider than true), hasPassword present, a
-// non-empty manualId, a 5-digit manualSeq. All optional fields at their app
-// defaults (omitted).
+// non-empty manualId, a 5-digit manualSeq and swatchesSeq. All optional
+// fields at their app defaults (omitted).
 void test_core_worst_case_pinned_under_cap() {
   wisp::WispStatusFields f = plain();
   setUptimeMs(kWidestStampMs);
   f.hasPassword = true;
   f.manualId = "abcdef12";
   f.manualSeq = 65535;
+  f.swatchesSeq = 65535;
   char out[256];
   size_t n = build(f, out, sizeof(out), CAP);
   TEST_ASSERT_EQUAL_UINT32(CORE_PIN, n);
@@ -89,6 +94,7 @@ void test_core_worst_case_pinned_under_cap() {
   TEST_ASSERT_TRUE(d["configSplit"].as<bool>());
   TEST_ASSERT_EQUAL_STRING("abcdef12", d["manualId"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT32(65535, d["manualSeq"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT32(65535, d["swatchesSeq"].as<uint32_t>());
   TEST_ASSERT_TRUE(d["auroraConnected"].isNull());
   TEST_ASSERT_TRUE(d["currentZone"].isNull());
   TEST_ASSERT_TRUE(d["zoneSource"].isNull());
@@ -160,7 +166,7 @@ void test_offcolor_role_and_prefix_outrank_the_rest() {
   f.oscRole = "fill";
   f.name = "abc";
   char out[512];
-  const size_t cap = 253;  // Off core 185 + offColor 22 + oscRole 17 + prefix 29
+  const size_t cap = 273;  // Off core 205 + offColor 22 + oscRole 17 + prefix 29
   size_t n = build(f, out, sizeof(out), cap);
   TEST_ASSERT_EQUAL_UINT32(cap, n);
   JsonDocument d;
@@ -177,7 +183,7 @@ void test_osc_role_and_prefix_outrank_the_rest() {
   wisp::WispStatusFields f = worstCase();
   f.name = "abc";
   char out[512];
-  const size_t cap = 239;  // core 188 + oscRole 22 + paletteIdPrefix 29
+  const size_t cap = 259;  // core 208 + oscRole 22 + paletteIdPrefix 29
   size_t n = build(f, out, sizeof(out), cap);
   TEST_ASSERT_EQUAL_UINT32(cap, n);
   JsonDocument d;
@@ -354,10 +360,28 @@ void test_manual_seq_rides_the_core_and_is_omitted_at_zero() {
   TEST_ASSERT_TRUE(d2["manualSeq"].isNull());
 }
 
+// swatchesSeq rides the core when a setSwatches set it, so no cap sheds the
+// echo a style pick waits for, and is omitted at 0, which means no echo.
+void test_swatches_seq_rides_the_core_and_is_omitted_at_zero() {
+  char out[1024];
+  wisp::WispStatusFields f = worstCase();
+  f.swatchesSeq = 7;
+  TEST_ASSERT_TRUE(build(f, out, sizeof(out), /*cap=*/0) > 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_UINT32(7, d["swatchesSeq"].as<uint32_t>());
+
+  f.swatchesSeq = 0;
+  TEST_ASSERT_TRUE(build(f, out, sizeof(out), /*cap=*/4096) > 0);
+  JsonDocument d2;
+  TEST_ASSERT_FALSE(deserializeJson(d2, out));
+  TEST_ASSERT_TRUE(d2["swatchesSeq"].isNull());
+}
+
 // Absolute worst case, untruncated: Off mode (offColor outweighs the longer
 // "manual"), every live field widest, both mismatch fields, ethIp. It fits
 // CONTROL_MAX_PAYLOAD with room to spare, so at the production cap nothing
-// sheds. Manual mode is 341. The lamp's merge adds up to 301 B on top
+// sheds. Manual mode is 361. The lamp's merge adds up to 301 B on top
 // (test_wisp_status_merge), which is why the app recovers an over-512 status
 // through the wispstatus page section. ArduinoJson escapes '"', '\' and
 // \b \f \n \r \t to two bytes and passes other control bytes raw, so a name
@@ -367,13 +391,13 @@ void test_worst_case_untruncated_length() {
   wisp::WispStatusFields f = worstCase();
   f.source = "off";
   size_t n = build(f, out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(360, n);
+  TEST_ASSERT_EQUAL_UINT32(380, n);
   n = build(worstCase(), out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(341, n);
+  TEST_ASSERT_EQUAL_UINT32(361, n);
 
   f.name = "\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"";
   n = build(f, out, sizeof(out), /*cap=*/4096);
-  TEST_ASSERT_EQUAL_UINT32(380, n);
+  TEST_ASSERT_EQUAL_UINT32(400, n);
   TEST_ASSERT_TRUE(n <= lamp_protocol::CONTROL_MAX_PAYLOAD);
 }
 
@@ -384,7 +408,7 @@ void test_worst_case_fits_control_op_at_production_cap() {
   char json[1024];
   size_t jsonLen = build(worstCase(), json, sizeof(json),
                          lamp_protocol::CONTROL_MAX_PAYLOAD);
-  TEST_ASSERT_EQUAL_UINT32(341, jsonLen);
+  TEST_ASSERT_EQUAL_UINT32(361, jsonLen);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, json));
   TEST_ASSERT_EQUAL_STRING("secondary", d["oscRole"].as<const char*>());
@@ -425,7 +449,11 @@ void test_config_carries_every_field_at_defaults() {
   TEST_ASSERT_EQUAL_STRING("", d["ip"].as<const char*>());
   TEST_ASSERT_TRUE(d["swatches"].is<bool>());
   TEST_ASSERT_FALSE(d["swatches"].as<bool>());
-  TEST_ASSERT_EQUAL_size_t(10, d.as<JsonObject>().size());
+  TEST_ASSERT_EQUAL_STRING("straylight", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(1, d["oscSlot"].as<int>());
+  TEST_ASSERT_TRUE(d["oscAddr"].is<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", d["oscAddr"].as<const char*>());
+  TEST_ASSERT_EQUAL_size_t(13, d.as<JsonObject>().size());
 }
 
 // The widest wispConfig. It must stay at most 255 B, since the builder
@@ -435,12 +463,76 @@ void test_config_worst_case_pinned() {
   wisp::WispConfigFields c = worstConfig();
   c.brightness = 100;
   size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
-  TEST_ASSERT_EQUAL_UINT32(191, n);
+  TEST_ASSERT_EQUAL_UINT32(255, n);
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_EQUAL_STRING("GRBW", d["ledType"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT32(4294967295u, d["opSeq"].as<uint32_t>());
   TEST_ASSERT_EQUAL_STRING("255.255.255.255", d["ip"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("straylight", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(10, d["oscSlot"].as<int>());
+  TEST_ASSERT_EQUAL_STRING(worstConfig().oscAddr, d["oscAddr"].as<const char*>());
+}
+
+// The pin fixture's address is as long as the rule allows.
+void test_config_pin_uses_the_longest_custom_address() {
+  TEST_ASSERT_EQUAL_size_t(wisp::kOscCustomAddressMaxLen,
+                           std::strlen(worstConfig().oscAddr));
+  TEST_ASSERT_TRUE(wisp::oscCustomAddressValid(worstConfig().oscAddr));
+}
+
+// Every address the rule takes serializes unescaped, so the widest config
+// holding any of them stays at most 255 B and every lamp takes it (P5).
+void test_config_fits_with_every_custom_address_byte() {
+  char out[256];
+  char addr[wisp::kOscCustomAddressMaxLen + 1];
+  for (int b = 1; b < 256; ++b) {
+    std::memset(addr, b, sizeof(addr) - 1);
+    addr[0] = '/';
+    addr[sizeof(addr) - 1] = '\0';
+    if (!wisp::oscCustomAddressValid(addr)) continue;
+    wisp::WispConfigFields c = worstConfig();
+    c.brightness = 100;
+    c.oscAddr = addr;
+    const size_t n = wisp::buildWispConfigJson(c, out, sizeof(out));
+    TEST_ASSERT_TRUE_MESSAGE(n > 0 && n <= 255, addr);
+    JsonDocument d;
+    TEST_ASSERT_FALSE(deserializeJson(d, out));
+    TEST_ASSERT_EQUAL_STRING(addr, d["oscAddr"].as<const char*>());
+  }
+}
+
+void test_config_reports_custom_and_address() {
+  char out[256];
+  wisp::WispConfigFields c;
+  c.oscMode = wisp::OscMode::Custom;
+  c.oscAddr = "/lamp/palette";
+  TEST_ASSERT_TRUE(wisp::buildWispConfigJson(c, out, sizeof(out)) > 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_STRING("custom", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", d["oscAddr"].as<const char*>());
+}
+
+// The widest mode name is the one the pin fixture uses.
+void test_config_pin_uses_the_widest_osc_mode() {
+  const size_t pinned = std::strlen(wisp::oscModeName(worstConfig().oscMode));
+  for (int m = 0; m < 256; ++m) {
+    const char* name = wisp::oscModeName(static_cast<wisp::OscMode>(m));
+    TEST_ASSERT_TRUE(std::strlen(name) <= pinned);
+  }
+}
+
+void test_config_reports_maestro_and_slot() {
+  char out[256];
+  wisp::WispConfigFields c;
+  c.oscMode = wisp::OscMode::Maestro;
+  c.oscSlot = 3;
+  TEST_ASSERT_TRUE(wisp::buildWispConfigJson(c, out, sizeof(out)) > 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_EQUAL_STRING("maestro", d["oscMode"].as<const char*>());
+  TEST_ASSERT_EQUAL_INT(3, d["oscSlot"].as<int>());
 }
 
 // A buffer too small for the document yields 0, never a truncated frame.
@@ -507,9 +599,15 @@ int main(int, char**) {
   RUN_TEST(test_config_split_survives_any_cap);
   RUN_TEST(test_manual_id_rides_the_core_in_every_mode);
   RUN_TEST(test_manual_seq_rides_the_core_and_is_omitted_at_zero);
+  RUN_TEST(test_swatches_seq_rides_the_core_and_is_omitted_at_zero);
   RUN_TEST(test_config_carries_every_field_at_defaults);
   RUN_TEST(test_config_worst_case_pinned);
   RUN_TEST(test_config_reports_swatches_when_set);
+  RUN_TEST(test_config_pin_uses_the_widest_osc_mode);
+  RUN_TEST(test_config_reports_maestro_and_slot);
+  RUN_TEST(test_config_pin_uses_the_longest_custom_address);
+  RUN_TEST(test_config_fits_with_every_custom_address_byte);
+  RUN_TEST(test_config_reports_custom_and_address);
   RUN_TEST(test_send_to_ip_prefers_ethernet_then_sta);
   RUN_TEST(test_config_too_small_buffer_returns_zero);
   RUN_TEST(test_builders_write_char_first);

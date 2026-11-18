@@ -210,15 +210,18 @@ void WispController::applySourceModeTransition(wisp::WispSourceMode mode) {
       pushManualPaletteToCurrent();
       Serial.println("[wisp] source=Manual — paintMode on");
       break;
-    case wisp::WispSourceMode::Osc:
+    case wisp::WispSourceMode::Osc: {
       // Choosing Osc is the paint opt-in. Lamps stay at Off until the first
       // palette makes the stream live.
       resetOscStream();
       paint_.setSourceLive(false);
       paint_.setPaintMode(true);
+      char address[kOscTargetAddressCap];
+      oscTargetAddress(config_.oscTarget(), address, sizeof(address));
       Serial.printf("[wisp] source=Osc — paintMode on, waiting for %s\n",
-                    oscPaletteAddress(config_.oscRole()));
+                    address);
       break;
+    }
   }
   renderRing();
   if (mode == wisp::WispSourceMode::Manual) artnet_.onPaletteChanged();
@@ -247,6 +250,18 @@ void WispController::applyOpResult(DispatchResult res) {
       // lands; onOscPalette keys its dedup on the role.
       status_.triggerOnChange();
       break;
+    case wisp::DispatchResult::AppliedOscSettings:
+      status_.triggerOnChange();
+      break;
+    case wisp::DispatchResult::AppliedOscRetarget: {
+      holdOscStream();
+      char address[kOscTargetAddressCap];
+      oscTargetAddress(config_.oscTarget(), address, sizeof(address));
+      Serial.printf("[osc] now %s — holding lamps at Off until its first "
+                    "palette\n", address);
+      status_.triggerOnChange();
+      break;
+    }
     case wisp::DispatchResult::AppliedWifiChange:
       Serial.println("[wisp] wifi creds updated; STA reconnect + advert refresh kicked");
       status_.triggerOnChange();
@@ -352,7 +367,7 @@ void WispController::onOscFeed(uint32_t nowMs) {
 
 void WispController::tickOscLiveness(uint32_t now) {
   if (config_.sourceMode() != wisp::WispSourceMode::Osc) return;
-  if (oscFresh_.tick(now)) {
+  if (oscFresh_.tick(now, config_.oscTarget())) {
     holdOscStream();
     Serial.println(
         "[osc] palette stale — holding lamps at Off, paint mode kept");

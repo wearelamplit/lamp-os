@@ -31,6 +31,13 @@ class ExpressionRegistry {
   const ExpressionDescriptor* find(const char* id) const;
   const std::vector<const ExpressionDescriptor*>& all() const;
 
+  // True for a registered type a person may configure as one of the lamp's
+  // expressions; an internal type plays only when the lamp fires it.
+  bool configurable(const char* id) const;
+  // Erases every entry whose type is registered here as internal; returns how
+  // many went.
+  size_t dropInternal(ExpressionSettings& settings) const;
+
   // Fills missing param keys from each ParamSpec's resolved default and folds
   // interval/duration range defaults into their min/maxKey. Never overwrites a
   // present key.

@@ -54,9 +54,9 @@ class WispController {
   // Any other packet from the Straylight feed: keeps a held palette live.
   void onOscFeed(uint32_t nowMs);
 
-  // Osc mode with no palette for OscFreshness::kStaleMs: hold lamps and ring
-  // at Off with paint mode kept, until the next palette. Also releases a
-  // held paint update.
+  // Osc mode with no palette for the target's stale window: hold lamps and
+  // ring at Off with paint mode kept, until the next palette. Also releases
+  // a held paint update.
   void tickOscLiveness(uint32_t now);
 
   // Osc mode with a fresh palette. HELLO flag bit 2 + wispStatus sourceLive.

@@ -7,6 +7,47 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **Mushrooms tint nearby lamps.** When a mushroom spores near a lamp, the
+  lamp sparkles in the strain's colour for 6 s, then the colour blooms over
+  its base, holds 20 s and fades back over up to 100 s. A lamp mid-tint
+  still sparkles at the next spore but doesn't tint again. Older lamps keep
+  playing it as a 2 s sparkle. No change to the mesh messages or the app.
+- **The app shows where to send OSC.** The third palette source is now called
+  OSC, with the Straylight role picker under it, and shows the wisp's address
+  and port 9000 with a copy button, or says the wisp has no address yet. Needs
+  the wisp on 1.3.8; an older wisp on Ethernet shows its Ethernet address.
+- **Gradient or Swatches for the wisp's palette, in the app.** Under Manual
+  and OSC a Gradient | Swatches switch picks how lamps take the palette; the
+  painted-lamps preview and the palette bar follow it, the bar drawing solid
+  blocks in Swatches as the wisp's ring does. A change the wisp never confirms
+  goes back with "Couldn't reach the wisp." Shows only for a wisp on 1.3.8.
+- **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can
+  read a Maestro's live palette slot (1 to 10) instead of Straylight, in
+  either colour format the Maestro sends (hex, or a float layout with white
+  driving the lamps' white LEDs and amber mixed in as orange). Set it with
+  `osc:mode maestro` and `osc:slot <n>` on the wisp's console, then point the
+  Maestro at the wisp's address, port 9000. Lamps keep the last Maestro
+  palette when it goes quiet. Needs the wisp reflashed.
+- **Maestro under the OSC source, in the app.** A Straylight | Maestro switch
+  picks the sender; Maestro shows a palette slot picker (1 to 10) and says
+  what to set on the Maestro ("send palette slot 3 to 192.168.1.42, port
+  9000"), with the send-to address under both. A change shows at once and
+  goes back with "Couldn't reach the wisp." if the wisp never confirms it.
+  Needs the wisp reflashed with the Maestro firmware above; an older wisp
+  shows the Straylight role picker and asks to be updated.
+- **The wisp follows any OSC sender on a typed address.** A third OSC
+  sub-mode, Custom, reads one address you type (up to 15 characters,
+  starting with `/`), matched exactly, and works out the colour format from
+  the message itself. Set it with `osc:addr </path>` and `osc:mode custom` on
+  the wisp's console; the wisp reports the address in its settings. Needs the
+  wisp reflashed.
+- **The wisp numbers each Gradient/Swatches pick.** A `setSwatches` from
+  the app can carry a number the wisp echoes in its status as `swatchesSeq`,
+  so the app can tell its latest pick landed rather than a late copy of an
+  earlier one. Needs the wisp reflashed; an older app's pick works as before.
+  The app's Gradient | Swatches switch confirms on it, so it can't be left
+  showing a stale pick.
 ### Fixed
 - **More memory free once a lamp has booted.** The lamp checks its web UI
   files at boot without splitting its memory, and stops holding them open
@@ -14,6 +55,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   and web UI updates over the mesh work as before.
 
 ### Changed
+- **Yawn is built in.** The app and Web Config no longer offer Yawn as an
+  expression to add or configure; lamps still yawn on their own, a tired
+  introvert now and then and a lamp yawning back at a peer. A lamp that had
+  Yawn added drops it on update and keeps its other expressions.
+- **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
+  app's Test with colours, or a mushroom's tint, fades back and stops; a
+  configured Shifty still chains into Glitchy.
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
   status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told
@@ -31,7 +79,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   the app to show under the OSC source. Needs the wisp reflashed.
 - **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
   lamp two of the palette's own colours exactly, and a colour listed more
-  often goes to more lamps. Set it with `paint:swatches on|off` on the wisp's
+  than once is on the base of more lamps. Set it with `paint:swatches on|off` on the wisp's
   console. Needs the wisp reflashed.
 
 ### Fixed

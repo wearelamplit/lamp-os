@@ -12,6 +12,9 @@
 #include <mbedtls/hkdf.h>
 #include <mbedtls/md.h>
 
+#include "../test_osc_address/osc_address_cases.hpp"
+#include "status/status_json.hpp"
+
 // CHAR_WISP_OP UUID 5f64f4e1-d6d9-4a44-9b3f-3a8d6f7e6b40, byte-reversed (LE).
 static const uint8_t kWispOpSaltLE[16] = {
     0x40, 0x6b, 0x7e, 0x6f, 0x8d, 0x3a, 0x3f, 0x9b,
@@ -699,10 +702,375 @@ void test_set_swatches_sealed_bumps_op_seq() {
     wisp::crypto::RecentNonces nonces;
     d.setNonces(&nonces);
     const auto sealed = sealWispOp("testpass", 0x03,
-        R"({"char":"wispOp","op":"setSwatches","swatches":true})");
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":9})");
     TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches,
         (int)d.dispatch(sealed.data(), sealed.size()));
     TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+    TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+    TEST_ASSERT_EQUAL_UINT16(9, cfg.swatchesSeq());
+}
+
+// The status's swatchesSeq as the wisp builds it from the config.
+static uint32_t statusSwatchesSeq(const wisp::WispConfig& cfg) {
+    wisp::WispStatusFields f{};
+    f.source = "manual";
+    f.swatchesSeq = cfg.swatchesSeq();
+    char out[512];
+    TEST_ASSERT_TRUE(wisp::buildWispStatusJson(f, out, sizeof(out), 0) > 0);
+    JsonDocument doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, out));
+    return doc["swatchesSeq"].isNull() ? 0 : doc["swatchesSeq"].as<uint32_t>();
+}
+
+// After pick A then pick B, the status names B; a late copy of A lands
+// as A's number, so a reader waiting on B tells the two apart. A pick of the
+// held style moves the echo too.
+void test_set_swatches_echoes_the_seq_of_the_last_applied_pick() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    const char* pickA = R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":41})";
+    const char* pickB = R"({"char":"wispOp","op":"setSwatches","swatches":false,"seq":42})";
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickA));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickB));
+    TEST_ASSERT_EQUAL_UINT32(42, statusSwatchesSeq(cfg));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Gradient, (int)cfg.paletteStyle());
+
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d, pickA));
+    TEST_ASSERT_EQUAL_UINT32(41, statusSwatchesSeq(cfg));
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedSwatches, (int)dispatchStr(d,
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":43})"));
+    TEST_ASSERT_EQUAL_UINT32(43, statusSwatchesSeq(cfg));
+    TEST_ASSERT_EQUAL_UINT32(0, cfg.opSeq());
+}
+
+// No seq, or one that is not an integer in 1..65535, means none: the op
+// sets its style and clears the previous echo.
+void test_set_swatches_without_valid_seq_clears_echo() {
+    const char* ops[] = {
+        R"({"char":"wispOp","op":"setSwatches","swatches":true})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":0})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":70000})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":-1})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":"42"})",
+        R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":4.5})",
+    };
+    for (const char* op : ops) {
+        wisp::WispConfig cfg;
+        cfg.begin();
+        wisp::WispOpDispatcher d(cfg);
+        dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":false,"seq":42})");
+        TEST_ASSERT_EQUAL_UINT16(42, cfg.swatchesSeq());
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::AppliedSwatches,
+                                      (int)dispatchStr(d, op), op);
+        TEST_ASSERT_EQUAL_UINT16_MESSAGE(0, cfg.swatchesSeq(), op);
+        TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+    }
+}
+
+// A style op that sets nothing leaves the echo of the last one that did.
+void test_malformed_swatches_op_keeps_echo() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","swatches":true,"seq":42})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setSwatches","seq":7})"));
+    TEST_ASSERT_EQUAL_UINT16(42, cfg.swatchesSeq());
+    TEST_ASSERT_EQUAL_INT((int)wisp::PaletteStyle::Swatches, (int)cfg.paletteStyle());
+}
+
+void test_set_osc_maestro_applies_and_reloads() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":3})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(3, cfg.oscSlot());
+    wisp::WispConfig reload;
+    reload.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)reload.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(3, reload.oscSlot());
+}
+
+// A setOsc with no slot keeps the stored one, so switching sub-mode never
+// moves the Maestro slot.
+void test_set_osc_without_slot_keeps_slot() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Maestro, 8, "");
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"straylight"})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(8, cfg.oscSlot());
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":null})"));
+    TEST_ASSERT_EQUAL_UINT8(8, cfg.oscSlot());
+}
+
+// Any invalid field makes the whole op Malformed and changes nothing.
+void test_set_osc_invalid_changes_nothing() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Maestro, 4, "");
+    wisp::WispOpDispatcher d(cfg);
+    const char* bad[] = {
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":0})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":11})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":-1})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":"3"})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":2.5})",
+        R"({"char":"wispOp","op":"setOsc","mode":"straylight","slot":true})",
+        R"({"char":"wispOp","op":"setOsc","mode":"aurora","slot":2})",
+        R"({"char":"wispOp","op":"setOsc","mode":"Custom","address":"/a"})",
+        R"({"char":"wispOp","op":"setOsc","mode":1,"slot":2})",
+        R"({"char":"wispOp","op":"setOsc","slot":2})",
+    };
+    for (const char* op : bad) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::Malformed,
+                                      (int)dispatchStr(d, op), op);
+        TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+        TEST_ASSERT_EQUAL_UINT8(4, cfg.oscSlot());
+    }
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":10})"));
+    TEST_ASSERT_EQUAL_UINT8(10, cfg.oscSlot());
+}
+
+// In Osc, a setOsc that moves the listened address says so; a resend and a
+// change made outside Osc do not.
+void test_set_osc_reports_a_live_retarget() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    const char* slot3 = R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":3})";
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, slot3));
+    cfg.setSourceMode(wisp::WispSourceMode::Osc);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, slot3));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":4})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"straylight"})"));
+}
+
+// setOsc is config like any other: sealed once a password is set.
+void test_set_osc_plaintext_rejected_with_password() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Rejected,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":3})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+}
+
+// A sealed setOsc counts as applied, so opSeq confirms it for the app.
+void test_set_osc_sealed_bumps_op_seq() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    wisp::crypto::RecentNonces nonces;
+    d.setNonces(&nonces);
+    const auto sealed = sealWispOp("testpass", 0x05,
+        R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":9})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)d.dispatch(sealed.data(), sealed.size()));
+    TEST_ASSERT_EQUAL_UINT8(9, cfg.oscSlot());
+    TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
+    cfg.setSourceMode(wisp::WispSourceMode::Osc);
+    const auto retarget = sealWispOp("testpass", 0x06,
+        R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":2})");
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)d.dispatch(retarget.data(), retarget.size()));
+    TEST_ASSERT_EQUAL_UINT32(2, cfg.opSeq());
+}
+
+static std::string setOscCustom(const char* address) {
+    return std::string(R"({"char":"wispOp","op":"setOsc","mode":"custom","address":")") +
+           address + "\"}";
+}
+
+void test_set_osc_custom_applies_and_reloads() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, setOscCustom("/lamp/palette").c_str()));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_STRING("/lamp/palette", cfg.oscAddress());
+    wisp::WispConfig reload;
+    reload.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)reload.oscMode());
+    TEST_ASSERT_EQUAL_STRING("/lamp/palette", reload.oscAddress());
+}
+
+// Every case of the shared address rule: a valid address applies, an
+// invalid one makes the op Malformed and changes nothing.
+void test_set_osc_address_follows_the_rule() {
+    for (const OscAddressCase& c : kOscAddressCases) {
+        kv_reset();
+        wisp::WispConfig cfg;
+        cfg.begin();
+        cfg.setOsc(wisp::OscMode::Maestro, 4, "/kept");
+        wisp::WispOpDispatcher d(cfg);
+        JsonDocument op;
+        op["char"] = "wispOp";
+        op["op"] = "setOsc";
+        op["mode"] = "custom";
+        op["address"] = c.address;
+        std::string json;
+        serializeJson(op, json);
+        const auto res = dispatchStr(d, json.c_str());
+        if (c.valid) {
+            TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::AppliedOscSettings,
+                                          (int)res, c.address);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(c.address, cfg.oscAddress(), c.address);
+            TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)cfg.oscMode());
+        } else {
+            TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::Malformed,
+                                          (int)res, c.address);
+            TEST_ASSERT_EQUAL_STRING("/kept", cfg.oscAddress());
+            TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+            TEST_ASSERT_EQUAL_UINT8(4, cfg.oscSlot());
+        }
+    }
+}
+
+// An address that is not a string, carries a NUL, or is empty is Malformed
+// and changes nothing.
+void test_set_osc_address_must_be_a_string() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Maestro, 4, "/kept");
+    wisp::WispOpDispatcher d(cfg);
+    const char* bad[] = {
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":5})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":true})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":["/a"]})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":{"a":1}})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":"/a\u0000#"})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":"/a\u0000"})",
+        R"({"char":"wispOp","op":"setOsc","mode":"maestro","address":""})",
+    };
+    for (const char* op : bad) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::Malformed,
+                                      (int)dispatchStr(d, op), op);
+        TEST_ASSERT_EQUAL_STRING("/kept", cfg.oscAddress());
+        TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+    }
+}
+
+// applyOscSettings, the path the console takes too, holds the rule itself:
+// every invalid case is Malformed in any sub-mode and stores nothing; ""
+// stores outside Custom only.
+void test_apply_osc_settings_follows_the_rule() {
+    for (wisp::OscMode mode : {wisp::OscMode::Maestro, wisp::OscMode::Custom}) {
+        for (const OscAddressCase& c : kOscAddressCases) {
+            kv_reset();
+            wisp::WispConfig cfg;
+            cfg.begin();
+            cfg.setOsc(wisp::OscMode::Straylight, 4, "/kept");
+            const bool empty = c.address[0] == '\0';
+            const bool takes = c.valid || (empty && mode != wisp::OscMode::Custom);
+            const auto res = wisp::applyOscSettings(cfg, mode, 7, c.address);
+            TEST_ASSERT_EQUAL_INT_MESSAGE(
+                (int)(takes ? wisp::DispatchResult::AppliedOscSettings
+                            : wisp::DispatchResult::Malformed),
+                (int)res, c.address);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(takes ? c.address : "/kept",
+                                             cfg.oscAddress(), c.address);
+            TEST_ASSERT_EQUAL_UINT8(takes ? 7 : 4, cfg.oscSlot());
+        }
+    }
+    kv_reset();
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed,
+        (int)wisp::applyOscSettings(cfg, wisp::OscMode::Maestro, 2, nullptr));
+    TEST_ASSERT_EQUAL_UINT8(1, cfg.oscSlot());
+}
+
+// An absent or null address keeps the stored one, so switching sub-mode or
+// slot never moves it, and switching back to Custom needs no address.
+void test_set_osc_without_address_keeps_address() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Custom, 1, "/lamp/a");
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","slot":5})"));
+    TEST_ASSERT_EQUAL_STRING("/lamp/a", cfg.oscAddress());
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"custom","address":null})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_STRING("/lamp/a", cfg.oscAddress());
+    TEST_ASSERT_EQUAL_UINT8(5, cfg.oscSlot());
+}
+
+// An address sent with another sub-mode is stored for a later Custom.
+void test_set_osc_stores_address_outside_custom() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, R"({"char":"wispOp","op":"setOsc","mode":"maestro","address":"/later"})"));
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_STRING("/later", cfg.oscAddress());
+}
+
+// Custom with no address sent and none stored would listen to nothing.
+void test_set_osc_custom_needs_an_address() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setOsc(wisp::OscMode::Maestro, 3, "");
+    wisp::WispOpDispatcher d(cfg);
+    for (const char* op : {
+             R"({"char":"wispOp","op":"setOsc","mode":"custom"})",
+             R"({"char":"wispOp","op":"setOsc","mode":"custom","address":null})",
+             R"({"char":"wispOp","op":"setOsc","mode":"custom","slot":2})"}) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::Malformed,
+                                      (int)dispatchStr(d, op), op);
+        TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
+        TEST_ASSERT_EQUAL_UINT8(3, cfg.oscSlot());
+    }
+}
+
+// In Osc, a Custom address change retargets; a resend does not.
+void test_set_osc_custom_reports_a_live_retarget() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setSourceMode(wisp::WispSourceMode::Osc);
+    wisp::WispOpDispatcher d(cfg);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)dispatchStr(d, setOscCustom("/a").c_str()));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)dispatchStr(d, setOscCustom("/a").c_str()));
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscRetarget,
+        (int)dispatchStr(d, setOscCustom("/b").c_str()));
+}
+
+// A sealed Custom change bumps opSeq, so the app can confirm it.
+void test_set_osc_custom_sealed_bumps_op_seq() {
+    wisp::WispConfig cfg;
+    cfg.begin();
+    cfg.setPassword("testpass");
+    wisp::WispOpDispatcher d(cfg);
+    wisp::crypto::RecentNonces nonces;
+    d.setNonces(&nonces);
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Rejected,
+        (int)dispatchStr(d, setOscCustom("/a").c_str()));
+    TEST_ASSERT_EQUAL_STRING("", cfg.oscAddress());
+    const auto sealed = sealWispOp("testpass", 0x07, setOscCustom("/a").c_str());
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::AppliedOscSettings,
+        (int)d.dispatch(sealed.data(), sealed.size()));
+    TEST_ASSERT_EQUAL_STRING("/a", cfg.oscAddress());
     TEST_ASSERT_EQUAL_UINT32(1, cfg.opSeq());
 }
 
@@ -789,5 +1157,23 @@ int main(int, char**) {
     RUN_TEST(test_set_swatches_needs_a_bool);
     RUN_TEST(test_set_swatches_plaintext_rejected_with_password);
     RUN_TEST(test_set_swatches_sealed_bumps_op_seq);
+    RUN_TEST(test_set_swatches_echoes_the_seq_of_the_last_applied_pick);
+    RUN_TEST(test_set_swatches_without_valid_seq_clears_echo);
+    RUN_TEST(test_malformed_swatches_op_keeps_echo);
+    RUN_TEST(test_set_osc_maestro_applies_and_reloads);
+    RUN_TEST(test_set_osc_without_slot_keeps_slot);
+    RUN_TEST(test_set_osc_invalid_changes_nothing);
+    RUN_TEST(test_set_osc_plaintext_rejected_with_password);
+    RUN_TEST(test_set_osc_reports_a_live_retarget);
+    RUN_TEST(test_set_osc_sealed_bumps_op_seq);
+    RUN_TEST(test_set_osc_custom_applies_and_reloads);
+    RUN_TEST(test_set_osc_address_follows_the_rule);
+    RUN_TEST(test_set_osc_address_must_be_a_string);
+    RUN_TEST(test_apply_osc_settings_follows_the_rule);
+    RUN_TEST(test_set_osc_without_address_keeps_address);
+    RUN_TEST(test_set_osc_stores_address_outside_custom);
+    RUN_TEST(test_set_osc_custom_needs_an_address);
+    RUN_TEST(test_set_osc_custom_reports_a_live_retarget);
+    RUN_TEST(test_set_osc_custom_sealed_bumps_op_seq);
     return UNITY_END();
 }

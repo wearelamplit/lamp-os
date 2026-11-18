@@ -146,6 +146,31 @@ class WispRepository {
     });
   }
 
+  /// Which OSC sender the wisp listens to, and with [slot] the Maestro
+  /// palette slot; a null [slot] keeps the stored one. Persisted in wisp NVS
+  /// and echoed as `oscMode` / `oscSlot` in its `wispConfig`.
+  Future<void> setOsc(OscMode mode, {int? slot}) async {
+    assert(mode != OscMode.unknown);
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setOsc',
+      'mode': mode.name,
+      'slot': ?slot,
+    });
+  }
+
+  /// How lamps take colours from the palette, in every source mode. Persisted
+  /// in wisp NVS and echoed as `swatches` in its `wispConfig`. [seq], 1..65535,
+  /// is echoed as the status's `swatchesSeq` until the next `setSwatches`.
+  Future<void> setSwatches(bool swatches, {int? seq}) async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setSwatches',
+      'swatches': swatches,
+      'seq': ?seq,
+    });
+  }
+
   /// Payload budget for a wispOp: the lamp's BLE stack takes at most 512 B
   /// per attribute write (`BLE_ATT_ATTR_MAX_LEN`), under the 576 B its
   /// MSG_CONTROL_OP relay carries. A larger write fails. The widest palette

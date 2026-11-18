@@ -12,6 +12,7 @@ import '../../../core/ble/uuids.dart';
 import '../data/wisp_password_store.dart';
 import '../data/wisp_repository.dart';
 import 'manual_palette_draft.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_config.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
@@ -102,12 +103,12 @@ class WispNotifier extends _$WispNotifier {
   // Bumped on every setManualPalette, the same way [_setSourceEpoch] is.
   int _paletteSaveEpoch = 0;
 
-  /// The first palette save `seq` this notifier sends, 1..65535. Random, so
-  /// two phones rarely start on the same one.
+  /// The first op `seq` this notifier sends (a palette save or a palette
+  /// style pick), 1..65535. Random, so two phones rarely start on the same one.
   @visibleForTesting
   static int Function() debugSeqStart = () => Random().nextInt(_seqMax) + 1;
   static const int _seqMax = 65535;
-  int? _lastSaveSeq;
+  int? _lastSeq;
 
   // Palette comes from the dedicated `wisppalette` page section, not the
   // status char (whose palette-less NOTIFY would clobber it). A status
@@ -141,6 +142,8 @@ class WispNotifier extends _$WispNotifier {
   final Map<String, String?> _manualIds = {};
   // The `manualSeq` each such wisp echoed last.
   final Map<String, int> _manualSeqs = {};
+  // The `swatchesSeq` each wisp's latest own status echoed, 0 for none.
+  final Map<String, int> _swatchesSeqs = {};
   // The wisp the known palette belongs to, the wisp of the latest present
   // status, and whether the wisp sent that status (the lamp's hello-only
   // merge did not).
@@ -256,6 +259,20 @@ class WispNotifier extends _$WispNotifier {
   // Every opSeq the wisp reports, from a status or a `wispconfig` read.
   late StreamController<int> _opSeqs;
 
+  // Every `wispconfig` read, with the wisp it was read for and the lamp's
+  // `configLastSeenMs` stamp it was read under.
+  late StreamController<({String? mac, int? stamp, WispConfig config})>
+      _configReads;
+
+  final _stylePick = _ConfigPick<PaletteStyle>();
+  final _oscPick = _ConfigPick<_OscPick>();
+
+  /// One attempt's confirm window for a setting that confirms on a config
+  /// read: the op's status, the config 250 ms to 2 s after it, then the
+  /// notify and the section read.
+  @visibleForTesting
+  static Duration debugConfigConfirmWindow = const Duration(seconds: 10);
+
   // FbpBleClient has no internal lock, so two concurrent characteristic
   // reads stall the GATT flow on Android; every read here skips while
   // another is in flight. A skipped config read runs once the link is free;
@@ -278,6 +295,7 @@ class WispNotifier extends _$WispNotifier {
     _paletteRereadInFlight = false;
     _manualIds.clear();
     _manualSeqs.clear();
+    _swatchesSeqs.clear();
     _paletteMac = null;
     _statusMac = null;
     _statusFromWisp = false;
@@ -305,6 +323,10 @@ class WispNotifier extends _$WispNotifier {
     _settingsWritesReadBack = 0;
     final incoming = _incoming = StreamController<WispStatus>.broadcast();
     final opSeqs = _opSeqs = StreamController<int>.broadcast();
+    final configReads = _configReads = StreamController<
+        ({String? mac, int? stamp, WispConfig config})>.broadcast();
+    _stylePick.clear();
+    _oscPick.clear();
 
     ref.onDispose(() {
       _disposed = true;
@@ -312,6 +334,7 @@ class WispNotifier extends _$WispNotifier {
       _connSub?.cancel();
       unawaited(incoming.close());
       unawaited(opSeqs.close());
+      unawaited(configReads.close());
       _offColorWriteTimer?.cancel();
       _driftWriteTimer?.cancel();
       _brightnessWriteTimer?.cancel();
@@ -373,8 +396,7 @@ class WispNotifier extends _$WispNotifier {
       // cover that window. Kept tight (2x1.5s) so a genuinely wisp-less lamp
       // resolves fast rather than sitting in loading; the notify subscription
       // (already attached above) catches anything slower.
-      var initial = _applySourceWriteGuard(await _repo.readStatus()) ??
-          WispStatus.empty;
+      var initial = await _readStatusNoted() ?? WispStatus.empty;
       if (_disposed) return WispStatus.empty;
       for (var attempt = 0; !initial.present && attempt < 2; attempt++) {
         await Future.delayed(const Duration(milliseconds: 1500));
@@ -386,11 +408,9 @@ class WispNotifier extends _$WispNotifier {
           initial = live;
           break;
         }
-        initial = _applySourceWriteGuard(await _repo.readStatus()) ??
-            WispStatus.empty;
+        initial = await _readStatusNoted() ?? WispStatus.empty;
         if (_disposed) return WispStatus.empty;
       }
-      _notePaletteStatus(initial);
       // Palette rides its own reliable section read, decoupled from the
       // notify-clobbered status char. Awaited before _loadClaims so the two
       // BLE reads don't collide on FbpBleClient's lockless flow.
@@ -558,6 +578,9 @@ class WispNotifier extends _$WispNotifier {
   /// guard and the palette / config / claims re-read triggers.
   void _onIncoming(WispStatus raw) {
     if (_disposed) return;
+    if (_stylePick.overriddenBy(raw.wispMac, raw.swatchesSeq)) {
+      unawaited(_reassertStyle());
+    }
     var next = _withHeldConfig(raw);
     final paletteWasKnown = _currentPaletteKnown;
     _notePaletteStatus(next);
@@ -600,6 +623,14 @@ class WispNotifier extends _$WispNotifier {
     );
   }
 
+  // A build read, noted before the source-write guard as `_onIncoming` notes
+  // a notify, so a status the guard holds off still names its wisp.
+  Future<WispStatus?> _readStatusNoted() async {
+    final raw = await _repo.readStatus();
+    _notePaletteStatus(raw);
+    return _applySourceWriteGuard(raw);
+  }
+
   Future<void> _rereadStatusSection() async {
     if (_readBusy || _disposed) return;
     _statusRereadInFlight = true;
@@ -618,15 +649,20 @@ class WispNotifier extends _$WispNotifier {
   }
 
   /// [status] with the held config merged in, when the config came from the
-  /// same wisp.
+  /// same wisp, and the settings still confirming laid over it.
   WispStatus _withHeldConfig(WispStatus status) {
     final config = _config;
-    if (config == null ||
-        status.wispMac == null ||
-        status.wispMac != _configMac) {
-      return status;
+    var out = status;
+    if (config != null &&
+        status.wispMac != null &&
+        status.wispMac == _configMac) {
+      out = status.withConfig(config, seenMs: _lastConfigSeenMs);
     }
-    return status.withConfig(config);
+    final style = _stylePick.heldFor(out.wispMac, out.swatchesSeq);
+    if (style != null) out = out.copyWith(paletteStyle: style);
+    final osc = _oscPick.heldFor(out.wispMac);
+    if (osc != null) out = out.copyWith(oscMode: osc.mode, oscSlot: osc.slot);
+    return out;
   }
 
   // Bounded wait for an in-flight read, so a caller that needs the section's
@@ -674,6 +710,11 @@ class WispNotifier extends _$WispNotifier {
     _config = config;
     _configMac = forStatus.wispMac;
     _lastConfigSeenMs = forStatus.configLastSeenMs;
+    _configReads.add((
+      mac: forStatus.wispMac,
+      stamp: forStatus.configLastSeenMs,
+      config: config,
+    ));
     if (!emit) return config;
     final cur = state.value;
     if (cur == null) return config;
@@ -769,6 +810,7 @@ class WispNotifier extends _$WispNotifier {
   void _notePaletteStatus(WispStatus status) {
     final mac = status.wispMac;
     if (mac == null) return;
+    if (status.fromWisp) _swatchesSeqs[mac] = status.swatchesSeq;
     if (!status.fromWisp) _currentPaletteKnown = false;
     final stated = status.manualId;
     if (stated == null) {
@@ -819,7 +861,7 @@ class WispNotifier extends _$WispNotifier {
     } catch (e, st) {
       debugPrint('WispNotifier.setOscRole($role) failed: $e\n$st');
       if (_disposed) rethrow;
-      state = prev;
+      state = _withPending(prev);
       rethrow;
     }
   }
@@ -1151,6 +1193,160 @@ class WispNotifier extends _$WispNotifier {
     _readBackAfterWrite();
   }
 
+  /// Set how lamps take colours from the palette, confirmed as
+  /// [_sendConfigPick] describes, on the `swatchesSeq` echo.
+  Future<void> setPaletteStyle(PaletteStyle style) {
+    final mac = state.value?.wispMac;
+    return _sendStyle(style, mac == null ? null : _mintSeq(_swatchesSeqs[mac]));
+  }
+
+  // The picked wisp applied the pick, then echoed the seq of a pick this phone
+  // superseded, so a late copy of that pick landed after it. Send it again.
+  Future<void> _reassertStyle() async {
+    final style = _stylePick.value;
+    if (style == null || state.value?.wispMac != _stylePick.mac) return;
+    try {
+      await _sendStyle(style, _stylePick.seq);
+    } catch (e) {
+      debugPrint('[wisp_notifier] palette style re-send failed: $e');
+    }
+  }
+
+  Future<void> _sendStyle(PaletteStyle style, int? seq) => _sendConfigPick(
+        pick: _stylePick,
+        value: style,
+        seq: seq,
+        echoed: (mac) => _swatchesSeqs[mac] ?? 0,
+        shows: (c) => c.paletteStyle == style,
+        send: (seq) =>
+            _repo.setSwatches(style == PaletteStyle.swatches, seq: seq),
+      );
+
+  /// Set which OSC sender the wisp listens to, keeping the Maestro slot,
+  /// confirmed as [_sendConfigPick] describes. A slot still confirming rides
+  /// along.
+  Future<void> setOscMode(OscMode mode) {
+    final slot = _oscPick.heldFor(state.value?.wispMac)?.slot;
+    return _sendOsc((mode: mode, slot: slot));
+  }
+
+  /// Listen to the Maestro on palette [slot], confirmed as [_sendConfigPick]
+  /// describes.
+  Future<void> setMaestroSlot(int slot) =>
+      _sendOsc((mode: OscMode.maestro, slot: slot));
+
+  Future<void> _sendOsc(_OscPick osc) => _sendConfigPick(
+        pick: _oscPick,
+        value: osc,
+        shows: (c) =>
+            c.oscMode == osc.mode &&
+            (osc.slot == null || c.oscSlot == osc.slot),
+        send: (_) => _repo.setOsc(osc.mode, slot: osc.slot),
+      );
+
+  /// Send a setting the wisp echoes in its config, and, given a [seq], also
+  /// in its status as [echoed] reads it. [value] shows at once and holds,
+  /// over every status and any config read still showing the old setting,
+  /// until confirmed, resending on a miss. A status from this wisp echoing
+  /// [seq] confirms it, and [value] then keeps showing while this wisp's
+  /// status echoes [seq]. Until this wisp's status echoes some seq, a config
+  /// the lamp cached after the send that [shows] it from this wisp confirms
+  /// it too. A read of a config cached before the send never confirms, since
+  /// an earlier pick may still land after it. A pick the wisp's held config
+  /// already [shows] at the send never confirms on a config, since no config
+  /// of its own need follow. Without its echo it resends for the whole budget,
+  /// covering a late earlier pick, and then stands if the held config still
+  /// shows it. A pick whose attempts all go unconfirmed stands if the held
+  /// config shows it by then, else rolls back to the held setting and throws.
+  /// A newer pick on the same [pick] supersedes this one, which then stops
+  /// resending and returns. Once a status comes from another wisp, adopted or
+  /// held off by the source-write guard, it stops resending, since the lamp
+  /// would relay the op to that wisp, and counts as unconfirmed.
+  Future<void> _sendConfigPick<T extends Object>({
+    required _ConfigPick<T> pick,
+    required T value,
+    required bool Function(WispConfig config) shows,
+    required Future<void> Function(int? seq) send,
+    int? seq,
+    int Function(String mac)? echoed,
+  }) async {
+    final cur = state.value;
+    final mac = cur?.wispMac;
+    if (cur == null || mac == null) throw StateError('no wisp shown');
+    if (pick.confirming && pick.value == value && pick.mac == mac) return;
+    final sentAfter = cur.configLastSeenMs;
+    final heldAtSend = _configMac == mac ? _config : null;
+    final pickBack = heldAtSend != null && shows(heldAtSend);
+    final epoch = ++pick.epoch;
+    pick.start(value, mac, seq);
+    state = AsyncData(_withHeldConfig(cur));
+    final echoesSeq = seq == null || echoed == null
+        ? null
+        : () => _incoming.stream
+            .firstWhere((s) => s.wispMac == mac && echoed(mac) == seq)
+            .timeout(debugConfigConfirmWindow)
+            .then((_) => true)
+            .catchError((_) => false);
+    final landed = await _sendConfirmed(
+      send: () async {
+        await send(seq);
+        _readBackAfterWrite();
+      },
+      confirm: () {
+        final byConfig = pickBack
+            ? Future<bool>.delayed(debugConfigConfirmWindow, () => false)
+            : _confirmConfigRead(
+                mac,
+                sentAfter,
+                (c) => shows(c) && (echoed == null || echoed(mac) == 0),
+              );
+        return echoesSeq == null
+            ? byConfig
+            : _eitherTrue(echoesSeq(), byConfig);
+      },
+      isSuperseded: () => pick.epoch != epoch || _statusMac != mac,
+    );
+    if (_disposed || pick.epoch != epoch) return;
+    pick.confirming = false;
+    pick.landed = landed;
+    final held = _configMac == mac ? _config : null;
+    final now = state.value;
+    if (now != null) state = AsyncData(_withHeldConfig(now));
+    if (!landed && (held == null || !shows(held))) {
+      throw Exception('wisp setting $value not confirmed');
+    }
+  }
+
+  /// Resolve true once [a] or [b] does, else false once both resolve false.
+  static Future<bool> _eitherTrue(Future<bool> a, Future<bool> b) {
+    final out = Completer<bool>();
+    var misses = 0;
+    void settle(bool ok) {
+      if (out.isCompleted) return;
+      if (ok || ++misses == 2) out.complete(ok);
+    }
+
+    a.then(settle);
+    b.then(settle);
+    return out.future;
+  }
+
+  /// Resolve true once a read for [mac] of a config the lamp stamped other
+  /// than [sentAfter] [shows] the setting, or false when
+  /// [debugConfigConfirmWindow] elapses first.
+  Future<bool> _confirmConfigRead(
+    String mac,
+    int? sentAfter,
+    bool Function(WispConfig config) shows,
+  ) {
+    return _configReads.stream
+        .firstWhere(
+            (r) => r.mac == mac && r.stamp != sentAfter && shows(r.config))
+        .timeout(debugConfigConfirmWindow)
+        .then((_) => true)
+        .catchError((_) => false);
+  }
+
   /// Set the wisp source mode (Off / Manual / Osc).
   /// Optimistically reflects in local state so the pill picker doesn't
   /// lag the tap, then resends until the wisp's wispStatus echoes the mode
@@ -1193,8 +1389,15 @@ class WispNotifier extends _$WispNotifier {
     // Roll optimistic state back and drop the guard so ground truth shows.
     _pendingSourceMode = null;
     _pendingSourceUntil = null;
-    state = prev;
+    state = _withPending(prev);
     throw Exception('wisp setSource($mode) not confirmed');
+  }
+
+  /// [snapshot] with the held config and the settings still confirming laid
+  /// over it, so restoring a snapshot never drops a newer pick.
+  AsyncValue<WispStatus> _withPending(AsyncValue<WispStatus> snapshot) {
+    final s = snapshot.value;
+    return s == null ? snapshot : AsyncData(_withHeldConfig(s));
   }
 
   /// Resolve true once a wispStatus arrives whose `source` matches [mode]
@@ -1348,7 +1551,7 @@ class WispNotifier extends _$WispNotifier {
     final losses = _paletteLosses;
     final committed = List<LampColor>.from(_draft);
     final epoch = ++_paletteSaveEpoch;
-    final seq = _mintSaveSeq(wispMac);
+    final seq = _mintSeq(_manualSeqs[wispMac]);
     final expected = WispRepository.sentManualId(committed, seq: seq);
     // The echo is this save landing whenever it is heard, even when its new
     // palette id has moved the losses count.
@@ -1378,14 +1581,14 @@ class WispNotifier extends _$WispNotifier {
     if (!ok) throw Exception('wisp manual palette write not confirmed');
   }
 
-  // Steps from a random start through 1..65535 and skips the seq the wisp
-  // echoes now. A status already carrying it would confirm a save the wisp
-  // never applied whenever the palette matched.
-  int _mintSaveSeq(String wispMac) {
-    final last = _lastSaveSeq;
+  // Steps from a random start through 1..65535 and skips [echoed], the seq
+  // the wisp echoes now for this op. A status already carrying it would
+  // confirm an op the wisp never applied.
+  int _mintSeq(int? echoed) {
+    final last = _lastSeq;
     var seq = last == null ? debugSeqStart() : last % _seqMax + 1;
-    if (seq == _manualSeqs[wispMac]) seq = seq % _seqMax + 1;
-    _lastSaveSeq = seq;
+    if (seq == echoed) seq = seq % _seqMax + 1;
+    _lastSeq = seq;
     return seq;
   }
 
@@ -1444,4 +1647,59 @@ class WispNotifier extends _$WispNotifier {
     );
   }
 
+}
+
+/// An OSC sender pick. A null [slot] keeps the wisp's stored Maestro slot.
+typedef _OscPick = ({OscMode mode, int? slot});
+
+/// The latest wisp setting picked, the wisp it went to and the op's [seq].
+/// Laid over every status from that wisp while [confirming], so a config read
+/// from before the wisp applied it cannot flip the control back, and after
+/// while the status echoes [seq]. [epoch] counts picks, so a newer one
+/// supersedes.
+class _ConfigPick<T extends Object> {
+  T? value;
+  String? mac;
+  int? seq;
+  bool confirming = false;
+  // Whether the wisp confirmed the pick, so a later echo of an earlier seq
+  // can only mean that earlier pick landed after it.
+  bool landed = false;
+  int epoch = 0;
+  // The seqs of this phone's earlier picks.
+  final Set<int> _superseded = {};
+
+  void start(T value, String mac, int? seq) {
+    final prior = this.seq;
+    if (prior != null && prior != seq) _superseded.add(prior);
+    this.value = value;
+    this.mac = mac;
+    this.seq = seq;
+    confirming = true;
+    landed = false;
+  }
+
+  T? heldFor(String? wispMac, [int echoedSeq = 0]) =>
+      wispMac != null &&
+              wispMac == mac &&
+              (confirming || (seq != null && echoedSeq == seq))
+          ? value
+          : null;
+
+  /// Whether [echoedSeq], from [wispMac]'s status, names an earlier pick that
+  /// landed over the confirmed one.
+  bool overriddenBy(String? wispMac, int echoedSeq) =>
+      landed &&
+      seq != null &&
+      wispMac == mac &&
+      _superseded.contains(echoedSeq);
+
+  void clear() {
+    value = null;
+    mac = null;
+    seq = null;
+    confirming = false;
+    landed = false;
+    _superseded.clear();
+  }
 }

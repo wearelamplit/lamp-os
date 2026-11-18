@@ -14,6 +14,7 @@ import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../application/manual_palette_draft.dart';
 import '../application/wisp_notifier.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import 'palette_gradient_bar.dart';
@@ -23,7 +24,9 @@ import 'widgets/wisp_manual_palette.dart';
 import 'widgets/wisp_off_color.dart';
 import 'widgets/wisp_osc_source.dart';
 import 'widgets/wisp_painted_lamps.dart';
+import 'widgets/wisp_palette_style.dart';
 import 'widgets/wisp_password_field.dart';
+import 'widgets/wisp_settings_pending.dart';
 import 'widgets/space_brightness_slider.dart';
 import 'widgets/wisp_source_picker.dart';
 import 'widgets/wisp_wifi_config.dart';
@@ -132,6 +135,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
           sourceMode: source,
           manualPalette: draft,
           offColor: status.offColor,
+          style: status.paletteStyle ?? PaletteStyle.gradient,
         ),
         Expanded(
           child: IndexedStack(
@@ -192,6 +196,61 @@ class _SourcesTabState extends State<_SourcesTab> {
     }
   }
 
+  // The OSC sender and its settings. The sender comes from the wisp's config,
+  // so nothing shows until it is held; a wisp that predates the sender
+  // setting follows only Straylight.
+  List<Widget> _oscSender(WispStatus status, WispNotifier notifier) {
+    if (!status.configKnown) {
+      return [
+        const SectionHeader('OSC sender'),
+        const SizedBox(height: AppSpace.sm),
+        WispSettingsPending(lampId: widget.lampId),
+      ];
+    }
+    final mode = status.oscMode ?? OscMode.straylight;
+    final sender = switch (mode) {
+      OscMode.straylight => 'Straylight',
+      OscMode.maestro => 'the Maestro',
+      OscMode.unknown => null,
+    };
+    return [
+      if (!status.sourceLive && sender != null) ...[
+        Semantics(
+          liveRegion: true,
+          label: 'Waiting for $sender',
+          child: WaitingForOscNotice(sender: sender),
+        ),
+        const SizedBox(height: AppSpace.lg),
+      ],
+      if (status.oscMode != null) ...[
+        OscModeSwitch(
+          current: mode,
+          onSelect: (m) => _runWispOp(() => notifier.setOscMode(m)),
+        ),
+        const SizedBox(height: AppSpace.xl),
+      ],
+      if (mode == OscMode.straylight)
+        OscRolePicker(
+          current: status.oscRole,
+          onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
+        ),
+      if (status.oscMode == null) ...[
+        const SizedBox(height: AppSpace.sm),
+        Text(
+          'Update this wisp to use Maestro.',
+          key: const Key('wisp-osc-update-wisp'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+      if (mode == OscMode.maestro)
+        MaestroSlotPicker(
+          current: status.oscSlot,
+          address: status.oscSendTo,
+          onSelect: (n) => _runWispOp(() => notifier.setMaestroSlot(n)),
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final source = widget.source;
@@ -218,17 +277,19 @@ class _SourcesTabState extends State<_SourcesTab> {
         ],
         if (source == WispSourceMode.osc) ...[
           const SizedBox(height: AppSpace.xl),
-          if (!status.sourceLive) ...[
-            Semantics(
-              liveRegion: true,
-              label: 'Waiting for Straylight',
-              child: const WaitingForStraylightNotice(),
-            ),
-            const SizedBox(height: AppSpace.lg),
-          ],
-          OscRolePicker(
-            current: status.oscRole,
-            onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
+          ..._oscSender(status, notifier),
+          const SizedBox(height: AppSpace.xl),
+          OscSendTo(
+            lampId: lampId,
+            status: status,
+            onLinkDisagrees: () => unawaited(notifier.pollConfig()),
+          ),
+        ],
+        if (source != WispSourceMode.off && status.paletteStyle != null) ...[
+          const SizedBox(height: AppSpace.xl),
+          PaletteStyleSwitch(
+            current: status.paletteStyle!,
+            onSelect: (s) => _runWispOp(() => notifier.setPaletteStyle(s)),
           ),
         ],
       ],

@@ -1,10 +1,14 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'tuple_sampler.dart';
+import 'wisp_source_mode.dart';
+
 /// The wisp's settings as its `wispConfig` broadcast carries them, read from
 /// the lamp's `wispconfig` page section. The wisp sends every field every
 /// time, so a parsed [WispConfig] is complete: nothing here is a default
-/// standing in for a missing value.
+/// standing in for a missing value. A field a newer wisp added is nullable,
+/// and null means the wisp predates it.
 class WispConfig {
   const WispConfig({
     required this.ledType,
@@ -14,6 +18,10 @@ class WispConfig {
     required this.driftFadePct,
     required this.shuffleSeed,
     required this.opSeq,
+    this.ip,
+    this.paletteStyle,
+    this.oscMode,
+    this.oscSlot,
   });
 
   final String ledType;
@@ -24,9 +32,25 @@ class WispConfig {
   final int shuffleSeed;
   final int opSeq;
 
+  /// Where an OSC sender reaches the wisp on UDP [kOscPort]: `""` while it
+  /// has no network address.
+  final String? ip;
+
+  static const int kOscPort = 9000;
+
+  /// How lamps take colours from the palette (`swatches`).
+  final PaletteStyle? paletteStyle;
+
+  /// Which OSC sender the wisp listens to (`oscMode`).
+  final OscMode? oscMode;
+
+  /// The Maestro palette slot the wisp reads (`oscSlot`), kept while it
+  /// listens to another sender.
+  final int? oscSlot;
+
   /// Parse the section bytes. Null for an empty read (a lamp that predates
   /// the section), `"{}"` (no config cached yet), a payload that is not a
-  /// `wispConfig`, or one missing any field.
+  /// `wispConfig`, or one missing any field every wisp sends.
   static WispConfig? fromBytes(Uint8List bytes) {
     if (bytes.isEmpty) return null;
     final Object? decoded;
@@ -44,6 +68,10 @@ class WispConfig {
     final driftFadePct = decoded['driftFadePct'];
     final shuffleSeed = decoded['shuffleSeed'];
     final opSeq = decoded['opSeq'];
+    final ip = decoded['ip'];
+    final swatches = decoded['swatches'];
+    final oscMode = decoded['oscMode'];
+    final oscSlot = decoded['oscSlot'];
     if (ledType is! String ||
         px is! int ||
         brightness is! int ||
@@ -61,6 +89,12 @@ class WispConfig {
       driftFadePct: driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
+      ip: ip is String ? ip : null,
+      paletteStyle: swatches is bool
+          ? (swatches ? PaletteStyle.swatches : PaletteStyle.gradient)
+          : null,
+      oscMode: parseOscMode(oscMode),
+      oscSlot: parseMaestroSlot(oscSlot),
     );
   }
 
@@ -79,6 +113,10 @@ class WispConfig {
       driftFadePct: driftFadePct ?? this.driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
+      ip: ip,
+      paletteStyle: paletteStyle,
+      oscMode: oscMode,
+      oscSlot: oscSlot,
     );
   }
 }

@@ -14,6 +14,7 @@
 #include "config/manual_palette_color.hpp"
 #include "paint/palette_style.hpp"
 #include "osc/osc_role.hpp"
+#include "osc/osc_target.hpp"
 
 namespace wisp {
 
@@ -60,6 +61,17 @@ class WispConfig {
   OscRole oscRole() const { return oscRole_; }
   void setOscRole(OscRole role);
 
+  // The OSC sub-mode, Maestro slot and Custom address. `slot` must pass
+  // maestroSlotValid; `address` must be "" or pass oscCustomAddressValid.
+  // setOsc is true when the source is Osc and the listened address moved
+  // (oscTargetResets), so the caller holds lamps at Off until its first
+  // palette.
+  OscMode oscMode() const { return oscMode_; }
+  uint8_t oscSlot() const { return oscSlot_; }
+  const char* oscAddress() const { return oscAddress_; }
+  bool setOsc(OscMode mode, uint8_t slot, const char* address);
+  OscTarget oscTarget() const;
+
   // Replace-only; empty is valid (lamps revert to their own behavior).
   const std::vector<ManualPaletteColor>& manualPalette() const {
     return manualPalette_;
@@ -87,9 +99,12 @@ class WispConfig {
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
 
-  // How lamps take colours from the palette, in every source mode.
+  // How lamps take colours from the palette, in every source mode. [seq] is
+  // the app's setSwatches seq (1..65535) echoed in the status until the next
+  // style pick, the held style included; 0 for none. RAM-only.
   PaletteStyle paletteStyle() const { return paletteStyle_; }
-  void setPaletteStyle(PaletteStyle style);
+  uint16_t swatchesSeq() const { return swatchesSeq_; }
+  void setPaletteStyle(PaletteStyle style, uint16_t seq = 0);
 
   // Color drift interval (ms), and the Fade setting (0..100) that sets each
   // drift step's fade length (see driftFadeMs).
@@ -132,11 +147,15 @@ class WispConfig {
   String wifiPw_;
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   OscRole oscRole_ = OscRole::Primary;
+  OscMode oscMode_ = OscMode::Straylight;
+  uint8_t oscSlot_ = kMaestroSlotMin;
+  char oscAddress_[kOscCustomAddressMaxLen + 1] = "";
   std::vector<ManualPaletteColor> manualPalette_;
   uint16_t manualSeq_ = 0;
   ManualPaletteColor offColor_ = {255, 150, 50, 0};
   uint8_t shuffleSeed_ = 0;
   PaletteStyle paletteStyle_ = PaletteStyle::Gradient;
+  uint16_t swatchesSeq_ = 0;
   uint32_t driftIntervalMs_ = 120000;
   uint8_t driftFadePct_ = 50;
   String name_;

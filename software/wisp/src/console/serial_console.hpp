@@ -36,6 +36,8 @@ public:
 
 private:
   void handleCommand(const String& cmd);
+  // applyOscSettings, then apply_ on success; false (logged) when Malformed.
+  bool applyOsc(OscMode mode, uint8_t slot, const char* address);
   static String formatVersion(uint32_t v);
 
   PaintDistributor& paint_;

@@ -188,10 +188,9 @@ class ExpressionManager {
    */
   void setCompositor(Compositor* compositor);
 
-  /**
-   * Load expressions from config.
-   */
-  void loadFromConfig(const ExpressionSettings& settings);
+  // Loads the configured expressions, first erasing from `settings` every
+  // entry of an internal type. Returns how many it erased.
+  size_t loadFromConfig(ExpressionSettings& settings);
 
   /**
    * Get active expression behaviors for compositor.
@@ -298,6 +297,10 @@ class ExpressionManager {
   // True when this lamp played an expression of registered `type`, its own
   // fire or a transient, within windowMs before nowMs.
   bool playedWithin(const char* type, uint32_t windowMs, uint32_t nowMs) const;
+
+  // True while a peer's transient of `type` is in flight here, until reaped;
+  // from `srcMac` only, when given.
+  bool remoteTransientPlaying(const char* type, const uint8_t* srcMac = nullptr) const;
 
   /**
    * Garbage-collect transient one-shot expressions created by

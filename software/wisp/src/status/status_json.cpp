@@ -45,6 +45,9 @@ size_t buildWispStatusJson(const WispStatusFields& f, char* out,
   if (f.manualSeq != 0) {
     doc["manualSeq"] = f.manualSeq;
   }
+  if (f.swatchesSeq != 0) {
+    doc["swatchesSeq"] = f.swatchesSeq;
+  }
 
   const bool isOff = f.source && std::strcmp(f.source, "off") == 0;
 
@@ -104,6 +107,9 @@ size_t buildWispConfigJson(const WispConfigFields& f, char* out,
   doc["opSeq"]           = f.opSeq;
   doc["ip"]              = f.ip;
   doc["swatches"]        = f.swatches;
+  doc["oscMode"]         = oscModeName(f.oscMode);
+  doc["oscSlot"]         = f.oscSlot;
+  doc["oscAddr"]         = f.oscAddr ? f.oscAddr : "";
   if (measureJson(doc) >= outCap) return 0;
   return serializeJson(doc, out, outCap);
 }

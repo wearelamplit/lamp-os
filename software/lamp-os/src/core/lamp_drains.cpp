@@ -592,7 +592,7 @@ void Lamp::drainCommand() {
       lamp::ExpressionInvocation inv;
       if (!lamp::parseInvocation(doc.as<JsonObjectConst>(), inv)) return;
       if (inv.delayMs == 0) {
-        expressionManager.triggerInvocation(inv, cmd.sourceMac);
+        lamp::playReceivedCommand(expressionManager, sporeTint, inv, cmd.sourceMac);
       } else {
         lamp::enqueueDelayedInvocation(inv, cmd.sourceMac, inv.delayMs);
       }

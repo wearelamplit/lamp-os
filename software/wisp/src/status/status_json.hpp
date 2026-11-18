@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "osc/osc_target.hpp"
+
 namespace wisp {
 
 // Live state: what the wisp is doing right now. Rides wispStatus.
@@ -21,6 +23,7 @@ struct WispStatusFields {
   const char*  ethIp = nullptr;  // omitted when Ethernet is not up
   const char*  manualId = "";    // statusManualId of the stored Manual palette
   uint16_t     manualSeq = 0;    // seq of the save that stored it; 0 = none
+  uint16_t     swatchesSeq = 0;  // seq of the setSwatches that set the style
 };
 
 // Settings the app edits, plus opSeq, which confirms a sealed op landed.
@@ -35,6 +38,9 @@ struct WispConfigFields {
   uint32_t     opSeq = 0;
   char         ip[16] = "";  // where an OSC sender reaches the wisp; "" for none
   bool         swatches = false;
+  OscMode      oscMode = OscMode::Straylight;
+  uint8_t      oscSlot = 1;
+  const char*  oscAddr = "";  // the Custom address, "" for none
 };
 
 // The OSC send-to address into `out`: `ethIp` when set, else `staIp` while

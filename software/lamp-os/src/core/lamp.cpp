@@ -49,6 +49,7 @@
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/expression_upsert.hpp"
 #include "behaviors/configurator.hpp"
 #include "behaviors/fade_out.hpp"
 #include "behaviors/knockout.hpp"
@@ -245,6 +246,7 @@ lamp::FadeOutBehavior shadeFadeOutBehavior;
 lamp::FadeOutBehavior baseFadeOutBehavior;
 lamp::KnockoutBehavior baseKnockoutBehavior;
 lamp::ExpressionManager expressionManager;
+lamp::SporeTint sporeTint;
 lamp::ExpressionObserverRegistry expressionObserverRegistry;
 lamp::ArrivalNotifier arrivalNotifier;
 lamp::Config config;
@@ -381,30 +383,28 @@ void runExpressionOp(JsonObject doc, bool mutateConfig) {
       Serial.printf("[expr] upsert %s over caps, extras dropped\n",
                     cfg.type.c_str());
     }
-    // A type this variant does not register never renders; storing it only
-    // spends a record and NVS.
-    if (!::expressionManager.registry().find(cfg.type.c_str())) {
-      Serial.printf("[expr] upsert type=%s rejected: not on this lamp\n",
-                    cfg.type.c_str());
-      return;
-    }
-    if (cfg.target < lamp::kExpressionTargetMin ||
-        cfg.target > lamp::kExpressionTargetMax) {
-      Serial.printf("[expr] upsert type=%s target=%u rejected\n", cfg.type.c_str(),
-                    (unsigned)cfg.target);
-      return;
-    }
-    // Mirror into config.expressions so the next save persists the user's
-    // latest edits; config is what gets serialized to NVS, expressionManager
-    // the runtime animator. A mirrored entry's parameters live only in config.
-    bool configBacked = false;
-    if (mutateConfig) {
-      configBacked = lamp::config_codec::mirrorUpsert(::config.expressions, cfg);
-      if (!configBacked) {
+    // config is what gets serialized to NVS, expressionManager the runtime
+    // animator. A mirrored entry's parameters live only in config.
+    const lamp::UpsertVerdict verdict = lamp::admitUpsert(
+        ::expressionManager.registry(), cfg, mutateConfig ? &::config.expressions : nullptr);
+    switch (verdict) {
+      case lamp::UpsertVerdict::NotConfigurable:
+        Serial.printf("[expr] upsert type=%s rejected: not configurable on this lamp\n",
+                      cfg.type.c_str());
+        return;
+      case lamp::UpsertVerdict::BadTarget:
+        Serial.printf("[expr] upsert type=%s target=%u rejected\n", cfg.type.c_str(),
+                      (unsigned)cfg.target);
+        return;
+      case lamp::UpsertVerdict::Unsaved:
         Serial.printf("[expr] config full; upsert type=%s not saved\n", cfg.type.c_str());
-      }
+        break;
+      case lamp::UpsertVerdict::Saved:
+      case lamp::UpsertVerdict::Live:
+        break;
     }
-    ::expressionManager.upsertExpression(cfg, &::compositor, configBacked);
+    ::expressionManager.upsertExpression(cfg, &::compositor,
+                                         verdict == lamp::UpsertVerdict::Saved);
   } else if (op && strcmp(op, "remove") == 0) {
     const char* type = doc["type"].as<const char*>();
     int tgt = doc["target"] | 0;
@@ -1269,6 +1269,7 @@ void lamp::Lamp::tick() {
   // a remote cascade arrived) whose animations have finished. AFTER tick so
   // the final frame of the animation is drawn before removal.
   expressionManager.gcTransients();
+  sporeTint.tick(expressionManager);
   expressionManager.tickCascade(millis());
   expressionManager.retireStale(millis());
 
