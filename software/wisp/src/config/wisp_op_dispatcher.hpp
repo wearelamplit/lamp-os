@@ -39,9 +39,9 @@ enum class DispatchResult {
 };
 
 // Stores the OSC sub-mode, Maestro slot (valid per maestroSlotValid) and
-// Custom address ("" or valid per oscCustomAddressValid), and names the
-// result the controller applies. Custom with no address stores nothing and
-// is Malformed: it would listen to nothing.
+// Custom address, and names the result the controller applies. Malformed,
+// storing nothing, when `address` is null, neither "" nor valid per
+// oscCustomAddressValid, or "" with Custom (which would listen to nothing).
 DispatchResult applyOscSettings(WispConfig& config, OscMode mode, uint8_t slot,
                                 const char* address);
 

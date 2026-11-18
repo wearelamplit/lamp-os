@@ -1,5 +1,5 @@
-// What the wisp listens to in Osc mode (the sub-mode and its role or slot),
-// and when changing it resets the stream.
+// What the wisp listens to in Osc mode (the sub-mode and its role, slot or
+// Custom address), and when changing it resets the stream.
 
 #pragma once
 

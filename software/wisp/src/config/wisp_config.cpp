@@ -104,6 +104,10 @@ void WispConfig::begin() {
     std::snprintf(oscAddress_, sizeof(oscAddress_), "%s",
                   valid ? addr.c_str() : "");
   }
+  // A cut between setOsc's writes, or a lost address, would listen to nothing.
+  if (oscMode_ == OscMode::Custom && oscAddress_[0] == '\0') {
+    oscMode_ = OscMode::Straylight;
+  }
 
   manualPalette_.clear();
   const size_t paletteLen = prefs_.getBytesLength(kKeyManualPalette);

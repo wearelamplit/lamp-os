@@ -869,7 +869,8 @@ void test_set_osc_address_follows_the_rule() {
     }
 }
 
-// An address that is not a string is Malformed and changes nothing.
+// An address that is not a string, carries a NUL, or is empty is Malformed
+// and changes nothing.
 void test_set_osc_address_must_be_a_string() {
     wisp::WispConfig cfg;
     cfg.begin();
@@ -880,6 +881,9 @@ void test_set_osc_address_must_be_a_string() {
         R"({"char":"wispOp","op":"setOsc","mode":"custom","address":true})",
         R"({"char":"wispOp","op":"setOsc","mode":"custom","address":["/a"]})",
         R"({"char":"wispOp","op":"setOsc","mode":"custom","address":{"a":1}})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":"/a\u0000#"})",
+        R"({"char":"wispOp","op":"setOsc","mode":"custom","address":"/a\u0000"})",
+        R"({"char":"wispOp","op":"setOsc","mode":"maestro","address":""})",
     };
     for (const char* op : bad) {
         TEST_ASSERT_EQUAL_INT_MESSAGE((int)wisp::DispatchResult::Malformed,
@@ -887,6 +891,36 @@ void test_set_osc_address_must_be_a_string() {
         TEST_ASSERT_EQUAL_STRING("/kept", cfg.oscAddress());
         TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)cfg.oscMode());
     }
+}
+
+// applyOscSettings, the path the console takes too, holds the rule itself:
+// every invalid case is Malformed in any sub-mode and stores nothing; ""
+// stores outside Custom only.
+void test_apply_osc_settings_follows_the_rule() {
+    for (wisp::OscMode mode : {wisp::OscMode::Maestro, wisp::OscMode::Custom}) {
+        for (const OscAddressCase& c : kOscAddressCases) {
+            kv_reset();
+            wisp::WispConfig cfg;
+            cfg.begin();
+            cfg.setOsc(wisp::OscMode::Straylight, 4, "/kept");
+            const bool empty = c.address[0] == '\0';
+            const bool takes = c.valid || (empty && mode != wisp::OscMode::Custom);
+            const auto res = wisp::applyOscSettings(cfg, mode, 7, c.address);
+            TEST_ASSERT_EQUAL_INT_MESSAGE(
+                (int)(takes ? wisp::DispatchResult::AppliedOscSettings
+                            : wisp::DispatchResult::Malformed),
+                (int)res, c.address);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(takes ? c.address : "/kept",
+                                             cfg.oscAddress(), c.address);
+            TEST_ASSERT_EQUAL_UINT8(takes ? 7 : 4, cfg.oscSlot());
+        }
+    }
+    kv_reset();
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::DispatchResult::Malformed,
+        (int)wisp::applyOscSettings(cfg, wisp::OscMode::Maestro, 2, nullptr));
+    TEST_ASSERT_EQUAL_UINT8(1, cfg.oscSlot());
 }
 
 // An absent or null address keeps the stored one, so switching sub-mode or
@@ -1058,6 +1092,7 @@ int main(int, char**) {
     RUN_TEST(test_set_osc_custom_applies_and_reloads);
     RUN_TEST(test_set_osc_address_follows_the_rule);
     RUN_TEST(test_set_osc_address_must_be_a_string);
+    RUN_TEST(test_apply_osc_settings_follows_the_rule);
     RUN_TEST(test_set_osc_without_address_keeps_address);
     RUN_TEST(test_set_osc_stores_address_outside_custom);
     RUN_TEST(test_set_osc_custom_needs_an_address);

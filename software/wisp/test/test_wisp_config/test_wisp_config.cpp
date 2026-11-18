@@ -3,6 +3,8 @@
 #include "config/wisp_config.cpp"  // NOLINT(build/include)
 
 #include <unity.h>
+
+#include "status/wisp_config_fields.hpp"
 #include <lampos/led_types.hpp>
 
 // kv_reset() is defined inside Preferences.h's anonymous namespace.
@@ -268,6 +270,61 @@ void test_invalid_stored_custom_address_loads_empty() {
   }
 }
 
+// Custom stored with no usable address loads as Straylight, never as a
+// Custom that listens to nothing.
+void test_custom_without_address_loads_as_straylight() {
+  for (const char* stored : {static_cast<const char*>(nullptr), "", "/a b"}) {
+    kv_reset();
+    {
+      Preferences p;
+      p.putUChar("oscMode", 2);
+      p.putUChar("oscSlot", 4);
+      if (stored) p.putString("oscAddr", stored);
+    }
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(4, cfg.oscSlot());
+  }
+  kv_reset();
+  {
+    Preferences p;
+    p.putUChar("oscMode", 2);
+    p.putString("oscAddr", "/kept");
+  }
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)cfg.oscMode());
+}
+
+// wispConfig reports what the wisp holds, every field off its default, so
+// the app confirms a change on it.
+void test_config_fields_report_the_stored_settings() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setLedFormat(lampos::led::ByteOrder::BGR);
+  cfg.setPixelCount(61);
+  cfg.setBrightness(42);
+  cfg.setDrift(90000, 33);
+  cfg.bumpShuffleSeed();
+  cfg.bumpOpSeq();
+  cfg.bumpOpSeq();
+  cfg.setPaletteStyle(wisp::PaletteStyle::Swatches);
+  cfg.setOsc(wisp::OscMode::Custom, 6, "/lamp/x");
+  const wisp::WispConfigFields f = wisp::wispConfigFields(cfg);
+  TEST_ASSERT_EQUAL_STRING("BGR", f.ledType);
+  TEST_ASSERT_EQUAL_UINT16(61, f.pixelCount);
+  TEST_ASSERT_EQUAL_UINT8(42, f.brightness);
+  TEST_ASSERT_EQUAL_UINT32(90000, f.driftIntervalMs);
+  TEST_ASSERT_EQUAL_UINT8(33, f.driftFadePct);
+  TEST_ASSERT_EQUAL_UINT8(1, f.shuffleSeed);
+  TEST_ASSERT_EQUAL_UINT32(2, f.opSeq);
+  TEST_ASSERT_TRUE(f.swatches);
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)f.oscMode);
+  TEST_ASSERT_EQUAL_UINT8(6, f.oscSlot);
+  TEST_ASSERT_EQUAL_STRING("/lamp/x", f.oscAddr);
+}
+
 // In Osc, a Custom address change asks for a hold; the same address, or a
 // slot change, does not.
 void test_set_osc_custom_holds_only_on_an_address_change() {
@@ -433,6 +490,8 @@ int main(int, char**) {
   RUN_TEST(test_set_osc_holds_only_a_live_retarget);
   RUN_TEST(test_custom_address_persists);
   RUN_TEST(test_invalid_stored_custom_address_loads_empty);
+  RUN_TEST(test_custom_without_address_loads_as_straylight);
+  RUN_TEST(test_config_fields_report_the_stored_settings);
   RUN_TEST(test_set_osc_custom_holds_only_on_an_address_change);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
   RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
