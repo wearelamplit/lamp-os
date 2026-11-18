@@ -25,7 +25,7 @@ Everything lives under [`software/`](../../software/).
 ## How they fit
 
 ```
-Straylight/Maestro ──OSC (SLIP over USB serial, or UDP :9000)──► wisp
+OSC sender ──────────OSC (SLIP over USB serial, or UDP :9000)──► wisp
                                                                 │
                                                                 │ ESP-NOW (channel 6)
                                                                 ▼
@@ -40,7 +40,7 @@ Five links carry everything:
   expressions, OTA push.
 - **lamp ↔ lamp** — ESP-NOW broadcast mesh, channel 6. Presence, greetings,
   transient overrides, expression announce, firmware distribution.
-- **Straylight / Maestro → wisp** — OSC 1.0 palettes, as SLIP frames on the USB serial
+- **Straylight / Maestro / Custom sender → wisp** — OSC 1.0 palettes, as SLIP frames on the USB serial
   console or UDP datagrams on port 9000 (softAP, the wisp's STA LAN join, or
   wired Ethernet through an optional W5500 on SPI, which keeps the feed off the
   radio). The STA join runs only while the source is Osc and Ethernet is not
@@ -63,7 +63,7 @@ Full topology and channel details: [`networking.md`](networking.md#topology).
 |---|---|---|
 | **App control write** | Phone → BLE GATT characteristic → Core-0 callback → pending slot → Core 1 applies + persists NVS (and mesh-cascades where relevant) | [`networking.md`](networking.md#ble-gatt-characteristics-lamp--phone) |
 | **Presence / roster** | Each lamp broadcasts `MSG_HELLO` (TLV trailer); the wisp broadcasts `MSG_WISP_HELLO`. Receivers fold sightings into the unified `LampRoster` (near + mesh, RSSI) | [`networking.md`](networking.md#tier-1-presence) |
-| **Wisp paint** | Straylight or Maestro OSC (or manual) palette → wisp samples → `MSG_WISP_STATE` paint broadcast → lamp composites the wisp layer over its scene, easing on adopt/release | [`networking.md`](networking.md#wisp-paints-a-lamps-base--shade-declarative-broadcast) |
+| **Wisp paint** | Straylight, Maestro or Custom OSC (or manual) palette → wisp samples → `MSG_WISP_STATE` paint broadcast → lamp composites the wisp layer over its scene, easing on adopt/release | [`networking.md`](networking.md#wisp-paints-a-lamps-base--shade-declarative-broadcast) |
 | **Firmware OTA** | A signed lamp offers `MSG_FW_*` over the mesh; an RSSI-gated peer requests chunks, verifies the ed25519 signature from flash, then swaps A/B slots | [`networking.md`](networking.md#firmware-distribution-messages-msg_fw_) |
 
 ## Where subsystems live
