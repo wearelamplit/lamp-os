@@ -63,11 +63,24 @@ OscFeedPacket oscClassifyFeedPacket(const uint8_t* data, size_t len,
                                     const char* feedPrefix, float* out,
                                     size_t cap, size_t& count);
 
-// A palette message's colours, the format told by its type tags. Every tag
-// `i`: one 0xRRGGBB per int. Every tag `f` or `i` otherwise: RGB in threes.
-// Channels land clamped to 0..1, white 0. False, with nothing to use in
-// `out`, on any other tags, a NaN or infinite float, arguments that end
-// early or run past the tags, no colour, or more than `cap` colours.
+// The most channels a Limbic float layout names.
+inline constexpr size_t kOscLayoutMaxChannels = 16;
+// Amber mixes into red at full and into green at this share (amber read as
+// #FFBF00). Too low reads yellow-orange as red; tune on the bench.
+inline constexpr float kOscAmberGreen = 0.75f;
+
+// A palette message's colours, the format told by its type tags:
+// - every tag `i`: one 0xRRGGBB per int, white 0;
+// - every tag `f` or `i` otherwise: RGB in threes, white 0;
+// - `s` then only `f` / `i`: a Limbic float layout. The string names one
+//   channel per float (`am` and `uv` read before single letters; r g b w,
+//   `a` amber, `u` UV, any other byte unused) and the floats repeat in groups
+//   of its width. w drives white, amber mixes into red and green, UV and
+//   unused channels drop.
+// Channels land clamped to 0..1. False, with nothing to use in `out`, on
+// any other tags, a NaN or infinite float, arguments that end early or run
+// past the tags, a float count the group width does not divide, an empty or
+// over-long layout, no colour, or more than `cap` colours.
 bool oscReadColours(const OscMessage& msg, PaletteColor* out, size_t cap,
                     size_t& count);
 

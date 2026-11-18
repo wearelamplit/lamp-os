@@ -202,12 +202,83 @@ bool readRgb(const OscMessage& msg, size_t colours, PaletteColor* out) {
   return true;
 }
 
+enum class LayoutChannel : uint8_t { Unused, Red, Green, Blue, White, Amber, Uv };
+
+// The layout's channels into `out`; 0 for an empty or over-long layout.
+size_t parseLayout(const char* s, LayoutChannel* out) {
+  size_t width = 0;
+  while (*s) {
+    if (width == kOscLayoutMaxChannels) return 0;
+    if ((s[0] == 'a' && s[1] == 'm') || (s[0] == 'u' && s[1] == 'v')) {
+      out[width++] = s[0] == 'a' ? LayoutChannel::Amber : LayoutChannel::Uv;
+      s += 2;
+      continue;
+    }
+    switch (*s) {
+      case 'r': out[width] = LayoutChannel::Red; break;
+      case 'g': out[width] = LayoutChannel::Green; break;
+      case 'b': out[width] = LayoutChannel::Blue; break;
+      case 'w': out[width] = LayoutChannel::White; break;
+      case 'a': out[width] = LayoutChannel::Amber; break;
+      case 'u': out[width] = LayoutChannel::Uv; break;
+      default:  out[width] = LayoutChannel::Unused; break;
+    }
+    ++width;
+    ++s;
+  }
+  return width;
+}
+
+bool readLayout(const OscMessage& msg, PaletteColor* out, size_t cap,
+                size_t& count) {
+  const size_t span = stringSpan(msg.args, msg.argsLen, 0);
+  if (span == 0) return false;
+  LayoutChannel channels[kOscLayoutMaxChannels];
+  const size_t width =
+      parseLayout(reinterpret_cast<const char*>(msg.args), channels);
+  if (width == 0) return false;
+  const char* floatTags = msg.tags + 1;
+  size_t n = 0;
+  for (const char* t = floatTags; *t; ++t, ++n) {
+    if (*t != 'f' && *t != 'i') return false;
+  }
+  if (n == 0 || n % width != 0 || msg.argsLen != span + n * 4) return false;
+  const size_t colours = n / width;
+  if (colours > cap) return false;
+  for (size_t i = 0; i < colours; ++i) {
+    float r = 0, g = 0, b = 0, w = 0, amber = 0;
+    for (size_t k = 0; k < width; ++k) {
+      const size_t arg = i * width + k;
+      float v;
+      if (!readNumber(msg, floatTags[arg], span + arg * 4, v)) return false;
+      v = clamp01(v);
+      switch (channels[k]) {
+        case LayoutChannel::Red:   r = v; break;
+        case LayoutChannel::Green: g = v; break;
+        case LayoutChannel::Blue:  b = v; break;
+        case LayoutChannel::White: w = v; break;
+        case LayoutChannel::Amber: amber = v; break;
+        case LayoutChannel::Uv:
+        case LayoutChannel::Unused:
+          break;
+      }
+    }
+    out[i].r = clamp01(r + amber);
+    out[i].g = clamp01(g + kOscAmberGreen * amber);
+    out[i].b = b;
+    out[i].w = w;
+  }
+  count = colours;
+  return true;
+}
+
 }  // namespace
 
 bool oscReadColours(const OscMessage& msg, PaletteColor* out, size_t cap,
                     size_t& count) {
   count = 0;
   if (!msg.tags || !out) return false;
+  if (msg.tags[0] == 's') return readLayout(msg, out, cap, count);
   size_t n = 0;
   bool allInt = true;
   for (const char* t = msg.tags; *t; ++t, ++n) {
