@@ -148,7 +148,7 @@ struct ExpressionDescriptor {
   Expression* (*make)(FrameBuffer*) = nullptr;
   // Framework-only expression: registry-backed so triggerInvocation can fire
   // it, but never a configured expression. serializeCatalog omits it, an
-  // upsert of it is refused, and a saved entry of it is dropped at boot.
+  // upsert of it is refused, and loadFromConfig drops a saved entry of it.
   bool internal = false;
   // TARGET_BOTH builds one instance bound to the base that runs base then
   // shade as one strip, rather than one instance per surface.

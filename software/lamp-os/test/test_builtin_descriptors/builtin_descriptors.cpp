@@ -561,9 +561,9 @@ void test_configurable_types_are_the_listed_ones() {
   TEST_ASSERT_FALSE(reg.configurable("nope"));
 }
 
-// A lamp with yawn saved loads without it and keeps every other entry in
-// order, an unregistered type included.
-void test_saved_internal_entries_drop_at_load() {
+// dropInternal erases only internal entries and keeps the rest in order, an
+// unregistered type included.
+void test_drop_internal_keeps_other_entries_in_order() {
   ExpressionRegistry reg = baseSetRegistry();
   reg.add(kBloomDescriptorData);
   ExpressionSettings saved;
@@ -607,7 +607,7 @@ int main(int, char**) {
   RUN_TEST(test_no_variant_registers_the_moment_sentinel);
   RUN_TEST(test_yawn_is_registered_but_not_listed);
   RUN_TEST(test_configurable_types_are_the_listed_ones);
-  RUN_TEST(test_saved_internal_entries_drop_at_load);
+  RUN_TEST(test_drop_internal_keeps_other_entries_in_order);
   RUN_TEST(test_every_type_fits_the_parameter_cap);
   RUN_TEST(test_all_five_ids_present);
   RUN_TEST(test_continuous_flags);

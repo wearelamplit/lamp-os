@@ -63,9 +63,6 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
   expressionManager.begin(&shade, &base);
 
   self.registerExpressions(expressionManager.registry());
-  if (expressionManager.registry().dropInternal(config.expressions) > 0) {
-    config.invalidateExpressionsSection();
-  }
 
   if (!lamp::any(features, lamp::Features::SocialBehavior)) {
     fondnessEngine.setNearSource([]() -> const std::vector<lamp::NearbyCopy>& {
@@ -109,7 +106,9 @@ void initBehaviors(lamp::Features features, lamp::Lamp& self) {
         return lamp::config_codec::findExpressionParams(::config.expressions, type, target);
       });
   if (lamp::any(features, lamp::Features::DefaultExpressions)) {
-    expressionManager.loadFromConfig(config.expressions);
+    if (expressionManager.loadFromConfig(config.expressions) > 0) {
+      config.invalidateExpressionsSection();
+    }
   }
 
   // Draw order = registration order, last-writer-wins on the surface buffer.

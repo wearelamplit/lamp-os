@@ -520,6 +520,27 @@ void test_tired_yawn_stands_down_for_ota_and_test() {
   TEST_ASSERT_EQUAL_size_t(1, s_registered.size());
 }
 
+// A lamp with yawn saved loads without it: the entries leave the settings, so
+// the next save drops them, and none becomes a configured expression.
+void test_saved_yawn_drops_at_load() {
+  Rig r;
+  ExpressionSettings saved;
+  for (uint8_t target : {uint8_t(TARGET_SHADE), uint8_t(TARGET_BASE)}) {
+    ExpressionConfig c;
+    c.type = kYawnDescriptorData.id;
+    c.target = target;
+    saved.expressions.push_back(c);
+  }
+  ExpressionConfig other;
+  other.type = "nope";
+  saved.expressions.insert(saved.expressions.begin() + 1, other);
+
+  TEST_ASSERT_EQUAL_size_t(2, r.manager.loadFromConfig(saved));
+  TEST_ASSERT_EQUAL_size_t(1, saved.expressions.size());
+  TEST_ASSERT_EQUAL_STRING("nope", saved.expressions[0].type.c_str());
+  TEST_ASSERT_TRUE(r.manager.getBehaviors().empty());
+}
+
 // A peer's roll stamp reads as old a millis() wrap later, so it rolls again.
 void test_roll_stamp_stays_old_a_wrap_later() {
   Rig r;
@@ -577,6 +598,7 @@ int main() {
   RUN_TEST(test_mirror_booked_yawn_holds_the_floor);
   RUN_TEST(test_tired_yawn_stands_down_for_ota_and_test);
   RUN_TEST(test_roll_stamp_stays_old_a_wrap_later);
+  RUN_TEST(test_saved_yawn_drops_at_load);
   RUN_TEST(test_tuning_range_checks);
   RUN_TEST(test_engine_gate_covers_yawns);
   RUN_TEST(test_yawn_back_counts_the_store_meetings);
