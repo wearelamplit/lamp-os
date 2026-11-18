@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../../control/domain/lamp_color.dart';
+import 'tuple_sampler.dart';
 import 'wisp_config.dart';
 import 'wisp_source_mode.dart';
 
@@ -58,6 +59,7 @@ class WispStatus {
     this.manualId,
     this.manualSeq = 0,
     this.ip,
+    this.paletteStyle,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -205,6 +207,11 @@ class WispStatus {
   /// none, null until a config carrying it is merged (a wisp that predates
   /// it never sends one).
   final String? ip;
+
+  /// How lamps take colours from the palette, from the wisp's `wispConfig`.
+  /// Null until a config carrying it is merged: a wisp that predates it
+  /// paints only gradients.
+  final PaletteStyle? paletteStyle;
 
   /// The address an OSC sender should target, from the wisp's own reports:
   /// [ethIp] while the wisp is on Ethernet, which it always sends to first,
@@ -355,6 +362,7 @@ class WispStatus {
       opSeq: config.opSeq,
       configKnown: true,
       ip: config.ip,
+      paletteStyle: config.paletteStyle,
     );
   }
 
@@ -369,6 +377,7 @@ class WispStatus {
     String? ledType,
     int? pixelCount,
     int? brightness,
+    PaletteStyle? paletteStyle,
   }) {
     return _copy(
       source: source,
@@ -381,6 +390,7 @@ class WispStatus {
       ledType: ledType,
       pixelCount: pixelCount,
       brightness: brightness,
+      paletteStyle: paletteStyle ?? this.paletteStyle,
     );
   }
 
@@ -399,6 +409,7 @@ class WispStatus {
     int? opSeq,
     bool? configKnown,
     Object? ip = _keep,
+    Object? paletteStyle = _keep,
   }) {
     return WispStatus(
       wifiConnected: wifiConnected,
@@ -436,6 +447,9 @@ class WispStatus {
       manualId: manualId,
       manualSeq: manualSeq,
       ip: identical(ip, _keep) ? this.ip : ip as String?,
+      paletteStyle: identical(paletteStyle, _keep)
+          ? this.paletteStyle
+          : paletteStyle as PaletteStyle?,
     );
   }
 
@@ -477,7 +491,8 @@ class WispStatus {
           configLastSeenMs == other.configLastSeenMs &&
           manualId == other.manualId &&
           manualSeq == other.manualSeq &&
-          ip == other.ip;
+          ip == other.ip &&
+          paletteStyle == other.paletteStyle;
 
   @override
   int get hashCode => Object.hash(
@@ -505,7 +520,8 @@ class WispStatus {
           opSeq,
           brightness,
           configKnown,
-          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq, ip),
+          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq, ip,
+              paletteStyle),
         ),
       );
 }

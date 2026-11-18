@@ -146,6 +146,16 @@ class WispRepository {
     });
   }
 
+  /// How lamps take colours from the palette, in every source mode. Persisted
+  /// in wisp NVS and echoed as `swatches` in its `wispConfig`.
+  Future<void> setSwatches(bool swatches) async {
+    await _writeOp({
+      'char': 'wispOp',
+      'op': 'setSwatches',
+      'swatches': swatches,
+    });
+  }
+
   /// Payload budget for a wispOp: the lamp's BLE stack takes at most 512 B
   /// per attribute write (`BLE_ATT_ATTR_MAX_LEN`), under the 576 B its
   /// MSG_CONTROL_OP relay carries. A larger write fails. The widest palette

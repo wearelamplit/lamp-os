@@ -113,3 +113,15 @@ List<Color> renderPaletteRamp(List<Color> stops, int pixelCount) {
   }
   return out;
 }
+
+/// Render `stops` as solid blocks in order, pixel i showing stop
+/// `(i * N) ~/ pixelCount`, as `computeRingBlocks` in the wisp's
+/// `status_ring.hpp` draws the ring in swatches. Empty stops give
+/// [kWarmWhite] like [renderPaletteRamp].
+List<Color> renderPaletteBlocks(List<Color> stops, int pixelCount) {
+  if (pixelCount <= 0) return const <Color>[];
+  if (stops.isEmpty) return List<Color>.filled(pixelCount, kWarmWhite);
+  return [
+    for (var i = 0; i < pixelCount; i++) stops[(i * stops.length) ~/ pixelCount],
+  ];
+}

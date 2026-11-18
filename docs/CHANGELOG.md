@@ -12,6 +12,11 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   OSC, with the Straylight role picker under it, and shows the wisp's address
   and port 9000 with a copy button, or says the wisp has no address yet. Needs
   the wisp on 1.3.8; an older wisp on Ethernet shows its Ethernet address.
+- **Gradient or Swatches for the wisp's palette, in the app.** Under Manual
+  and OSC a Gradient | Swatches switch picks how lamps take the palette; the
+  painted-lamps preview and the palette bar follow it, the bar drawing solid
+  blocks in Swatches as the wisp's ring does. A change the wisp never confirms
+  goes back with "Couldn't reach the wisp." Shows only for a wisp on 1.3.8.
 
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and

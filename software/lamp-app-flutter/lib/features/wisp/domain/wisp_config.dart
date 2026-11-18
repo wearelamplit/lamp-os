@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'tuple_sampler.dart';
+
 /// The wisp's settings as its `wispConfig` broadcast carries them, read from
 /// the lamp's `wispconfig` page section. The wisp sends every field every
 /// time, so a parsed [WispConfig] is complete: nothing here is a default
@@ -16,6 +18,7 @@ class WispConfig {
     required this.shuffleSeed,
     required this.opSeq,
     this.ip,
+    this.paletteStyle,
   });
 
   final String ledType;
@@ -31,6 +34,9 @@ class WispConfig {
   final String? ip;
 
   static const int kOscPort = 9000;
+
+  /// How lamps take colours from the palette (`swatches`).
+  final PaletteStyle? paletteStyle;
 
   /// Parse the section bytes. Null for an empty read (a lamp that predates
   /// the section), `"{}"` (no config cached yet), a payload that is not a
@@ -53,6 +59,7 @@ class WispConfig {
     final shuffleSeed = decoded['shuffleSeed'];
     final opSeq = decoded['opSeq'];
     final ip = decoded['ip'];
+    final swatches = decoded['swatches'];
     if (ledType is! String ||
         px is! int ||
         brightness is! int ||
@@ -71,6 +78,9 @@ class WispConfig {
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
       ip: ip is String ? ip : null,
+      paletteStyle: swatches is bool
+          ? (swatches ? PaletteStyle.swatches : PaletteStyle.gradient)
+          : null,
     );
   }
 
@@ -90,6 +100,7 @@ class WispConfig {
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
       ip: ip,
+      paletteStyle: paletteStyle,
     );
   }
 }
