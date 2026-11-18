@@ -14,9 +14,10 @@ Everything lives under [`software/`](../../software/).
   ESP-NOW mesh to other lamps. Per-variant builds
   (`upesy_wroom_standard` / `_snafu` / `_staff`). Source: `software/lamp-os/src/`.
 - **`wisp/`** — the infrastructure node (Seeed XIAO ESP32-C6, external antenna).
-  Takes a palette from Straylight over OSC (USB serial or UDP), samples it, and
-  distributes paint to lamps over the mesh (and to pre-mesh lamps as ArtNet DMX
-  over its own softAP); beacons its status. USB-flash-only (no OTA).
+  Takes a palette from Straylight or a Limbic Maestro over OSC (USB serial or
+  UDP), samples it, and distributes paint to lamps over the mesh (and to
+  pre-mesh lamps as ArtNet DMX over its own softAP); beacons its status.
+  USB-flash-only (no OTA).
   Build env `seeed_xiao_esp32_c6`. Source: `software/wisp/src/`.
 - **`lamp-app-flutter/`** — the iOS/Android control app. Talks BLE GATT to lamps;
   no direct mesh participation. Source: `software/lamp-app-flutter/lib/`.
@@ -24,7 +25,7 @@ Everything lives under [`software/`](../../software/).
 ## How they fit
 
 ```
-        Straylight ──OSC (SLIP over USB serial, or UDP :9000)──► wisp
+Straylight/Maestro ──OSC (SLIP over USB serial, or UDP :9000)──► wisp
                                                                 │
                                                                 │ ESP-NOW (channel 6)
                                                                 ▼
@@ -39,7 +40,7 @@ Five links carry everything:
   expressions, OTA push.
 - **lamp ↔ lamp** — ESP-NOW broadcast mesh, channel 6. Presence, greetings,
   transient overrides, expression announce, firmware distribution.
-- **Straylight → wisp** — OSC 1.0 palettes, as SLIP frames on the USB serial
+- **Straylight / Maestro → wisp** — OSC 1.0 palettes, as SLIP frames on the USB serial
   console or UDP datagrams on port 9000 (softAP, the wisp's STA LAN join, or
   wired Ethernet through an optional W5500 on SPI, which keeps the feed off the
   radio). The STA join runs only while the source is Osc and Ethernet is not
@@ -62,7 +63,7 @@ Full topology and channel details: [`networking.md`](networking.md#topology).
 |---|---|---|
 | **App control write** | Phone → BLE GATT characteristic → Core-0 callback → pending slot → Core 1 applies + persists NVS (and mesh-cascades where relevant) | [`networking.md`](networking.md#ble-gatt-characteristics-lamp--phone) |
 | **Presence / roster** | Each lamp broadcasts `MSG_HELLO` (TLV trailer); the wisp broadcasts `MSG_WISP_HELLO`. Receivers fold sightings into the unified `LampRoster` (near + mesh, RSSI) | [`networking.md`](networking.md#tier-1-presence) |
-| **Wisp paint** | Straylight OSC (or manual) palette → wisp samples → `MSG_WISP_STATE` paint broadcast → lamp composites the wisp layer over its scene, easing on adopt/release | [`networking.md`](networking.md#wisp-paints-a-lamps-base--shade-declarative-broadcast) |
+| **Wisp paint** | Straylight or Maestro OSC (or manual) palette → wisp samples → `MSG_WISP_STATE` paint broadcast → lamp composites the wisp layer over its scene, easing on adopt/release | [`networking.md`](networking.md#wisp-paints-a-lamps-base--shade-declarative-broadcast) |
 | **Firmware OTA** | A signed lamp offers `MSG_FW_*` over the mesh; an RSSI-gated peer requests chunks, verifies the ed25519 signature from flash, then swaps A/B slots | [`networking.md`](networking.md#firmware-distribution-messages-msg_fw_) |
 
 ## Where subsystems live

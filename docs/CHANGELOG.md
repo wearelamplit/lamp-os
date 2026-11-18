@@ -7,6 +7,14 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 
 ## Unreleased
 
+### Added
+- **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can read
+  a Maestro's live palette slot (1 to 10) instead of Straylight, in either
+  colour format the Maestro sends (hex or RGB). Set it with `osc:mode maestro`
+  and `osc:slot <n>` on the wisp's console, then point the Maestro at the
+  wisp's address, port 9000. Lamps keep the last Maestro palette when it goes
+  quiet. Needs the wisp reflashed.
+
 ### Changed
 - **A failed `ble_timing` line now says why.** Failed connect, discover and
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
