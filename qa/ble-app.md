@@ -302,6 +302,18 @@ wisp's serial prints no `setManualPalette`. Tap Manual from Osc with the palette
 shown, then power-cycle the lamp within 20 s: the editor turns to "Reading
 palette from wisp…" with no tap.
 
+P19 — **the OSC source shows where to send.** Needs a wisp flashed from 1.3.8
+or later and the app from this tree. The third source pill reads "OSC". With
+the wisp in OSC and joined to Wi-Fi, the Palette tab shows "Send OSC to" with
+the wisp's address and "port 9000"; the address matches the wisp console's
+`wifi:show`, and tapping it copies the address. Unplug the wisp's Wi-Fi
+router (or clear Wi-Fi with no Ethernet): within about 30 s the row turns to
+"No address yet. The wisp joins Wi-Fi while OSC is on (set it in Settings), or
+plug in Ethernet." Plug the router back in: the address returns. With a wisp
+on firmware before 1.3.8 on Ethernet, the row shows its Ethernet address; on
+Wi-Fi it shows no "Send OSC to" section. In Manual, the Settings tab's Wi-Fi
+row reads "Joins only while the source is OSC."
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -342,6 +354,8 @@ palette from wisp…" with no tap.
 - P18: no `setManualPalette` leaves the app while the palette is unread, a
   sheet left open greys its Save until the palette is read and then gives it
   back without closing, and a reconnect shows the loading line with no tap.
+- P19: the pill reads OSC, the address shown is the wisp's own and copies,
+  and the no-address line shows only while the wisp has no network.
 
 ## Not covered here
 

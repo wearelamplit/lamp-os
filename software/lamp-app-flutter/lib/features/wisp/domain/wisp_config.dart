@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'tuple_sampler.dart';
+
 /// The wisp's settings as its `wispConfig` broadcast carries them, read from
 /// the lamp's `wispconfig` page section. The wisp sends every field every
 /// time, so a parsed [WispConfig] is complete: nothing here is a default
-/// standing in for a missing value.
+/// standing in for a missing value. A field a newer wisp added is nullable,
+/// and null means the wisp predates it.
 class WispConfig {
   const WispConfig({
     required this.ledType,
@@ -14,6 +17,8 @@ class WispConfig {
     required this.driftFadePct,
     required this.shuffleSeed,
     required this.opSeq,
+    this.ip,
+    this.paletteStyle,
   });
 
   final String ledType;
@@ -24,9 +29,18 @@ class WispConfig {
   final int shuffleSeed;
   final int opSeq;
 
+  /// Where an OSC sender reaches the wisp on UDP [kOscPort]: `""` while it
+  /// has no network address.
+  final String? ip;
+
+  static const int kOscPort = 9000;
+
+  /// How lamps take colours from the palette (`swatches`).
+  final PaletteStyle? paletteStyle;
+
   /// Parse the section bytes. Null for an empty read (a lamp that predates
   /// the section), `"{}"` (no config cached yet), a payload that is not a
-  /// `wispConfig`, or one missing any field.
+  /// `wispConfig`, or one missing any field every wisp sends.
   static WispConfig? fromBytes(Uint8List bytes) {
     if (bytes.isEmpty) return null;
     final Object? decoded;
@@ -44,6 +58,8 @@ class WispConfig {
     final driftFadePct = decoded['driftFadePct'];
     final shuffleSeed = decoded['shuffleSeed'];
     final opSeq = decoded['opSeq'];
+    final ip = decoded['ip'];
+    final swatches = decoded['swatches'];
     if (ledType is! String ||
         px is! int ||
         brightness is! int ||
@@ -61,6 +77,10 @@ class WispConfig {
       driftFadePct: driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
+      ip: ip is String ? ip : null,
+      paletteStyle: swatches is bool
+          ? (swatches ? PaletteStyle.swatches : PaletteStyle.gradient)
+          : null,
     );
   }
 
@@ -79,6 +99,8 @@ class WispConfig {
       driftFadePct: driftFadePct ?? this.driftFadePct,
       shuffleSeed: shuffleSeed,
       opSeq: opSeq,
+      ip: ip,
+      paletteStyle: paletteStyle,
     );
   }
 }

@@ -14,6 +14,7 @@
 #include "core/wisp_controller.hpp"
 #include "wire/lamp_protocol.hpp"
 #include "status/status_json.hpp"
+#include "status/wisp_config_fields.hpp"
 #include "status/seq_source.hpp"
 #include "util/fnv1a.hpp"
 
@@ -176,18 +177,8 @@ void StatusEmitter::emitStatus() {
 }
 
 WispConfigFields StatusEmitter::configFields() const {
-  WispConfigFields c;
-  if (!config_) return c;
-  c.ledType = lampos::led::byteOrderToString(config_->ledFormat());
-  c.pixelCount = config_->pixelCount();
-  c.brightness = config_->brightness();
-  c.driftIntervalMs = config_->driftIntervalMs();
-  c.driftFadePct = config_->driftFadePct();
-  c.shuffleSeed = config_->shuffleSeed();
-  c.opSeq = config_->opSeq();
-  c.swatches = config_->paletteStyle() == PaletteStyle::Swatches;
-  c.oscMode = config_->oscMode();
-  c.oscSlot = config_->oscSlot();
+  if (!config_) return WispConfigFields{};
+  WispConfigFields c = wispConfigFields(*config_);
   char ethIp[16];
   eth::formatIp(ethIp, sizeof(ethIp));
   const bool staConnected = WiFi.isConnected();

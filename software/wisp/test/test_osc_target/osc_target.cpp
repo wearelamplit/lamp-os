@@ -30,6 +30,14 @@ OscTarget maestro(uint8_t slot, OscRole role = OscRole::Primary) {
   return t;
 }
 
+OscTarget custom(const char* address, uint8_t slot = 1) {
+  OscTarget t;
+  t.mode = OscMode::Custom;
+  t.slot = slot;
+  std::strcpy(t.address, address);
+  return t;
+}
+
 void assertAddress(const char* want, const OscTarget& t) {
   char out[wisp::kOscTargetAddressCap];
   wisp::oscTargetAddress(t, out, sizeof(out));
@@ -52,10 +60,16 @@ void test_straylight_listens_on_its_role() {
   }
 }
 
+void test_custom_listens_on_its_address() {
+  assertAddress("/lamp/palette", custom("/lamp/palette"));
+  assertAddress("/0123456789abcd", custom("/0123456789abcd"));
+}
+
 void test_stale_window_per_mode() {
   TEST_ASSERT_EQUAL_UINT32(wisp::OscFreshness::kStaleMs,
                            wisp::oscTargetStaleMs(straylight(OscRole::Fill)));
   TEST_ASSERT_EQUAL_UINT32(0, wisp::oscTargetStaleMs(maestro(7)));
+  TEST_ASSERT_EQUAL_UINT32(0, wisp::oscTargetStaleMs(custom("/a")));
 }
 
 void test_mode_names_round_trip() {
@@ -66,7 +80,10 @@ void test_mode_names_round_trip() {
   TEST_ASSERT_TRUE(wisp::oscModeFromName("straylight", m));
   TEST_ASSERT_EQUAL_INT((int)OscMode::Straylight, (int)m);
   TEST_ASSERT_EQUAL_STRING("straylight", wisp::oscModeName(m));
-  for (const char* bad : {"custom", "Maestro", "", "aurora"}) {
+  TEST_ASSERT_TRUE(wisp::oscModeFromName("custom", m));
+  TEST_ASSERT_EQUAL_INT((int)OscMode::Custom, (int)m);
+  TEST_ASSERT_EQUAL_STRING("custom", wisp::oscModeName(m));
+  for (const char* bad : {"Custom", "Maestro", "", "aurora", "manual"}) {
     TEST_ASSERT_FALSE(wisp::oscModeFromName(bad, m));
   }
   TEST_ASSERT_FALSE(wisp::oscModeFromName(nullptr, m));
@@ -74,6 +91,8 @@ void test_mode_names_round_trip() {
 
 void test_corrupt_raw_values_coerce() {
   TEST_ASSERT_EQUAL_INT((int)OscMode::Maestro, (int)wisp::coerceOscMode(1));
+  TEST_ASSERT_EQUAL_INT((int)OscMode::Custom, (int)wisp::coerceOscMode(2));
+  TEST_ASSERT_EQUAL_INT((int)OscMode::Straylight, (int)wisp::coerceOscMode(3));
   TEST_ASSERT_EQUAL_INT((int)OscMode::Straylight, (int)wisp::coerceOscMode(9));
   TEST_ASSERT_EQUAL_INT((int)OscMode::Straylight, (int)wisp::coerceOscMode(-1));
   TEST_ASSERT_EQUAL_UINT8(7, wisp::coerceMaestroSlot(7));
@@ -117,6 +136,31 @@ void test_maestro_role_change_keeps() {
                                           maestro(5, OscRole::Secondary)));
 }
 
+// A resend keeps; any other address, a prefix or an extension of it
+// included, resets.
+void test_custom_address_change_resets() {
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(custom("/lamp/a"), custom("/lamp/a")));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(custom("/lamp/a"), custom("/lamp/b")));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(custom("/lamp/a"), custom("/lamp/ab")));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(custom("/lamp/ab"), custom("/lamp/a")));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(custom("/palette/live/3"), maestro(3)));
+  TEST_ASSERT_TRUE(wisp::oscTargetResets(maestro(3), custom("/palette/live/3")));
+}
+
+// In Custom the slot is not part of the target, nor the address in Maestro
+// or Straylight.
+void test_fields_outside_the_mode_keep() {
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(custom("/a", 2), custom("/a", 9)));
+  OscTarget m3 = maestro(3);
+  OscTarget m3b = maestro(3);
+  std::strcpy(m3b.address, "/other");
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(m3, m3b));
+  OscTarget s = straylight(OscRole::Primary);
+  OscTarget sb = straylight(OscRole::Primary);
+  std::strcpy(sb.address, "/other");
+  TEST_ASSERT_FALSE(wisp::oscTargetResets(s, sb));
+}
+
 void test_slot_from_text() {
   uint8_t slot = 0;
   TEST_ASSERT_TRUE(wisp::maestroSlotFromText("1", slot));
@@ -147,5 +191,8 @@ int main(int, char**) {
   RUN_TEST(test_straylight_role_or_slot_change_keeps);
   RUN_TEST(test_maestro_role_change_keeps);
   RUN_TEST(test_slot_from_text);
+  RUN_TEST(test_custom_listens_on_its_address);
+  RUN_TEST(test_custom_address_change_resets);
+  RUN_TEST(test_fields_outside_the_mode_keep);
   return UNITY_END();
 }

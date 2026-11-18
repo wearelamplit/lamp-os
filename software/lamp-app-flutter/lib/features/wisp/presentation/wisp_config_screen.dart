@@ -14,6 +14,7 @@ import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../application/manual_palette_draft.dart';
 import '../application/wisp_notifier.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import 'palette_gradient_bar.dart';
@@ -23,6 +24,7 @@ import 'widgets/wisp_manual_palette.dart';
 import 'widgets/wisp_off_color.dart';
 import 'widgets/wisp_osc_source.dart';
 import 'widgets/wisp_painted_lamps.dart';
+import 'widgets/wisp_palette_style.dart';
 import 'widgets/wisp_password_field.dart';
 import 'widgets/space_brightness_slider.dart';
 import 'widgets/wisp_source_picker.dart';
@@ -132,6 +134,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
           sourceMode: source,
           manualPalette: draft,
           offColor: status.offColor,
+          style: status.paletteStyle ?? PaletteStyle.gradient,
         ),
         Expanded(
           child: IndexedStack(
@@ -229,6 +232,19 @@ class _SourcesTabState extends State<_SourcesTab> {
           OscRolePicker(
             current: status.oscRole,
             onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
+          ),
+          const SizedBox(height: AppSpace.xl),
+          OscSendTo(
+            lampId: lampId,
+            status: status,
+            onLinkDisagrees: () => unawaited(notifier.pollConfig()),
+          ),
+        ],
+        if (source != WispSourceMode.off && status.paletteStyle != null) ...[
+          const SizedBox(height: AppSpace.xl),
+          PaletteStyleSwitch(
+            current: status.paletteStyle!,
+            onSelect: (s) => _runWispOp(() => notifier.setPaletteStyle(s)),
           ),
         ],
       ],
