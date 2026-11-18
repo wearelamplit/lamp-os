@@ -15,6 +15,7 @@ import 'package:lamp_app/features/social/application/lamp_nearby_peers_notifier.
 import 'package:lamp_app/features/social/domain/lamp_nearby_peer.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_config.dart';
+import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_status.dart';
 import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart';
 
@@ -62,11 +63,17 @@ const _noAddress =
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
-String _status({bool wifi = false, String ethIp = '', int seen = 100}) =>
+String _status({
+  bool wifi = false,
+  String ethIp = '',
+  int seen = 100,
+  int lastSeenMs = 1000,
+}) =>
     jsonEncode({
       'wispMac': _mac,
       'configSplit': true,
       'source': 'osc',
+      'lastSeenMs': lastSeenMs,
       'wifiConnected': wifi,
       if (ethIp.isNotEmpty) 'ethIp': ethIp,
       'configLastSeenMs': seen,
@@ -254,9 +261,12 @@ void main() {
         _devId,
         BleUuids.controlService,
         BleUuids.wispStatus,
-        _b(_status(seen: 100, wifi: false)),
+        _b(_status(wifi: false, lastSeenMs: 2000)),
       );
       await tester.pump();
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+      expect(c.read(wispNotifierProvider(_devId)).value!.lastSeenMs, 2000);
       expect(_pollConfigs(ble), before, reason: 'agreeing status');
 
       ble.simulateNotify(
@@ -267,6 +277,7 @@ void main() {
       );
       await tester.pump();
       await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
       expect(_pollConfigs(ble), before + 1);
 
       ble.holdPollStatus!.complete();
@@ -304,6 +315,23 @@ void main() {
       );
     });
 
+    test('on Ethernet the send-to address is the Ethernet one', () {
+      const s = WispStatus(
+        wispMac: _mac,
+        configSplit: true,
+        configKnown: true,
+        ethIp: '10.0.0.5',
+        ip: '192.168.1.42',
+      );
+      expect(s.oscSendTo, '10.0.0.5');
+    });
+
+    test('an optimistic copy keeps the held ip', () {
+      const s = WispStatus(wispMac: _mac, configKnown: true, ip: '10.1.2.3');
+      expect(s.copyWith(oscRole: OscRole.fill).ip, '10.1.2.3');
+      expect(s.copyWith(brightness: 5).ip, '10.1.2.3');
+    });
+
     test('a config without ip clears one merged before', () {
       const base = WispStatus(wispMac: _mac, configSplit: true);
       final withIp = base.withConfig(
@@ -330,6 +358,10 @@ void main() {
       expect(s(ip: '10.0.0.9').ipDisagreesWithLink, isTrue);
       expect(s(ip: '').ipDisagreesWithLink, isFalse);
       expect(s(ip: '10.0.0.9', wifi: true).ipDisagreesWithLink, isFalse);
+      // A swap to Ethernet whose config frame was lost.
+      expect(s(ip: '192.168.1.42', wifi: true, eth: '10.0.0.5')
+          .ipDisagreesWithLink, isTrue);
+      expect(s(ip: '10.0.0.5', eth: '10.0.0.5').ipDisagreesWithLink, isFalse);
       expect(
         s(ip: null, wifi: true).ipDisagreesWithLink,
         isFalse,

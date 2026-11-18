@@ -207,17 +207,19 @@ class WispStatus {
   final String? ip;
 
   /// The address an OSC sender should target, from the wisp's own reports:
-  /// [ip], or [ethIp] while [ip] has none. Empty when neither has one.
-  String get oscSendTo => (ip ?? '').isNotEmpty ? ip! : ethIp;
+  /// [ethIp] while the wisp is on Ethernet, which it always sends to first,
+  /// else [ip]. Empty when neither has one.
+  String get oscSendTo => ethIp.isNotEmpty ? ethIp : (ip ?? '');
 
   /// True when the wisp sent this status and its link state contradicts the
-  /// held [ip]: a link up with no address, or an address with no link. A
-  /// config frame lost after a link edge leaves them apart until the next
-  /// config read.
+  /// held [ip]: on Ethernet with another address, a link up with no address,
+  /// or an address with no link. A config frame lost after a link edge leaves
+  /// them apart until the next config read.
   bool get ipDisagreesWithLink {
     final held = ip;
     if (!fromWisp || !configKnown || held == null) return false;
-    final linked = wifiConnected || ethIp.isNotEmpty;
+    if (ethIp.isNotEmpty) return held != ethIp;
+    final linked = wifiConnected;
     return linked == held.isEmpty;
   }
 

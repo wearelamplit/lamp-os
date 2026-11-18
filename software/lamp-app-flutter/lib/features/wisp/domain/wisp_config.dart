@@ -34,7 +34,7 @@ class WispConfig {
 
   /// Parse the section bytes. Null for an empty read (a lamp that predates
   /// the section), `"{}"` (no config cached yet), a payload that is not a
-  /// `wispConfig`, or one missing any field.
+  /// `wispConfig`, or one missing any field every wisp sends.
   static WispConfig? fromBytes(Uint8List bytes) {
     if (bytes.isEmpty) return null;
     final Object? decoded;
