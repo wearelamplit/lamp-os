@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -290,6 +291,20 @@ void main() {
         isNotNull,
         reason: 'never confirmed by the wisp it went to',
       );
+    });
+
+    test('a pick stops resending once another wisp is heard, '
+        'though a pending source change holds its status off', () async {
+      final (ble, _, n) = await open();
+
+      unawaited(n.setSource(WispSourceMode.manual).catchError((Object _) {}));
+      await pumpEventQueue();
+      final done = n.setOscMode(OscMode.maestro).catchError((Object _) {});
+      await pumpEventQueue();
+      _notify(ble, _status(seen: 500, mac: '11:22:33:44:55:66'));
+      await done;
+
+      expect(_oscOps(ble), hasLength(1));
     });
 
     test('the same pick again while it confirms sends nothing more', () async {

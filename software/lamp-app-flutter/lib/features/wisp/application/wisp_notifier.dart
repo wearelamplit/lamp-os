@@ -1223,9 +1223,9 @@ class WispNotifier extends _$WispNotifier {
   /// still shows it. A pick whose attempts all go unconfirmed stands if the
   /// held config shows it by then, else rolls back to the held setting and
   /// throws. A newer pick on the same [pick] supersedes this one, which then
-  /// stops resending and returns. Once another wisp is shown it stops
-  /// resending, since the lamp would relay the op to that wisp, and counts
-  /// as unconfirmed.
+  /// stops resending and returns. Once a status comes from another wisp,
+  /// adopted or held off by the source-write guard, it stops resending, since
+  /// the lamp would relay the op to that wisp, and counts as unconfirmed.
   Future<void> _sendConfigPick<T extends Object>({
     required _ConfigPick<T> pick,
     required T value,
@@ -1251,8 +1251,7 @@ class WispNotifier extends _$WispNotifier {
       confirm: () => pickBack
           ? Future<bool>.delayed(debugConfigConfirmWindow, () => false)
           : _confirmConfigRead(mac, sentAfter, shows),
-      isSuperseded: () =>
-          pick.epoch != epoch || state.value?.wispMac != mac,
+      isSuperseded: () => pick.epoch != epoch || _statusMac != mac,
     );
     if (_disposed || pick.epoch != epoch) return;
     pick.clear();
