@@ -326,6 +326,31 @@ void main() {
       expect(s.oscSendTo, '10.0.0.5');
     });
 
+    // Stamps are the lamp's millis when it cached each report.
+    test('the fresher of status and config picks the address', () {
+      WispStatus s({required int status, required int config}) => WispStatus(
+        wispMac: _mac,
+        configSplit: true,
+        configKnown: true,
+        wifiConnected: true,
+        ethIp: '10.0.0.5',
+        ip: '192.168.1.42',
+        statusLastSeenMs: status,
+        configLastSeenMs: config,
+      );
+      // Ethernet dropped: the edge's status was lost, its config arrived.
+      final configNewer = s(status: 100, config: 200);
+      expect(configNewer.oscSendTo, '192.168.1.42');
+      expect(configNewer.ipDisagreesWithLink, isFalse);
+      // Ethernet came up: the config was lost, the status arrived.
+      final statusNewer = s(status: 300, config: 200);
+      expect(statusNewer.oscSendTo, '10.0.0.5');
+      expect(statusNewer.ipDisagreesWithLink, isTrue);
+      // Across the lamp's millis wrap.
+      final wrapped = s(status: 5, config: 0xFFFFFFF0);
+      expect(wrapped.oscSendTo, '10.0.0.5');
+    });
+
     test('an optimistic copy keeps the held ip', () {
       const s = WispStatus(wispMac: _mac, configKnown: true, ip: '10.1.2.3');
       expect(s.copyWith(oscRole: OscRole.fill).ip, '10.1.2.3');
@@ -343,7 +368,7 @@ void main() {
       );
     });
 
-    test('link and held address disagree only when one is missing', () {
+    test('link and held address disagree when the status contradicts ip', () {
       WispStatus s({required String? ip, bool wifi = false, String eth = ''}) =>
           WispStatus(
             wispMac: _mac,

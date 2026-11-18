@@ -214,17 +214,32 @@ class WispStatus {
   final PaletteStyle? paletteStyle;
 
   /// The address an OSC sender should target, from the wisp's own reports:
-  /// [ethIp] while the wisp is on Ethernet, which it always sends to first,
-  /// else [ip]. Empty when neither has one.
-  String get oscSendTo => ethIp.isNotEmpty ? ethIp : (ip ?? '');
+  /// [ethIp] while the wisp is on Ethernet, since the wisp always picks it
+  /// first, unless a config reached the lamp after this status; else [ip].
+  /// Empty when neither has one.
+  String get oscSendTo =>
+      ethIp.isNotEmpty && (ip == null || _statusAfterConfig)
+          ? ethIp
+          : (ip ?? '');
+
+  // Whether the lamp cached this status no earlier than its latest config,
+  // on the lamp's wrapping 32-bit millis. True when either stamp is absent.
+  bool get _statusAfterConfig {
+    final s = statusLastSeenMs;
+    final c = configLastSeenMs;
+    if (s == null || c == null) return true;
+    return ((s - c) & 0xFFFFFFFF) < 0x80000000;
+  }
 
   /// True when the wisp sent this status and its link state contradicts the
   /// held [ip]: on Ethernet with another address, a link up with no address,
   /// or an address with no link. A config frame lost after a link edge leaves
-  /// them apart until the next config read.
+  /// them apart until the next config read. A status older than the lamp's
+  /// latest config never disagrees: the config is the fresher report.
   bool get ipDisagreesWithLink {
     final held = ip;
     if (!fromWisp || !configKnown || held == null) return false;
+    if (!_statusAfterConfig) return false;
     if (ethIp.isNotEmpty) return held != ethIp;
     final linked = wifiConnected;
     return linked == held.isEmpty;
