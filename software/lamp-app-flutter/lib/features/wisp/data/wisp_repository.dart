@@ -146,16 +146,23 @@ class WispRepository {
     });
   }
 
-  /// Which OSC sender the wisp listens to, and with [slot] the Maestro
-  /// palette slot; a null [slot] keeps the stored one. Persisted in wisp NVS
-  /// and echoed as `oscMode` / `oscSlot` in its `wispConfig`.
-  Future<void> setOsc(OscMode mode, {int? slot}) async {
+  /// Which OSC sender the wisp listens to, with [slot] the Maestro palette
+  /// slot and [address] the Custom address; a null one keeps the stored one.
+  /// [OscMode.custom] needs an [address] the wisp's rule takes, else this
+  /// throws [ArgumentError] and sends nothing. Persisted in wisp NVS and
+  /// echoed as `oscMode` / `oscSlot` / `oscAddr` in its `wispConfig`.
+  Future<void> setOsc(OscMode mode, {int? slot, String? address}) async {
     assert(mode != OscMode.unknown);
+    if (address != null && !oscCustomAddressValid(address) ||
+        mode == OscMode.custom && address == null) {
+      throw ArgumentError.value(address, 'address');
+    }
     await _writeOp({
       'char': 'wispOp',
       'op': 'setOsc',
       'mode': mode.name,
       'slot': ?slot,
+      'address': ?address,
     });
   }
 

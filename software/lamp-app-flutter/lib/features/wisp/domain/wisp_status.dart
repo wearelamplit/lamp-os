@@ -63,6 +63,7 @@ class WispStatus {
     this.paletteStyle,
     this.oscMode,
     this.oscSlot,
+    this.oscAddr,
     this.heldConfigSeenMs,
   });
 
@@ -230,6 +231,11 @@ class WispStatus {
   /// The Maestro palette slot the wisp reads, from its `wispConfig`. Null
   /// until a config carrying it is merged.
   final int? oscSlot;
+
+  /// The Custom OSC address the wisp stores, from its `wispConfig`: `""` while
+  /// it has none. Null until a config carrying it is merged; a wisp that
+  /// predates Custom never sends one.
+  final String? oscAddr;
 
   /// The lamp's `configLastSeenMs` stamp the merged config was read under,
   /// so the config's age can be told against [statusLastSeenMs]. Null until a
@@ -405,6 +411,7 @@ class WispStatus {
       paletteStyle: config.paletteStyle,
       oscMode: config.oscMode,
       oscSlot: config.oscSlot,
+      oscAddr: config.oscAddr,
       heldConfigSeenMs: seenMs,
     );
   }
@@ -423,6 +430,7 @@ class WispStatus {
     PaletteStyle? paletteStyle,
     OscMode? oscMode,
     int? oscSlot,
+    String? oscAddr,
   }) {
     return _copy(
       source: source,
@@ -438,6 +446,7 @@ class WispStatus {
       paletteStyle: paletteStyle ?? _keep,
       oscMode: oscMode ?? _keep,
       oscSlot: oscSlot ?? _keep,
+      oscAddr: oscAddr ?? _keep,
     );
   }
 
@@ -459,6 +468,7 @@ class WispStatus {
     Object? paletteStyle = _keep,
     Object? oscMode = _keep,
     Object? oscSlot = _keep,
+    Object? oscAddr = _keep,
     Object? heldConfigSeenMs = _keep,
   }) {
     return WispStatus(
@@ -503,6 +513,7 @@ class WispStatus {
           : paletteStyle as PaletteStyle?,
       oscMode: identical(oscMode, _keep) ? this.oscMode : oscMode as OscMode?,
       oscSlot: identical(oscSlot, _keep) ? this.oscSlot : oscSlot as int?,
+      oscAddr: identical(oscAddr, _keep) ? this.oscAddr : oscAddr as String?,
       heldConfigSeenMs: identical(heldConfigSeenMs, _keep)
           ? this.heldConfigSeenMs
           : heldConfigSeenMs as int?,
@@ -552,6 +563,7 @@ class WispStatus {
           paletteStyle == other.paletteStyle &&
           oscMode == other.oscMode &&
           oscSlot == other.oscSlot &&
+          oscAddr == other.oscAddr &&
           heldConfigSeenMs == other.heldConfigSeenMs;
 
   @override
@@ -581,7 +593,8 @@ class WispStatus {
           brightness,
           configKnown,
           Object.hash(configSplit, configLastSeenMs, manualId, manualSeq,
-              swatchesSeq, ip, paletteStyle, oscMode, oscSlot, heldConfigSeenMs),
+              swatchesSeq, ip, paletteStyle, oscMode, oscSlot, oscAddr,
+              heldConfigSeenMs),
         ),
       );
 }

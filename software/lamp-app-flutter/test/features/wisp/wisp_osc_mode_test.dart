@@ -625,7 +625,7 @@ void main() {
     });
 
     test('an unknown sender is kept as unknown; a slot off 1..10 is null', () {
-      final c = WispConfig.fromBytes(_b(_config(mode: 'custom', slot: 11)))!;
+      final c = WispConfig.fromBytes(_b(_config(mode: 'aurora', slot: 11)))!;
       expect(c.oscMode, OscMode.unknown);
       expect(c.oscSlot, isNull);
       expect(WispConfig.fromBytes(_b(_config(slot: 0)))!.oscSlot, isNull);

@@ -67,11 +67,13 @@ String oscRoleWire(OscRole r) => r.name;
 
 /// Which OSC sender the wisp listens to in [WispSourceMode.osc]. Wire format
 /// on `wispConfig.oscMode` and the `setOsc` wispOp is the lowercase enum
-/// name. [unknown] is a value this app cannot name, from a newer wisp; it is
-/// never sent.
+/// name. [custom] follows one address the owner sets ([oscCustomAddressValid]).
+/// [unknown] is a value this app cannot name, from a newer wisp; it is never
+/// sent.
 enum OscMode {
   straylight,
   maestro,
+  custom,
   unknown,
 }
 
@@ -93,3 +95,33 @@ const int kMaestroSlotMax = 10;
 /// [kMaestroSlotMin]..[kMaestroSlotMax].
 int? parseMaestroSlot(Object? raw) =>
     raw is int && raw >= kMaestroSlotMin && raw <= kMaestroSlotMax ? raw : null;
+
+/// The longest Custom OSC address the wisp stores, in bytes.
+const int kOscCustomAddressMaxLen = 15;
+
+/// Why a Custom OSC address breaks the wisp's rule.
+enum OscAddressProblem { empty, noLeadingSlash, tooLong, badCharacter }
+
+const String _kOscAddressForbidden = '"\\#*,?[]{}';
+
+/// What is wrong with [address] as a Custom OSC address, or null when the
+/// wisp takes it: printable ASCII without `"` `\` `#` `*` `,` `?` `[` `]` `{`
+/// `}`, starting with `/`, at most [kOscCustomAddressMaxLen] bytes. The wisp's
+/// own rule is `oscCustomAddressValid` in `software/wisp/src/osc/osc_target.cpp`,
+/// and the test runs its cases against this one.
+OscAddressProblem? oscCustomAddressProblem(String address) {
+  if (address.isEmpty) return OscAddressProblem.empty;
+  if (!address.startsWith('/')) return OscAddressProblem.noLeadingSlash;
+  for (final c in address.codeUnits) {
+    if (c < 0x21 || c > 0x7E || _kOscAddressForbidden.codeUnits.contains(c)) {
+      return OscAddressProblem.badCharacter;
+    }
+  }
+  if (address.length > kOscCustomAddressMaxLen) {
+    return OscAddressProblem.tooLong;
+  }
+  return null;
+}
+
+bool oscCustomAddressValid(String address) =>
+    oscCustomAddressProblem(address) == null;

@@ -22,6 +22,7 @@ class WispConfig {
     this.paletteStyle,
     this.oscMode,
     this.oscSlot,
+    this.oscAddr,
   });
 
   final String ledType;
@@ -48,6 +49,11 @@ class WispConfig {
   /// listens to another sender.
   final int? oscSlot;
 
+  /// The Custom OSC address the wisp stores (`oscAddr`), kept while it listens
+  /// to another sender: `""` while it has none. Null from a wisp that predates
+  /// Custom.
+  final String? oscAddr;
+
   /// Parse the section bytes. Null for an empty read (a lamp that predates
   /// the section), `"{}"` (no config cached yet), a payload that is not a
   /// `wispConfig`, or one missing any field every wisp sends.
@@ -72,6 +78,7 @@ class WispConfig {
     final swatches = decoded['swatches'];
     final oscMode = decoded['oscMode'];
     final oscSlot = decoded['oscSlot'];
+    final oscAddr = decoded['oscAddr'];
     if (ledType is! String ||
         px is! int ||
         brightness is! int ||
@@ -95,6 +102,7 @@ class WispConfig {
           : null,
       oscMode: parseOscMode(oscMode),
       oscSlot: parseMaestroSlot(oscSlot),
+      oscAddr: oscAddr is String ? oscAddr : null,
     );
   }
 
@@ -117,6 +125,7 @@ class WispConfig {
       paletteStyle: paletteStyle,
       oscMode: oscMode,
       oscSlot: oscSlot,
+      oscAddr: oscAddr,
     );
   }
 }

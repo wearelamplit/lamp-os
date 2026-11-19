@@ -13,6 +13,7 @@ import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../application/manual_palette_draft.dart';
+import '../application/osc_address_presets.dart';
 import '../application/wisp_notifier.dart';
 import '../domain/tuple_sampler.dart';
 import '../domain/wisp_source_mode.dart';
@@ -169,7 +170,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   }
 }
 
-class _SourcesTab extends StatefulWidget {
+class _SourcesTab extends ConsumerStatefulWidget {
   const _SourcesTab({
     required this.lampId,
     required this.status,
@@ -183,10 +184,35 @@ class _SourcesTab extends StatefulWidget {
   final WispSourceMode source;
 
   @override
-  State<_SourcesTab> createState() => _SourcesTabState();
+  ConsumerState<_SourcesTab> createState() => _SourcesTabState();
 }
 
-class _SourcesTabState extends State<_SourcesTab> {
+class _SourcesTabState extends ConsumerState<_SourcesTab> {
+  // Custom picked for a wisp with no address to send: shown, nothing sent.
+  bool _customDraft = false;
+
+  @override
+  void didUpdateWidget(_SourcesTab old) {
+    super.didUpdateWidget(old);
+    final status = widget.status;
+    if (widget.source != WispSourceMode.osc ||
+        status.wispMac != old.status.wispMac ||
+        status.oscMode == OscMode.custom) {
+      _customDraft = false;
+    }
+  }
+
+  void _selectOscMode(OscMode picked, OscMode wispMode) {
+    if (picked == OscMode.custom &&
+        !oscCustomAddressValid(widget.status.oscAddr ?? '')) {
+      setState(() => _customDraft = true);
+      return;
+    }
+    setState(() => _customDraft = false);
+    if (picked == wispMode) return;
+    _runWispOp(() => widget.notifier.setOscMode(picked));
+  }
+
   Future<void> _runWispOp(Future<void> Function() op) async {
     try {
       await op();
@@ -207,12 +233,16 @@ class _SourcesTabState extends State<_SourcesTab> {
         WispSettingsPending(lampId: widget.lampId),
       ];
     }
-    final mode = status.oscMode ?? OscMode.straylight;
+    final wispMode = status.oscMode ?? OscMode.straylight;
+    final mode = _customDraft ? OscMode.custom : wispMode;
+    final customAddress = status.oscAddr ?? '';
     final sender = switch (mode) {
       OscMode.straylight => 'Straylight',
       OscMode.maestro => 'the Maestro',
+      OscMode.custom => _customDraft ? null : 'OSC on $customAddress',
       OscMode.unknown => null,
     };
+    final presets = ref.read(oscAddressPresetsProvider.notifier);
     return [
       if (!status.sourceLive && sender != null) ...[
         Semantics(
@@ -225,7 +255,8 @@ class _SourcesTabState extends State<_SourcesTab> {
       if (status.oscMode != null) ...[
         OscModeSwitch(
           current: mode,
-          onSelect: (m) => _runWispOp(() => notifier.setOscMode(m)),
+          customAvailable: status.oscAddr != null,
+          onSelect: (m) => _selectOscMode(m, wispMode),
         ),
         const SizedBox(height: AppSpace.xl),
       ],
@@ -247,6 +278,20 @@ class _SourcesTabState extends State<_SourcesTab> {
           current: status.oscSlot,
           address: status.oscSendTo,
           onSelect: (n) => _runWispOp(() => notifier.setMaestroSlot(n)),
+        ),
+      if (mode == OscMode.custom)
+        CustomOscAddress(
+          address: _customDraft ? '' : customAddress,
+          active: !_customDraft,
+          sendTo: status.oscSendTo,
+          presets:
+              ref.watch(oscAddressPresetsProvider).value ?? const <String>[],
+          onSend: (a) {
+            setState(() => _customDraft = false);
+            _runWispOp(() => notifier.setCustomOscAddress(a));
+          },
+          onSavePreset: (a) => unawaited(presets.add(a)),
+          onDeletePreset: (a) => unawaited(presets.remove(a)),
         ),
     ];
   }
