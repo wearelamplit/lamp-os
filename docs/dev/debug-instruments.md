@@ -28,7 +28,7 @@ source file is where the tag's format strings live.
 | `[override]` | `components/transient_override/color_override.cpp` | Transient color override apply / beginFade / drop-while-operator-editing |
 | `[recv]` | `components/network/mesh/mesh_link.cpp` | Mesh RX dispatch: OVERRIDE_COLORS, RESTORE_COLORS, COMMAND parse drops |
 | `[send]` | `components/network/mesh/mesh_link.cpp` | COMMAND resend dropped (frame > ring cap; single-send only) |
-| `[show]` | `components/network/mesh/mesh_link.cpp` | Lamp ESP-NOW init / ready (mac) / HELLO recv |
+| `[show]` | `components/network/mesh/mesh_link.cpp` | Lamp ESP-NOW init / ready (mac) / HELLO recv (`rssi=N direct` for the originator's own copy, the reading the OTA gate uses; `relayed` for a copy another lamp rebroadcast, whose RSSI is the relayer's link) |
 | `[meshmix]` | `components/network/mesh/mesh_link.cpp` | 30 s mesh RX mix window (`hello / wisp_hello / paint / …` counts) |
 | `[hellosupp]` | `components/network/mesh/mesh_link.cpp` | 30 s HELLO relay-suppression rate (`win=30s suppressed=.. relayed=.. rate=..%`) |
 | `[relaystagger]` | `components/network/mesh/mesh_link.cpp` | 30 s staggered wisp-frame relays (`win=30s queued=.. failopen=.. deferred=.. dropped=.. maxlate=..ms`): relays queued, relayed inline (table full, frame oversize, or a known loop stall), passes a due relay waited for a TX credit, copies dropped 1 s past their fire time (a credit stall, a failing driver, an unannounced loop stall over 1 s, or a known stall that outlasts 1 s holding copies queued before it), and the latest a relay went out past its fire time. Over a run, `relayed_out` in `[meshmix]` less `[hellosupp] relayed` should equal queued + failopen - dropped, plus one per retried submit (`[espnow.tx] submit FAIL`) |

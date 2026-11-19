@@ -51,7 +51,11 @@ skew:
    the lamp and aborts the OTA.
 
 2. **Signed lamp→lamp OTA end-to-end.** Wait for the lamps to exchange HELLOs
-   (roster fills 2–25 s after boot), then watch the chain:
+   (roster fills 2–25 s after boot). The src offers only once its direct link
+   to the peer has held -90 dBm or better for 45 s: before the first `→ OFFER`
+   its tap shows `[show] HELLO recv from <peer-mac> ... rssi=N direct` lines
+   with N at -90 or better spanning at least 45 s, so the first offer lands
+   45 to 75 s after the src first hears the peer directly. Then watch the chain:
 
    - src: `[fwdist] consider <peer-mac> v=... our=... → OFFER`, then
      `[fwdist] OFFER -> <peer-mac> v=... chunks=... seq=...`
@@ -101,8 +105,8 @@ skew:
    a phone's Wi-Fi list again. Repeat with a phone joined to the src's network
    and the web config page open: the src logs no `[fwdist] ... → OFFER` while
    the phone stays joined, and a settings save from the page answers. Leave the
-   network: the src reboots (its BLE comes back), then offers once it hears the
-   peer's HELLO again (up to 30 s). Then join a phone to the src's
+   network: the src reboots (its BLE comes back), then offers once its direct
+   link to the peer has held the floor for 45 s again (45 to 75 s). Then join a phone to the src's
    network inside the 15 s between `→ OFFER` and the peer's accept: the send
    goes ahead, the phone loses the network when streaming starts, and the
    network is back after `softAP back after OTA`. Between `softAP down for
@@ -138,6 +142,16 @@ skew:
    not silent). Cross-VARIANT gating (`standard` vs `snafu` type prefix) is
    the same code path with a different prefix; exercising it for real needs a
    snafu lamp + snafu-signed artifact — see Not covered.
+
+   **Weak-link gate.** With the peer back on the older beta (the Setup above),
+   move it until the src's tap reads its `[show] HELLO recv from <peer-mac>
+   ... direct` lines below -90 (or hears it only `relayed`). Over at least 3 min the src logs `[fwdist] consider <peer-mac>
+   ... skip: direct link has not held -90 dBm for 45000 ms` and no `→ OFFER`
+   to it. Bring the peer back: no OFFER until 45 s of direct lines at -90 or
+   better, and one line below -90 inside that window restarts the 45 s. With
+   the app on its Lamp Network screen, the peer's row carries the same direct
+   reading as `mrssi` in the `nearby` section, and drops it about 75 s after the
+   peer's last direct line.
 
 7. Restore: flash both lamps back to the intended baseline, revert `VERSION`.
 
@@ -254,6 +268,9 @@ tap, opened before the transfer so the open's reset lands on the old image.
 - Dev source: the `disabled (dev channel)` line, zero OFFERs.
 - Gated pair (step 6): zero OFFERs from the source; any receiver-side decline
   is logged, never a silent flash.
+- Weak link (step 6): zero OFFERs while the direct link reads below -90 or is
+  heard only relayed; the first OFFER after recovery comes no sooner than 45 s
+  of direct lines at -90 or better.
 - Zero `BOD|Guru|abort` after boot on either lamp (one boot-inrush BOD on USB
   power is the known artifact).
 

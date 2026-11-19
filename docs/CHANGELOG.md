@@ -5,6 +5,27 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **A lamp no longer starts an update over a link too weak to finish it.** A
+  lamp now offers firmware or a web UI update to a neighbour only after its
+  direct Wi-Fi reading of that neighbour has held -90 dBm or better for 45 s
+  (at least two readings); one reading below -90 restarts the wait, and a
+  neighbour heard only through other lamps is never offered. A reading expires
+  about 75 s after the neighbour's last direct hello, so an old number can't
+  start a send. Before this, one lucky reading could start a send that looped
+  for minutes with the sending lamp unreachable from the app. The receiving
+  lamp's floor moves from -92 to -90 too. Messages between lamps are
+  unchanged, so older lamps work with these.
+
+### Added
+- **The nearby list carries each lamp's direct Wi-Fi reading.** The app's
+  nearby section gains `mrssi`, the lamp's latest direct Wi-Fi signal in dBm,
+  left out when there's no fresh one. The Bluetooth layout is unchanged.
+- **The debug tap marks each hello as `direct` or `relayed`.** A relayed
+  hello's signal is the relaying lamp's link, not the sender's.
+
 ## 1.3.8
 
 ### Added
