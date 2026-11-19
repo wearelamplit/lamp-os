@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 import 'ble_client.dart';
@@ -31,6 +32,14 @@ class FbpBleClient extends BleClient {
         .listen((e) {
       if (e.connectionState == fbp.BluetoothConnectionState.disconnected) {
         _serviceCache.remove(e.device.remoteId.str);
+        // fbp records the reason in its own listener on the same stream,
+        // which may run after this one; a microtask runs after every
+        // listener has seen the event.
+        scheduleMicrotask(() {
+          final r = e.device.disconnectReason;
+          debugPrint('[ble_drop] id=${e.device.remoteId.str} '
+              'code=${r?.code} reason=${r?.description}');
+        });
       }
     });
     final device = fbp.BluetoothDevice(
