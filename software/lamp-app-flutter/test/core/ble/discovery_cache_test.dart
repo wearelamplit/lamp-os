@@ -30,6 +30,25 @@ void main() {
   });
   tearDown(() => bleTimings.sink = savedSink);
 
+  test('a timing failure fails the run and frees the device', () async {
+    final savedNow = bleTimings.now;
+    var calls = 0;
+    bleTimings.now = () {
+      if (++calls == 2) throw StateError('clock');
+      return Duration.zero;
+    };
+    addTearDown(() => bleTimings.now = savedNow);
+
+    final a = cache.resolve('x', discover.call);
+    discover.runs.single.complete(1);
+    await expectLater(a, throwsA(isA<StateError>()));
+
+    final retry = cache.resolve('x', discover.call);
+    expect(discover.runs, hasLength(2), reason: 'a fresh discovery');
+    discover.runs[1].complete(2);
+    expect(await retry, 2);
+  });
+
   Iterable<BleTimingEvent> discovers() =>
       events.where((e) => e.phase == BleTimingPhase.discover);
 
