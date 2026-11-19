@@ -84,8 +84,12 @@ tint and starts it from the loop once the burst's length has passed and the
 burst has been reaped, so the tint takes the Remote slot the burst held. The
 tint is a transient `shifty` from the same sender on the base: Bloom fill, 4 s
 fade in, 20 s hold, opacity 80 **(T)**, fading back over the command's
-`fadeDuration`, capped at 100 s so the whole tint finishes inside the 180 s
-transient lifetime (a static assert in `spore_tint.cpp` ties the two). Only a
+`fadeDuration`, capped at 100 s. Bloom staggers pixel starts, and shifty
+holds each fade's window open for half a fade past the fade length
+(`ShiftyExpression::maxCycleMs`), though every pixel has landed by then. So
+at the cap the tint holds its slot for 6 s + 20 s + 150 s = 176 s, the last
+50 s with nothing changing on the strip, inside the 180 s transient lifetime
+(a static assert in `spore_tint.cpp` ties the two). Only a
 command that started its burst at once (no `delayMs`) is followed. While a
 tint is booked or a peer's `shifty` transient is in flight, another spore
 still sparkles but tints nothing. A booked tint the manager refuses when its
