@@ -105,6 +105,7 @@ ListedPeer toListedPeer(const RosterEntry& e, uint32_t nowMs) {
   l.firmwareVersion = e.firmwareVersion;
   l.lastRssi = e.lastRssi;
   l.espnowRssi = e.directRssi.fresh(nowMs);
+  l.espnowRssiFreshS = static_cast<uint8_t>(e.directRssi.freshForMs(nowMs) / 1000);
   l.otaState = e.otaState;
   l.hasMac = e.hasMac;
   l.hasOtaSendingTo = e.hasOtaSendingTo;

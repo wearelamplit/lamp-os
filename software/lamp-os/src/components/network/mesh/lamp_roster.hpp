@@ -175,8 +175,10 @@ struct ListedPeer {
   uint32_t lastSeenMeshMs = 0;
   uint32_t firmwareVersion = 0;
   int8_t   lastRssi = -127;
-  // DirectRssi::fresh when the snapshot was taken.
+  // DirectRssi::fresh when the snapshot was taken, and whole seconds it
+  // stays fresh after that, rounded down.
   int8_t   espnowRssi = -127;
+  uint8_t  espnowRssiFreshS = 0;
   uint8_t  otaState = 0;
   bool     hasMac = false;
   bool     hasOtaSendingTo = false;

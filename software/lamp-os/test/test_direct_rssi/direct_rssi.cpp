@@ -40,6 +40,25 @@ void test_the_unavailable_sentinel_records_nothing() {
   TEST_ASSERT_EQUAL_INT8(-127, d.fresh(kT0 + DirectRssi::kMaxAgeMs + 1));
 }
 
+// The recv task can stamp a reading after the loop read its clock; that
+// reading is fresh at the earlier now, with its whole span ahead.
+void test_a_reading_stamped_ahead_of_now_is_fresh() {
+  DirectRssi d;
+  d.record(-70, kT0 + 2);
+  TEST_ASSERT_EQUAL_INT8(-70, d.fresh(kT0));
+  TEST_ASSERT_EQUAL_UINT32(DirectRssi::kMaxAgeMs, d.freshForMs(kT0));
+}
+
+// freshForMs counts down to the moment fresh() lets go of the reading.
+void test_fresh_span_ends_when_the_reading_goes_stale() {
+  DirectRssi d;
+  d.record(-70, kT0);
+  TEST_ASSERT_EQUAL_UINT32(DirectRssi::kMaxAgeMs - 1234, d.freshForMs(kT0 + 1234));
+  TEST_ASSERT_EQUAL_UINT32(0, d.freshForMs(kT0 + DirectRssi::kMaxAgeMs));
+  TEST_ASSERT_EQUAL_INT8(-70, d.fresh(kT0 + DirectRssi::kMaxAgeMs));
+  TEST_ASSERT_EQUAL_UINT32(0, d.freshForMs(kT0 + DirectRssi::kMaxAgeMs + 1));
+}
+
 // A reading stays for kMaxAgeMs: one lost steady HELLO keeps it, two expire it.
 void test_a_reading_goes_stale_after_two_lost_hellos() {
   static_assert(2 * kHello <= DirectRssi::kMaxAgeMs && DirectRssi::kMaxAgeMs < 3 * kHello,
@@ -143,6 +162,8 @@ int main(int argc, char** argv) {
   UNITY_BEGIN();
   RUN_TEST(test_no_reading_is_unknown_and_never_holds);
   RUN_TEST(test_the_unavailable_sentinel_records_nothing);
+  RUN_TEST(test_a_reading_stamped_ahead_of_now_is_fresh);
+  RUN_TEST(test_fresh_span_ends_when_the_reading_goes_stale);
   RUN_TEST(test_a_reading_goes_stale_after_two_lost_hellos);
   RUN_TEST(test_steady_cadence_at_the_floor_holds_after_the_window);
   RUN_TEST(test_one_reading_never_holds);

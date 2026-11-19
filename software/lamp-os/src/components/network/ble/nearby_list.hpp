@@ -39,8 +39,8 @@ class NearbyList {
 
   // Loop task only. Builds the list while a client is connected and a read
   // came within kHoldMs (a disconnect ends the hold), rebuilds it on a roster
-  // change (at most once a second), and frees it otherwise. True when rev()
-  // moved.
+  // change or once a listed mrssi goes stale (at most once a second), and
+  // frees it otherwise. True when rev() moved.
   bool tick(lamp::LampRoster& roster, bool clientConnected, uint32_t nowMs);
   // Loop task only. Frees the list and the roster copy.
   void release(lamp::LampRoster& roster);
@@ -65,6 +65,9 @@ class NearbyList {
   uint32_t builtGen_  = 0;
   uint32_t lastTryMs_ = 0;
   uint32_t lastHash_  = 0;
+  // When the soonest listed mrssi goes stale, if any is listed.
+  uint32_t mrssiStaleAtMs_ = 0;
+  bool     mrssiListed_    = false;
   bool     tried_     = false;
   bool     holding_   = false;
 };

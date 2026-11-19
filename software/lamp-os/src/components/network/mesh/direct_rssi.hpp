@@ -10,8 +10,9 @@
 namespace lamp {
 
 // A peer's ESP-NOW RSSI as measured off its own direct HELLOs, the link an OTA
-// offer to it would use. Fed only direct readings: a relayed copy measures the
-// relayer's link. Trivially copyable, so it lives in the roster entry.
+// offer to it would use. Fed only direct readings, since a relayed copy measures
+// the relayer's link. Trivially copyable, so it lives in the roster entry.
+// Defined here so every native test that compiles lamp_roster.cpp links it.
 class DirectRssi {
  public:
   // Age past which a reading is stale. At the steady HELLO interval one lost
@@ -47,6 +48,10 @@ class DirectRssi {
 
   // The latest reading, or -127 when there is none or it is stale.
   int8_t fresh(uint32_t nowMs) const { return isFresh(nowMs) ? rssi_ : -127; }
+  // How much longer fresh() returns the latest reading; 0 once it is stale.
+  uint32_t freshForMs(uint32_t nowMs) const {
+    return isFresh(nowMs) ? kMaxAgeMs - lampos::msSince(nowMs, lastMs_) : 0;
+  }
 
   // True when the link has held kOtaMinRssiDbm or better for kOtaHoldMs,
   // across at least kOtaMinReadings readings, and the latest is fresh.
@@ -76,5 +81,7 @@ class DirectRssi {
 
 static_assert(DirectRssi::kOtaHoldMs < UINT16_MAX, "heldMs_ must reach the hold");
 static_assert(sizeof(DirectRssi) == 8, "one DirectRssi per roster entry");
+static_assert(DirectRssi::kMaxAgeMs / 1000 <= UINT8_MAX,
+              "ListedPeer carries the fresh span in a byte of seconds");
 
 }  // namespace lamp

@@ -104,8 +104,8 @@ class FirmwareDistributor {
   // peerMaxChunk is the peer's HELLO_TLV_FW_MAX_CHUNK (0 = peer doesn't
   // advertise): the session chunk size becomes min(FW_CHUNK_SIZE_MAX,
   // peerMaxChunk) when advertised, else FW_CHUNK_SIZE_BASELINE.
-  // peerLinkHeld is DirectRssi::holdsOtaFloor for the peer: false skips the
-  // offer rather than starting a doomed direct-hop transfer.
+  // peerLinkHeld is DirectRssi::holdsOtaFloor for the peer. A peer whose link
+  // has not held is skipped, since a weak direct hop can't finish a transfer.
   // peerBeingServed is the mesh-derived "another lamp already has this peer":
   // the peer reports otaState receiving, or some roster peer reports sending to
   // it. The caller computes it from the roster; the offer is skipped so

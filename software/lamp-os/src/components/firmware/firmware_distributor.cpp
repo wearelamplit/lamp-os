@@ -736,17 +736,6 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                 (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MAX);
     return;
   }
-  // A weak direct hop thrashes or fails regardless of chunk size; cascade OTA
-  // reaches this peer later via a nearer upgraded lamp.
-  if (!peerLinkHeld) {
-    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
-                "direct link has not held %d dBm for %u ms\n",
-                peerMac[0], peerMac[1], peerMac[2],
-                peerMac[3], peerMac[4], peerMac[5],
-                (unsigned)peerVersion, (int)lamp_protocol::kOtaMinRssiDbm,
-                (unsigned)DirectRssi::kOtaHoldMs);
-    return;
-  }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
   if (!runningPartition_ || !shaPrefixReady_) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -775,6 +764,17 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
       // version-only gate. Receiver's otaAcceptable is the downstream backstop.
       if (peerVersion >= lamp::FIRMWARE_VERSION) return;
     }
+  }
+  // A weak direct hop thrashes or fails regardless of chunk size; cascade OTA
+  // reaches this peer later via a nearer upgraded lamp.
+  if (!peerLinkHeld) {
+    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
+                "direct link has not held %d dBm for %u ms\n",
+                peerMac[0], peerMac[1], peerMac[2],
+                peerMac[3], peerMac[4], peerMac[5],
+                (unsigned)peerVersion, (int)lamp_protocol::kOtaMinRssiDbm,
+                (unsigned)DirectRssi::kOtaHoldMs);
+    return;
   }
   if (peerBeingServed) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "

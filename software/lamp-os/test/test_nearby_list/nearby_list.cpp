@@ -517,6 +517,32 @@ void test_direct_reading_renders_as_mrssi() {
   TEST_ASSERT_EQUAL(std::string::npos, out.find("mrssi"));
 }
 
+// A held list no roster change touches still drops a peer's mrssi within a
+// second of the reading going stale, and keeps it until then.
+void test_stale_mrssi_leaves_a_list_no_change_rebuilds() {
+  Fixture f;
+  const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x03, 0};
+  const uint32_t heard = g_now + 3700;
+  at(heard);
+  f.roster.addOrUpdateFromEspNow("lamp00", mac, Color(0, 1, 2, 3), Color(4, 5, 6, 0), 0x010203,
+                                 0, 5, nullptr, nullptr, false, 0, false, nullptr, false, -71);
+  at(heard + 250);
+  std::string out;
+  f.list.read(out, g_now);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"mrssi\":-71"));
+  const uint32_t staleAt = heard + lamp::DirectRssi::kMaxAgeMs + 1;
+  for (uint32_t t = heard + 1250; t < staleAt; t += 1000) {
+    at(t);
+    f.list.tick(f.roster, true, g_now);
+    f.list.read(out, g_now);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(std::string::npos, out.find("\"mrssi\":-71"), "fresh");
+  }
+  at(staleAt + 1000);
+  f.list.tick(f.roster, true, g_now);
+  f.list.read(out, g_now);
+  TEST_ASSERT_EQUAL(std::string::npos, out.find("mrssi"));
+}
+
 // fwChannel arrives over the air, so a quote in it cannot end the string.
 void test_fw_channel_is_escaped() {
   ListedPeer p;
@@ -566,6 +592,7 @@ int main(int, char**) {
   RUN_TEST(test_build_demand_tracks_the_list_length);
   RUN_TEST(test_fw_channel_is_escaped);
   RUN_TEST(test_direct_reading_renders_as_mrssi);
+  RUN_TEST(test_stale_mrssi_leaves_a_list_no_change_rebuilds);
   RUN_TEST(test_read_stamped_after_the_tick_clock_counts);
   RUN_TEST(test_each_visible_field_moves_the_rev);
   RUN_TEST(test_fw_channel_high_bytes_are_escaped);
