@@ -5,6 +5,17 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## Unreleased
+
+### Fixed
+- **A lamp busy teaching another lamp says so, then comes back by itself.**
+  When a lamp hangs up on the phone to send or take a firmware update over the
+  mesh, the app shows "<Name> is busy teaching a lamp new tricks 🎓" instead
+  of a minute of "Reaching out…" ending in "Couldn't reach your lamp", makes
+  no connect attempts meanwhile, and reconnects on its own as soon as it hears
+  the lamp again. Other drops (out of range, a reboot) reconnect as before.
+  On an iPhone every drop behaves as before.
+
 ## 1.3.8
 
 ### Added

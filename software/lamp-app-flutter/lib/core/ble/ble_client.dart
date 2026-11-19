@@ -152,6 +152,15 @@ Future<Uint8List> readSectionVia(
   return result;
 }
 
+enum LinkDropCause {
+  /// The lamp ended a working link itself.
+  lampHungUp,
+
+  /// Any other drop: out of range, a reboot, the phone's own disconnect, or a
+  /// reason the transport does not report.
+  other,
+}
+
 abstract class BleClient {
   final Map<String, Object> _linkOwners = {};
 
@@ -177,6 +186,11 @@ abstract class BleClient {
   /// transport doesn't expose one). Callers must treat 0 as "fall back
   /// to the safe baseline chunk size", never as a literal MTU.
   int mtu(String deviceId) => 0;
+
+  /// Why [deviceId]'s link went down, valid from a `false` edge of
+  /// [watchConnected] until the next connect. [LinkDropCause.other] whenever
+  /// the transport cannot tell.
+  LinkDropCause lastDropCause(String deviceId) => LinkDropCause.other;
 
   Future<Uint8List> read(String deviceId, String serviceUuid, String charUuid);
   /// Writes [value] to the characteristic.

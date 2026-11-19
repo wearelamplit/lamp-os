@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../ota_busy_message.dart';
+import '../theme/app_spacing.dart';
 import '../routing/router.dart';
 import '../routing/routes.dart';
 import '../../features/control/application/control_notifier.dart';
@@ -26,7 +28,8 @@ String? activeLampId(String uri) => _lampRoute.firstMatch(uri)?.group(1);
 
 /// App-level gate: shows a whimsical blocking overlay whenever the app is
 /// actively reaching the lamp of the current route (initial connect, drop, or
-/// save-reboot). Mounted above the router so it covers pushed routes too.
+/// save-reboot), or waiting out a lamp that hung up to teach another one.
+/// Mounted above the router so it covers pushed routes too.
 /// Also hosts the current lamp's [FirmwarePushBanner].
 ///
 /// Reads the current location off the [GoRouter] instance rather than
@@ -69,9 +72,12 @@ class _ReachingLampGateState extends ConsumerState<ReachingLampGate> {
       if (reaching) {
         final name = state.maybeWhen(
             data: (d) => d.lamp.name.toTitleCase(), orElse: () => 'your lamp');
+        final hungUp =
+            state.maybeWhen(data: (d) => d.lampHungUp, orElse: () => false);
         overlay = _ReachingOverlay(
           lampId: id,
           name: name,
+          busyLine: hungUp ? otaBusyMessage(lampName: name) : null,
           onPickAnother: () => _router.go(AppRoutes.myLamps),
         );
       }
@@ -100,10 +106,15 @@ class _ReachingOverlay extends StatefulWidget {
     required this.lampId,
     required this.name,
     required this.onPickAnother,
+    this.busyLine,
   });
   final String lampId;
   final String name;
   final VoidCallback onPickAnother;
+
+  /// Shown in place of the rotating lines while the lamp is busy and the
+  /// app waits for it to come back.
+  final String? busyLine;
 
   @override
   State<_ReachingOverlay> createState() => _ReachingOverlayState();
@@ -139,9 +150,11 @@ class _ReachingOverlayState extends State<_ReachingOverlay>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final busyLine = widget.busyLine;
+    final line = busyLine ?? reachingLampLine(_line, widget.name);
     return Semantics(
       liveRegion: true,
-      label: 'Reaching your lamp',
+      label: busyLine ?? 'Reaching your lamp',
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
         child: ColoredBox(
@@ -164,12 +177,20 @@ class _ReachingOverlayState extends State<_ReachingOverlay>
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 400),
                   child: Text(
-                    reachingLampLine(_line, widget.name),
-                    key: ValueKey(_line),
+                    line,
+                    key: ValueKey(line),
                     textAlign: TextAlign.center,
                     style: tt.titleMedium?.copyWith(color: cs.onSurface),
                   ),
                 ),
+                if (busyLine != null) ...[
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    "Back in about a minute. I'll reconnect on my own.",
+                    textAlign: TextAlign.center,
+                    style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 TextButton(
                   onPressed: widget.onPickAnother,

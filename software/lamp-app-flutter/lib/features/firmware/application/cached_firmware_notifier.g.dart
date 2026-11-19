@@ -38,7 +38,7 @@ final class CachedFirmwareNotifierProvider
 }
 
 String _$cachedFirmwareNotifierHash() =>
-    r'e975a55e2943b594da7bdcb12ffb6bfd49a7b357';
+    r'dbf060a8fcba8d639f66f799c38a52c8bbb16a39';
 
 abstract class _$CachedFirmwareNotifier
     extends $AsyncNotifier<Map<String, CachedFirmware>> {

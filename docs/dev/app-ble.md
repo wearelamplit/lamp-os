@@ -204,6 +204,22 @@ flight when a build starts stops at its next step for good (`_buildsStarted`),
 either resuming the ladder as above, so each link gets one link
 session (`_beginLinkSession`).
 
+**A lamp that hangs up.** A lamp ends a working link itself when a mesh OTA
+starts in either direction, and stops advertising until it is done (OTA radio
+pause, [networking.md](networking.md)). When the link-down edge carries that
+reason (`BleClient.lastDropCause` reads `LinkDropCause.lampHungUp`; on Android
+flutter_blue_plus reports HCI 0x13, remote user terminated), the ladder does
+not start. `ControlState.lampHungUp` holds, the gate shows the lamp busy
+teaching (`otaBusyMessage`), and `_awaitLampBack` keeps the nearby scan running
+until it hears the lamp's first broadcast since the drop that does not carry
+the OTA-distributing bit, then makes one `_tryReconnect`. A lamp that hangs up
+again on that try is waited out again; any other failure clears `lampHungUp`
+and climbs the ladder. A drop during a reboot-save reload or the app's own
+firmware push never counts as a hang-up. The wait has no time limit; "pick
+another lamp" leaves it. On iOS every drop counts as other. Every drop logs
+`[ble_drop] id=<id> code=<code> reason=<description>` with the platform's
+reason.
+
 ## Scan hold during a connect
 
 The phone has one BLE scan, and a running scan competes with a connect

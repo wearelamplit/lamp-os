@@ -9,6 +9,16 @@ import 'ble_timing.dart';
 import 'discovery_cache.dart';
 import 'scan_pause.dart';
 
+/// HCI REMOTE_USER_TERMINATED_CONNECTION, the status Android reports when the
+/// lamp ends the link itself.
+const _hciRemoteUserTerminated = 0x13;
+
+/// The [LinkDropCause] for a platform's disconnect reason [code].
+LinkDropCause linkDropCauseOf(fbp.ErrorPlatform platform, int? code) =>
+    platform == fbp.ErrorPlatform.android && code == _hciRemoteUserTerminated
+        ? LinkDropCause.lampHungUp
+        : LinkDropCause.other;
+
 /// Production [BleClient] backed by flutter_blue_plus. Each public method
 /// resolves the device + service + characteristic from the plugin's live
 /// registry, errors out with a friendly exception type when it can't.
@@ -91,6 +101,16 @@ class FbpBleClient extends BleClient {
     return fbp.FlutterBluePlus.connectedDevices.any(
       (d) => d.remoteId.str == deviceId,
     );
+  }
+
+  @override
+  LinkDropCause lastDropCause(String deviceId) {
+    final device = fbp.BluetoothDevice(
+      remoteId: fbp.DeviceIdentifier(deviceId),
+    );
+    final reason = device.disconnectReason;
+    if (!device.isDisconnected || reason == null) return LinkDropCause.other;
+    return linkDropCauseOf(reason.platform, reason.code);
   }
 
   @override

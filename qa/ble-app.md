@@ -352,6 +352,19 @@ mode=custom ... address='/held'`. A wisp with Maestro but not Custom shows
 Custom greyed out and "Update this wisp to use Custom."; tapping it does
 nothing.
 
+P22 — **a lamp that hangs up to teach.** Needs two lamps, one older than the
+other, and the Pixel. Open the newer lamp in the app and leave it on its
+control screen. Start the older lamp so the newer one starts sending it an
+update: the open lamp's screen goes to "<Name> is busy teaching a lamp new
+tricks 🎓" with "Back in about a minute. I'll reconnect on my own." and the
+critter, without the rotating "Reaching out" lines and without "Couldn't
+reach your lamp". `adb logcat -s flutter | grep -E 'ble_drop|ble_timing'`
+shows one `[ble_drop] ... code=19` line and no `ble_timing connect` line
+until the lamp's serial prints `resumed adv + scan after OTA`; within a few
+seconds of that the app reconnects on its own. Then pull the open lamp's
+power instead: the screen shows the rotating "Reaching out" lines and
+`ble_timing connect` attempts follow, as before.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -397,6 +410,9 @@ nothing.
 - P20: the switch and slot show the wisp's own values, every pick reaches the
   wisp's serial, lamps follow the picked slot, and a pick the wisp never
   takes goes back with the error.
+- P22: a lamp that hangs up to send an update reads busy with no connect
+  attempt until it advertises again, then reconnects with no tap; a power
+  pull still climbs the reconnect ladder.
 
 ## Not covered here
 
