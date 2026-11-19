@@ -5,19 +5,32 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.8
 
 ### Added
+- **The app logs how long each part of a lamp connect takes.** Scan to first
+  sighting, each connect attempt, service discovery and the first read, one
+  `ble_timing` line each in the Android log
+  (`adb logcat -s flutter | grep ble_timing`). Failed connect, discover and
+  first-read lines end with `reason=<Type>:<code>:<description>` (the Android
+  status such as 133, or flutter_blue_plus's own code, when given), so a failed
+  attempt can be told apart from a timeout or a disconnect race. Connect
+  behaviour is unchanged.
+- **The app shows where to send OSC.** The wisp's settings now carry its
+  Ethernet or WiFi address (never its own hotspot's). The app's third palette
+  source is now called OSC, with the Straylight role picker under it, and shows
+  that address and port 9000 under "Listening on" with a copy button, or asks
+  you to connect the wisp to a network. Needs the wisp reflashed; an older wisp
+  on Ethernet shows its Ethernet address.
+- **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
+  lamp two of the palette's own colours exactly, and a colour listed more
+  than once is on the base of more lamps. Set it with `paint:swatches on|off` on the wisp's
+  console. Needs the wisp reflashed.
 - **Mushrooms tint nearby lamps.** When a mushroom spores near a lamp, the
   lamp sparkles in the strain's colour for 6 s, then the colour blooms over
   its base, holds 20 s and fades back over up to 100 s. A lamp mid-tint
   still sparkles at the next spore but doesn't tint again. Older lamps keep
   playing it as a 2 s sparkle. No change to the mesh messages or the app.
-- **The app shows where to send OSC.** The third palette source is now called
-  OSC, with the Straylight role picker under it, and shows the wisp's address
-  and port 9000 under "Listening on" with a copy button, or asks you to
-  connect the wisp to a network. Needs
-  the wisp on 1.3.8; an older wisp on Ethernet shows its Ethernet address.
 - **Gradient or Swatches for the wisp's palette, in the app.** Under Manual
   and OSC a Gradient | Swatches switch picks how lamps take the palette; the
   painted-lamps preview and the palette bar follow it, the bar drawing solid
@@ -59,49 +72,6 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   earlier one. Needs the wisp reflashed; an older app's pick works as before.
   The app's Gradient | Swatches switch confirms on it, so it can't be left
   showing a stale pick.
-### Fixed
-- **More memory free once a lamp has booted.** The lamp checks its web UI
-  files at boot without splitting its memory, and stops holding them open
-  afterwards, so more of its memory stays in one piece. The web config page
-  and web UI updates over the mesh work as before.
-- **The app looks up a lamp's services once per connect.** The first reads
-  after a connect each ran their own lookup of the lamp's services; they now
-  share one.
-
-### Changed
-- **Yawn is built in.** The app and Web Config no longer offer Yawn as an
-  expression to add or configure; lamps still yawn on their own, a tired
-  introvert now and then and a lamp yawning back at a peer. A lamp that had
-  Yawn added drops it on update and keeps its other expressions.
-- **A peer's yawn grows fondness on every lamp that yawns.** With Yawn built
-  in, a lamp counts a peer's yawn as an expression it shares, as it did when
-  Yawn was added to it. No other expression's fondness changes.
-- **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
-  app's Test with colours, or a mushroom's tint, fades back and stops; a
-  configured Shifty still chains into Glitchy.
-- **A failed `ble_timing` line now says why.** Failed connect, discover and
-  first-read lines end with `reason=<Type>:<code>:<description>` (the Android
-  status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told
-  apart from a timeout or a disconnect race. Connect behaviour is unchanged.
-- **A smaller wisp status for the app.** The status a lamp serves drops a
-  tag the app never reads and leaves the wisp-control flags out while they
-  are off, up to 69 bytes less, so more statuses fit the app's direct read.
-  The app shows the same thing.
-
-## 1.3.8
-
-### Added
-- **The app logs how long each part of a lamp connect takes.** Scan to first
-  sighting, each connect attempt, service discovery and the first read, one
-  `ble_timing` line each in the Android log
-  (`adb logcat -s flutter | grep ble_timing`). Connect behaviour is unchanged.
-- **The wisp reports the address an OSC sender should send to.** Its settings
-  now carry its Ethernet or WiFi address (never its own hotspot's), ready for
-  the app to show under the OSC source. Needs the wisp reflashed.
-- **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
-  lamp two of the palette's own colours exactly, and a colour listed more
-  than once is on the base of more lamps. Set it with `paint:swatches on|off` on the wisp's
-  console. Needs the wisp reflashed.
 
 ### Fixed
 - **A Straylight palette with a NaN or infinite value is refused.** The wisp
@@ -169,6 +139,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 - **The wisp settings screen fills in even when the lamp missed the wisp's
   settings.** The app asks the wisp again and keeps reading until they
   arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
+- **More memory free once a lamp has booted.** The lamp checks its web UI
+  files at boot without splitting its memory, and stops holding them open
+  afterwards, so more of its memory stays in one piece. The web config page
+  and web UI updates over the mesh work as before.
+- **The app looks up a lamp's services once per connect.** The first reads
+  after a connect each ran their own lookup of the lamp's services; they now
+  share one.
 
 ### Changed
 - **More refused writes show on the debug serial** as `[drop]` lines.
@@ -188,6 +165,20 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   settings message. Update the app on every phone that opens a wisp first:
   an older app shows default settings or never loads them. Through a lamp
   older than 1.2.8 the wisp's settings don't show.
+- **Yawn is built in.** The app and Web Config no longer offer Yawn as an
+  expression to add or configure; lamps still yawn on their own, a tired
+  introvert now and then and a lamp yawning back at a peer. A lamp that had
+  Yawn added drops it on update and keeps its other expressions.
+- **A peer's yawn grows fondness on every lamp that yawns.** With Yawn built
+  in, a lamp counts a peer's yawn as an expression it shares, as it did when
+  Yawn was added to it. No other expression's fondness changes.
+- **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
+  app's Test with colours, or a mushroom's tint, fades back and stops; a
+  configured Shifty still chains into Glitchy.
+- **A smaller wisp status for the app.** The status a lamp serves drops a
+  tag the app never reads and leaves the wisp-control flags out while they
+  are off, up to 69 bytes less, so more statuses fit the app's direct read.
+  The app shows the same thing.
 
 ## 1.3.7
 
