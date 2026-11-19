@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'ble_timing.dart';
 
 /// Per-device cache of a link's discovered GATT services. A miss runs
@@ -13,7 +15,9 @@ class DiscoveryCache<S> {
     if (hit != null) return Future.value(hit);
     final pending = _inFlight[deviceId];
     if (pending != null) return pending;
-    final run = _timed(deviceId, discover);
+    final started = bleTimings.now();
+    final done = Completer<S>();
+    final run = done.future;
     _inFlight[deviceId] = run;
     bool current() => identical(_inFlight[deviceId], run);
     run.then(
@@ -26,20 +30,17 @@ class DiscoveryCache<S> {
         if (current()) _inFlight.remove(deviceId);
       },
     );
+    run
+        .then<void>(
+          (_) => bleTimings.discovered(deviceId, started),
+          onError: (Object e) =>
+              bleTimings.discovered(deviceId, started, error: e),
+        )
+        .ignore();
+    // Registered first, so a discover that re-enters resolve or remove sees
+    // this run.
+    done.complete(Future.sync(discover));
     return run;
-  }
-
-  Future<S> _timed(String deviceId, Future<S> Function() discover) async {
-    final started = bleTimings.now();
-    final S found;
-    try {
-      found = await discover();
-    } catch (e) {
-      bleTimings.discovered(deviceId, started, error: e);
-      rethrow;
-    }
-    bleTimings.discovered(deviceId, started);
-    return found;
   }
 
   void remove(String deviceId) {
