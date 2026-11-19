@@ -72,6 +72,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   expression to add or configure; lamps still yawn on their own, a tired
   introvert now and then and a lamp yawning back at a peer. A lamp that had
   Yawn added drops it on update and keeps its other expressions.
+- **A peer's yawn grows fondness on every lamp that yawns.** With Yawn built
+  in, a lamp counts a peer's yawn as an expression it shares, as it did when
+  Yawn was added to it. No other expression's fondness changes.
 - **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
   app's Test with colours, or a mushroom's tint, fades back and stops; a
   configured Shifty still chains into Glitchy.
@@ -79,6 +82,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
   status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told
   apart from a timeout or a disconnect race. Connect behaviour is unchanged.
+- **A smaller wisp status for the app.** The status a lamp serves drops a
+  tag the app never reads and leaves the wisp-control flags out while they
+  are off, up to 69 bytes less, so more statuses fit the app's direct read.
+  The app shows the same thing.
 
 ## 1.3.8
 

@@ -31,7 +31,8 @@ const char kWorstStatus[] =
     R"("name":"12345678901234567890","ethIp":"255.255.255.255",)"
     R"("wifiChannelMismatch":true,"wifiApChannel":11})";
 
-// Every lamp-merged field at its widest.
+// Every lamp-merged field at its widest; a controlling flag rides only when
+// true.
 WispStatusMergeInput widestMerge(const char* status) {
   WispStatusMergeInput in;
   in.present = true;
@@ -45,6 +46,8 @@ WispStatusMergeInput widestMerge(const char* status) {
   in.lastStatusMs = 4294967295u;
   in.lastConfigMs = 4294967295u;
   in.haveLampState = true;
+  in.controllingBase = true;
+  in.controllingShade = true;
   in.baseWispColor = "#ffffffff";
   in.shadeWispColor = "#ffffffff";
   return in;
@@ -77,12 +80,13 @@ void test_config_stamp_merged_only_when_config_cached() {
   TEST_ASSERT_EQUAL_STRING("osc", d2["source"].as<const char*>());
 }
 
-// The merge adds 301 B at worst, so the wisp's widest status overflows the
-// 512 B characteristic whole; the page section serves all of it.
+// The merge adds 299 B at worst and drops the 20 B "char" tag, so the wisp's
+// widest status overflows the 512 B characteristic whole; the page section
+// serves all of it.
 void test_uncapped_merge_of_worst_status_pinned() {
   TEST_ASSERT_EQUAL_size_t(380, std::strlen(kWorstStatus));
   const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus), 0);
-  TEST_ASSERT_EQUAL_size_t(681, out.size());
+  TEST_ASSERT_EQUAL_size_t(659, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_FALSE(d["helloPaletteIdPrefix"].isNull());
@@ -98,7 +102,7 @@ void test_uncapped_merge_of_worst_status_pinned() {
 void test_capped_merge_sheds_every_diagnostic() {
   const std::string out = mergeWispStatusJson(widestMerge(kWorstStatus),
                                               kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(571, out.size());
+  TEST_ASSERT_EQUAL_size_t(549, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloPaletteIdPrefix"].isNull());
@@ -116,18 +120,19 @@ void test_capped_merge_sheds_every_diagnostic() {
   TEST_ASSERT_EQUAL_UINT32(65535, d["swatchesSeq"].as<uint32_t>());
 }
 
-// A Manual status without Ethernet or a name, after a seq'd swatches pick,
-// fits only once all four diagnostics are gone. Before any such pick it
-// fits once three are gone, so the shedding stops there and helloFlags stays.
+// A Manual status without Ethernet and with a 13-character name, after a
+// seq'd swatches pick, fits only once all four diagnostics are gone. Before
+// any such pick it fits once three are gone, so the shedding stops there and
+// helloFlags stays.
 void test_capped_merge_stops_shedding_once_it_fits() {
   std::string status(kWorstStatus);
   status.replace(status.find(R"("source":"off")"), 14, R"("source":"manual")");
   status.erase(status.find(R"("offColor":"ffffffff",)"), 22);
   status.erase(status.find(R"("ethIp":"255.255.255.255",)"), 26);
-  status.erase(status.find(R"("name":"12345678901234567890",)"), 30);
+  status.replace(status.find("12345678901234567890"), 20, "1234567890123");
   const std::string out =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(496, out.size());
+  TEST_ASSERT_EQUAL_size_t(497, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloFlags"].isNull());
@@ -136,7 +141,7 @@ void test_capped_merge_stops_shedding_once_it_fits() {
   status.erase(status.find(R"("swatchesSeq":65535,)"), 20);
   const std::string unpicked =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(493, unpicked.size());
+  TEST_ASSERT_EQUAL_size_t(494, unpicked.size());
   JsonDocument d2;
   TEST_ASSERT_FALSE(deserializeJson(d2, unpicked));
   TEST_ASSERT_TRUE(d2["statusLastSeenMs"].isNull());
@@ -152,7 +157,7 @@ void test_capped_merge_keeps_config_split_when_still_over() {
                  R"(\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\")");
   const std::string out =
       mergeWispStatusJson(widestMerge(status.c_str()), kWispStatusCharMaxLen);
-  TEST_ASSERT_EQUAL_size_t(591, out.size());
+  TEST_ASSERT_EQUAL_size_t(569, out.size());
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, out));
   TEST_ASSERT_TRUE(d["helloFlags"].isNull());
@@ -177,6 +182,47 @@ void test_status_payload_keys_win() {
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, mergeWispStatusJson(in, 0)));
   TEST_ASSERT_EQUAL_UINT32(7, d["wispVersion"].as<uint32_t>());
+}
+
+// The served document never carries the mesh frame's "char" tag, whether it
+// merges a cached payload, only a hello, or a payload that does not parse.
+void test_merge_drops_char_tag() {
+  WispStatusMergeInput withPayload = widestMerge(kWorstStatus);
+  WispStatusMergeInput helloOnly = widestMerge("");
+  WispStatusMergeInput malformed = widestMerge(R"({"char":"wispStatus","source")");
+  for (const WispStatusMergeInput* in : {&withPayload, &helloOnly, &malformed}) {
+    const std::string out = mergeWispStatusJson(*in, 0);
+    JsonDocument d;
+    TEST_ASSERT_FALSE(deserializeJson(d, out));
+    TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FF", d["wispMac"].as<const char*>());
+    TEST_ASSERT_EQUAL(std::string::npos, out.find("\"char\""));
+  }
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, mergeWispStatusJson(withPayload, 0)));
+  TEST_ASSERT_EQUAL_STRING("off", d["source"].as<const char*>());
+}
+
+// A controlling flag rides only when true; the lamp's state overrides a key
+// the payload carries, and the heading colours are untouched.
+void test_controlling_flags_only_when_true() {
+  WispStatusMergeInput in =
+      widestMerge(R"({"char":"wispStatus","controllingBase":true,"controllingShade":true})");
+  in.controllingShade = false;
+  const std::string out = mergeWispStatusJson(in, 0);
+  JsonDocument d;
+  TEST_ASSERT_FALSE(deserializeJson(d, out));
+  TEST_ASSERT_TRUE(d["controllingBase"].as<bool>());
+  TEST_ASSERT_EQUAL(std::string::npos, out.find("controllingShade"));
+  TEST_ASSERT_EQUAL_STRING("#ffffffff", d["baseWispColor"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("#ffffffff", d["shadeWispColor"].as<const char*>());
+
+  in.controllingBase = false;
+  in.controllingShade = true;
+  const std::string swapped = mergeWispStatusJson(in, 0);
+  JsonDocument d2;
+  TEST_ASSERT_FALSE(deserializeJson(d2, swapped));
+  TEST_ASSERT_EQUAL(std::string::npos, swapped.find("controllingBase"));
+  TEST_ASSERT_TRUE(d2["controllingShade"].as<bool>());
 }
 
 // A re-sent identical config leaves the cache alone, so configLastSeenMs and
@@ -212,6 +258,8 @@ int main(int, char**) {
   RUN_TEST(test_capped_merge_keeps_config_split_when_still_over);
   RUN_TEST(test_capped_merge_keeps_diagnostics_when_it_fits);
   RUN_TEST(test_status_payload_keys_win);
+  RUN_TEST(test_merge_drops_char_tag);
+  RUN_TEST(test_controlling_flags_only_when_true);
   RUN_TEST(test_store_if_changed_only_on_new_bytes);
   RUN_TEST(test_is_json_object_rejects_malformed);
   return UNITY_END();
