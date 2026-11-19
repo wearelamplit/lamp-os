@@ -216,8 +216,9 @@ own scan around a connect, so the app does:
   threw.
 - `FbpBleClient.connect` (`core/ble/fbp_ble_client.dart`) stops a running scan
   and runs flutter_blue_plus's `BluetoothDevice.connect` inside
-  `scanPause.during`, with an 8 s connect timeout. Connection priority and
-  service discovery run after the hold ends. `connect` clears the lamp's
+  `scanPause.during`, with an 8 s connect timeout. Connection priority runs
+  after the hold ends; a discovery started by a caller woken by the connected
+  edge can start inside it. `connect` clears the lamp's
   cached services before the link comes up, and the client also clears them
   on every disconnect event and in `disconnect` and `cycleAdapter`. A caller
   woken by the connected edge (the wisp and Wi-Fi notifiers renewing their

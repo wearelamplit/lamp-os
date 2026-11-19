@@ -16,6 +16,7 @@ final class _FakeLamp extends FlutterBluePlusPlatform {
   final _services = StreamController<BmDiscoverServicesResult>.broadcast();
   final _values = StreamController<BmCharacteristicData>.broadcast();
   int discoveries = 0;
+  void Function()? afterDiscover;
 
   @override
   Stream<BmConnectionStateResponse> get onConnectionStateChanged =>
@@ -80,6 +81,7 @@ final class _FakeLamp extends FlutterBluePlusPlatform {
           errorCode: 0,
           errorString: '',
         )));
+    if (afterDiscover != null) scheduleMicrotask(afterDiscover!);
     return Future.value(true);
   }
 
@@ -177,5 +179,27 @@ void main() {
     expect(await edgeRead, [7]);
     expect(lamp.discoveries, 1);
     expect(discovers, hasLength(1));
+  });
+
+  test('a discovery on the old link that drops during connect is not '
+      'reused', () async {
+    final lamp = _FakeLamp();
+    FlutterBluePlusPlatform.instance = lamp;
+    addTearDown(() => bleTimings.linkDown(_id));
+    final client = FbpBleClient();
+    await client.connect(_id);
+
+    lamp.afterDiscover = lamp.drop;
+    final connecting = client.connect(_id);
+    final early = client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
+    await connecting;
+    try {
+      await early;
+    } catch (_) {}
+    lamp.afterDiscover = null;
+    expect(lamp.discoveries, 1, reason: 'the early read discovered link 1');
+
+    await client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
+    expect(lamp.discoveries, 2, reason: 'link 1 services are not reused');
   });
 }
