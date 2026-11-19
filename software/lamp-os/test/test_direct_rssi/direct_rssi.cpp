@@ -49,6 +49,15 @@ void test_a_reading_stamped_ahead_of_now_is_fresh() {
   TEST_ASSERT_EQUAL_UINT32(DirectRssi::kMaxAgeMs, d.freshForMs(kT0));
 }
 
+// A hold that has just reached the window still holds when the loop's clock
+// trails the recv task's latest stamp.
+void test_a_just_held_link_holds_at_a_now_behind_the_stamp() {
+  DirectRssi d;
+  const uint32_t last = kT0 + 9 * 5000;
+  feed(d, kFloor, kT0, last, 5000);
+  TEST_ASSERT_TRUE(d.holdsOtaFloor(last - 2));
+}
+
 // freshForMs counts down to the moment fresh() lets go of the reading.
 void test_fresh_span_ends_when_the_reading_goes_stale() {
   DirectRssi d;
@@ -164,6 +173,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_the_unavailable_sentinel_records_nothing);
   RUN_TEST(test_a_reading_stamped_ahead_of_now_is_fresh);
   RUN_TEST(test_fresh_span_ends_when_the_reading_goes_stale);
+  RUN_TEST(test_a_just_held_link_holds_at_a_now_behind_the_stamp);
   RUN_TEST(test_a_reading_goes_stale_after_two_lost_hellos);
   RUN_TEST(test_steady_cadence_at_the_floor_holds_after_the_window);
   RUN_TEST(test_one_reading_never_holds);

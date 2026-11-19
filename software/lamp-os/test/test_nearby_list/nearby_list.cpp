@@ -543,6 +543,76 @@ void test_stale_mrssi_leaves_a_list_no_change_rebuilds() {
   TEST_ASSERT_EQUAL(std::string::npos, out.find("mrssi"));
 }
 
+size_t g_takes = 0;
+void countTake() { ++g_takes; }
+
+// Locks one loop tick takes; a tick that rebuilds takes more than one that
+// does not.
+size_t takesInTick(Fixture& f) {
+  g_takes = 0;
+  g_semaphoreTakeHook = countTake;
+  f.list.tick(f.roster, true, g_now);
+  g_semaphoreTakeHook = nullptr;
+  return g_takes;
+}
+
+void directHello(LampRoster& r, uint8_t tail, int8_t rssi) {
+  char name[8];
+  std::snprintf(name, sizeof(name), "lamp%02u", tail);
+  const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x03, tail};
+  r.addOrUpdateFromEspNow(name, mac, Color(tail, 1, 2, 3), Color(4, 5, 6, tail), 0x010203, 0, 5,
+                          nullptr, nullptr, false, 0, false, nullptr, false, rssi);
+}
+
+// Two readings heard 30 s apart: the older drops when it goes stale, while
+// the younger stays until its own expiry.
+void test_the_soonest_stale_mrssi_drops_first() {
+  Fixture f;
+  const uint32_t heard = g_now + 3700;
+  at(heard);
+  directHello(f.roster, 0, -71);
+  at(heard + 30000);
+  directHello(f.roster, 1, -64);
+  at(heard + 30250);
+  std::string out;
+  f.list.read(out, g_now);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"mrssi\":-71"));
+  const uint32_t firstStale = heard + lamp::DirectRssi::kMaxAgeMs + 1;
+  for (uint32_t t = heard + 31250; t <= firstStale + 1000; t += 1000) {
+    at(t);
+    f.list.tick(f.roster, true, g_now);
+  }
+  f.list.read(out, g_now);
+  TEST_ASSERT_EQUAL(std::string::npos, out.find("\"mrssi\":-71"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"mrssi\":-64"));
+}
+
+// A held list with no reading due and no roster change rebuilds nothing,
+// before a reading is listed and after the last one has dropped.
+void test_a_held_list_rebuilds_only_when_a_reading_is_due() {
+  Fixture f;
+  std::string out;
+  f.list.read(out, g_now);
+  at(g_now + 500);
+  const size_t idle = takesInTick(f);
+  for (int i = 0; i < 5; i++) {
+    at(g_now + 1000);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(idle, takesInTick(f), "no reading listed");
+  }
+  directHello(f.roster, 0, -71);
+  const uint32_t staleAt = g_now + lamp::DirectRssi::kMaxAgeMs + 1;
+  while (lampos::isLater(staleAt + 2000, g_now)) {
+    at(g_now + 1000);
+    f.list.tick(f.roster, true, g_now);
+  }
+  f.list.read(out, g_now);
+  TEST_ASSERT_EQUAL(std::string::npos, out.find("mrssi"));
+  for (int i = 0; i < 5; i++) {
+    at(g_now + 1000);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(idle, takesInTick(f), "reading dropped");
+  }
+}
+
 // fwChannel arrives over the air, so a quote in it cannot end the string.
 void test_fw_channel_is_escaped() {
   ListedPeer p;
@@ -593,6 +663,8 @@ int main(int, char**) {
   RUN_TEST(test_fw_channel_is_escaped);
   RUN_TEST(test_direct_reading_renders_as_mrssi);
   RUN_TEST(test_stale_mrssi_leaves_a_list_no_change_rebuilds);
+  RUN_TEST(test_the_soonest_stale_mrssi_drops_first);
+  RUN_TEST(test_a_held_list_rebuilds_only_when_a_reading_is_due);
   RUN_TEST(test_read_stamped_after_the_tick_clock_counts);
   RUN_TEST(test_each_visible_field_moves_the_rev);
   RUN_TEST(test_fw_channel_high_bytes_are_escaped);
