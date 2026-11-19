@@ -26,15 +26,16 @@ std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen) {
   }
 
   JsonDocument doc;
-  DeserializationError parsed;
+  DeserializationError parsed = DeserializationError::Ok;
   if (!in.statusJson.empty()) parsed = deserializeJson(doc, in.statusJson);
   if (parsed == DeserializationError::NoMemory) return std::string();
   // The wispStatus payload is open-set and wisp-owned; start from it.
   if (in.statusJson.empty() || parsed || !doc.is<JsonObject>()) {
     doc.clear();
     doc.to<JsonObject>();
-    if (in.statusJson.empty()) doc["char"] = "wispStatus";
   }
+  // "char" tags the mesh frame; no reader of the served document wants it.
+  doc.remove("char");
 
   // Status-payload keys win; isNull() skips fields the wisp already set.
   if (in.present) {
@@ -66,8 +67,11 @@ std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen) {
   }
 
   if (in.haveLampState) {
-    doc["controllingBase"]  = in.controllingBase;
-    doc["controllingShade"] = in.controllingShade;
+    // Omitted when false, which every app reads as false.
+    doc.remove("controllingBase");
+    doc.remove("controllingShade");
+    if (in.controllingBase) doc["controllingBase"] = true;
+    if (in.controllingShade) doc["controllingShade"] = true;
     if (!in.baseWispColor.empty()) doc["baseWispColor"] = in.baseWispColor;
     if (!in.shadeWispColor.empty()) doc["shadeWispColor"] = in.shadeWispColor;
   }

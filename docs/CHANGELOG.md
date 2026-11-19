@@ -66,6 +66,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   first-read lines end with `reason=<Type>:<code>:<description>` (the Android
   status such as 133, or flutter_blue_plus's own code, when given), so a failed attempt can be told
   apart from a timeout or a disconnect race. Connect behaviour is unchanged.
+- **A smaller wisp status for the app.** The status a lamp serves drops a
+  tag the app never reads and leaves the wisp-control flags out while they
+  are off, 20 to 69 bytes less, so more statuses fit the app's direct read.
+  The app shows the same thing.
 
 ## 1.3.8
 
