@@ -22,20 +22,19 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   that address and port 9000 under "Listening on" with a copy button, or asks
   you to connect the wisp to a network. Needs the wisp reflashed; an older wisp
   on Ethernet shows its Ethernet address.
-- **Swatches on the wisp.** Besides today's gradient, the wisp can hand each
-  lamp two of the palette's own colours exactly, and a colour listed more
-  than once is on the base of more lamps. Set it with `paint:swatches on|off` on the wisp's
-  console. Needs the wisp reflashed.
+- **Swatches on the wisp, picked in the app.** Besides today's gradient, the
+  wisp can hand each lamp two of the palette's own colours exactly, and a
+  colour listed more than once is on the base of more lamps. Under Manual and
+  OSC a Gradient | Swatches switch picks it; the painted-lamps preview and the
+  palette bar follow, the bar drawing solid blocks in Swatches as the wisp's
+  ring does. A change the wisp never confirms goes back with "Couldn't reach
+  the wisp." The switch shows only for a wisp on 1.3.8, so the wisp needs
+  reflashing; `paint:swatches on|off` on the wisp's console sets it too.
 - **Mushrooms tint nearby lamps.** When a mushroom spores near a lamp, the
   lamp sparkles in the strain's colour for 6 s, then the colour blooms over
   its base, holds 20 s and fades back over up to 100 s. A lamp mid-tint
   still sparkles at the next spore but doesn't tint again. Older lamps keep
   playing it as a 2 s sparkle. No change to the mesh messages or the app.
-- **Gradient or Swatches for the wisp's palette, in the app.** Under Manual
-  and OSC a Gradient | Swatches switch picks how lamps take the palette; the
-  painted-lamps preview and the palette bar follow it, the bar drawing solid
-  blocks in Swatches as the wisp's ring does. A change the wisp never confirms
-  goes back with "Couldn't reach the wisp." Shows only for a wisp on 1.3.8.
 - **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can
   read a Maestro's live palette slot (1 to 10) instead of Straylight, in
   either colour format the Maestro sends (hex, or a float layout with white
