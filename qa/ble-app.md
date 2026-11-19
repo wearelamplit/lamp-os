@@ -330,6 +330,25 @@ Maestro with "Couldn't reach the wisp. Try again." A wisp before the Maestro
 firmware shows the role picker and "Update this wisp to use Maestro.", no
 switch.
 
+P21 — **Custom under the OSC source.** Same setup as P20, a wisp with the
+Custom firmware and a laptop sending OSC to the wisp's address, port 9000.
+The OSC SENDER switch reads Straylight | Maestro | Custom. On a wisp with no
+Custom address stored (its boot line `[wisp.cfg] loaded` shows `oscAddr=''`),
+tap Custom: it lights, a
+CUSTOM ADDRESS field says "Custom needs an address before the wisp can
+switch.", the send arrow is grey, and the wisp's serial prints no `setOsc`.
+Type `lamp`: the field reads "Start with /." and Send on the keyboard does
+nothing. Type `/lamp/palette` and send: the serial prints `setOsc
+mode=custom ... address='/lamp/palette'` once, "Waiting for OSC on
+/lamp/palette" shows until the laptop sends, and the help line names the
+address, the Send OSC to address and port 9000. Tap Save as preset, close
+and reopen the app: the `/lamp/palette` chip is still there. Tap Straylight,
+then Custom: the wisp goes straight back to `/lamp/palette` with no typing.
+Power the wisp off, type `/other` and send: within 45 s the field and switch
+go back with "Couldn't reach the wisp. Try again." A wisp with Maestro but
+not Custom shows Custom greyed out and "Update this wisp to use Custom.";
+tapping it does nothing.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
