@@ -71,7 +71,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   apart from a timeout or a disconnect race. Connect behaviour is unchanged.
 - **A smaller wisp status for the app.** The status a lamp serves drops a
   tag the app never reads and leaves the wisp-control flags out while they
-  are off, 20 to 69 bytes less, so more statuses fit the app's direct read.
+  are off, up to 69 bytes less, so more statuses fit the app's direct read.
   The app shows the same thing.
 
 ## 1.3.8

@@ -186,7 +186,6 @@ void test_status_payload_keys_win() {
 
 // The served document never carries the mesh frame's "char" tag, whether it
 // merges a cached payload, only a hello, or a payload that does not parse.
-// The cached payload keeps it.
 void test_merge_drops_char_tag() {
   WispStatusMergeInput withPayload = widestMerge(kWorstStatus);
   WispStatusMergeInput helloOnly = widestMerge("");
@@ -198,7 +197,6 @@ void test_merge_drops_char_tag() {
     TEST_ASSERT_EQUAL_STRING("AA:BB:CC:DD:EE:FF", d["wispMac"].as<const char*>());
     TEST_ASSERT_EQUAL(std::string::npos, out.find("\"char\""));
   }
-  TEST_ASSERT_EQUAL(0u, withPayload.statusJson.find(R"({"char":"wispStatus")"));
   JsonDocument d;
   TEST_ASSERT_FALSE(deserializeJson(d, mergeWispStatusJson(withPayload, 0)));
   TEST_ASSERT_EQUAL_STRING("off", d["source"].as<const char*>());
@@ -208,7 +206,7 @@ void test_merge_drops_char_tag() {
 // the payload carries, and the heading colours are untouched.
 void test_controlling_flags_only_when_true() {
   WispStatusMergeInput in =
-      widestMerge(R"({"char":"wispStatus","controllingShade":true})");
+      widestMerge(R"({"char":"wispStatus","controllingBase":true,"controllingShade":true})");
   in.controllingShade = false;
   const std::string out = mergeWispStatusJson(in, 0);
   JsonDocument d;
