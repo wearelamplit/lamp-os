@@ -30,7 +30,7 @@ void main() {
   });
   tearDown(() => bleTimings.sink = savedSink);
 
-  test('a timing failure never touches the result', () async {
+  test('a timing failure after discovery never touches the result', () async {
     final savedNow = bleTimings.now;
     var calls = 0;
     bleTimings.now = () {
@@ -44,6 +44,15 @@ void main() {
     expect(await a, 1);
     expect(await cache.resolve('x', discover.call), 1);
     expect(discover.runs, hasLength(1));
+  });
+
+  test('a discover that throws at once fails and frees the device', () async {
+    final err = StateError('sync');
+    await expectLater(cache.resolve('x', () => throw err), throwsA(same(err)));
+    final retry = cache.resolve('x', discover.call);
+    expect(discover.runs, hasLength(1), reason: 'a fresh discovery');
+    discover.runs.single.complete(3);
+    expect(await retry, 3);
   });
 
   test('a discover that removes its own device is not cached', () async {
