@@ -170,4 +170,56 @@ void main() {
 
     expect(find.text('→ Gramp'), findsOneWidget);
   });
+
+  testWidgets('each row shows the mesh reading, else BT, labelled by radio',
+      (tester) async {
+    const lampId = 'floral-id';
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(InMemoryBleClient()),
+        activeLampNotifierProvider.overrideWith(() => _FakeActiveLamp(lampId)),
+        controlNotifierProvider(lampId)
+            .overrideWith(() => _FakeControl('floral')),
+        lampNearbyPeersNotifierProvider(lampId).overrideWith(
+          () => _FakeLampNearbyPeers(const [
+            LampNearbyPeer(
+              name: 'both',
+              lampId: 'AA:AA:AA:AA:AA:AA',
+              rssi: -71,
+              mrssi: -58,
+              viaEspNow: true,
+              viaBle: true,
+            ),
+            LampNearbyPeer(
+              name: 'meshonly',
+              lampId: 'CC:CC:CC:CC:CC:CC',
+              mrssi: -83,
+              viaEspNow: true,
+            ),
+            LampNearbyPeer(
+              name: 'btpeer',
+              lampId: 'BB:BB:BB:BB:BB:BB',
+              rssi: -66,
+              viaBle: true,
+            ),
+            LampNearbyPeer(
+              name: 'silent',
+              lampId: 'DD:DD:DD:DD:DD:DD',
+              viaEspNow: true,
+            ),
+          ]),
+        ),
+      ],
+      child: const MaterialApp(home: MeshLampsScreen()),
+    ));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('AA:AA:AA:AA:AA:AA · Wi-Fi -58 dBm'), findsOneWidget);
+    expect(find.text('CC:CC:CC:CC:CC:CC · Wi-Fi -83 dBm'), findsOneWidget);
+    expect(find.text('BB:BB:BB:BB:BB:BB · BT -66 dBm'), findsOneWidget);
+    expect(find.text('DD:DD:DD:DD:DD:DD · no reading'), findsOneWidget);
+    expect(find.textContaining('-127'), findsNothing);
+  });
 }

@@ -15,6 +15,12 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   no connect attempts meanwhile, and reconnects on its own as soon as it hears
   the lamp again. Other drops (out of range, a reboot) reconnect as before.
   On an iPhone every drop behaves as before.
+- **Lamp Network shows the mesh signal.** Each lamp's row shows how strongly
+  the connected lamp hears it over the mesh ("Wi-Fi -58 dBm"), falls back to
+  its Bluetooth reading ("BT -66 dBm") for a lamp with no mesh reading, and
+  says "no reading" when there is neither, instead of "-127 dBm" for lamps
+  heard only over the mesh. The Wi-Fi reading needs the connected lamp on
+  firmware that sends it.
 
 ## 1.3.8
 

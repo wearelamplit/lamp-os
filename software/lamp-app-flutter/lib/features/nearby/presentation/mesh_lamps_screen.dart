@@ -248,7 +248,7 @@ class _PeerCard extends StatelessWidget {
                       ? (peer.lampId.isEmpty
                           ? 'this lamp'
                           : '${peer.lampId} · this lamp')
-                      : '${peer.lampId} · ${peer.rssi} dBm',
+                      : '${peer.lampId} · ${signalLabel(peer)}',
                   style: textTheme.bodySmall?.copyWith(
                     fontFamily: 'monospace',
                     fontSize: 11,
@@ -351,6 +351,18 @@ class _WispDots extends StatelessWidget {
 /// null when no OTA edge touches this peer. `isSend` picks the accent: send is
 /// the sourcing color, receive is the amber "updating" role.
 typedef OtaPill = ({String label, bool isSend});
+
+/// Signal line for a peer row: the mesh (Wi-Fi) reading when the lamp sends
+/// one, else its Bluetooth reading, each labelled by radio.
+String signalLabel(LampNearbyPeer peer) {
+  final mesh = peer.mrssi;
+  if (mesh != null) return 'Wi-Fi $mesh dBm';
+  if (peer.rssi != _noRssi) return 'BT ${peer.rssi} dBm';
+  return 'no reading';
+}
+
+/// The lamp's "no BLE reading" sentinel, the [LampNearbyPeer.rssi] default.
+const _noRssi = -127;
 
 /// Firmware line for a peer row. A reported version renders verbatim (`fw
 /// 1.2.3`, plus ` · channel` when present). `0.0.1` is the deliberate

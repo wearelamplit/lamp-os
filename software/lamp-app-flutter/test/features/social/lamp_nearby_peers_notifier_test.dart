@@ -108,6 +108,11 @@ void main() {
     expect(LampNearbyPeer.fromJson({'name': 'x'}).fwChannel, '');
   });
 
+  test('mrssi parses from firmware JSON, null when absent', () {
+    expect(LampNearbyPeer.fromJson({'name': 'x', 'mrssi': -58}).mrssi, -58);
+    expect(LampNearbyPeer.fromJson({'name': 'x', 'rssi': -70}).mrssi, isNull);
+  });
+
   test('peer missing lampId defaults to empty string', () {
     // Older firmware may omit lampId. The model accepts that path
     // with lampId = ''.

@@ -25,6 +25,10 @@ abstract class LampNearbyPeer with _$LampNearbyPeer {
     /// `-127` means "no reading yet" (older firmware that doesn't emit
     /// RSSI, or a fresh peer not yet seen via BLE).
     @Default(-127) int rssi,
+    /// The connected lamp's reading of this peer's mesh (Wi-Fi radio)
+    /// traffic in dBm. Null when the lamp has none, and always on firmware
+    /// that predates it.
+    int? mrssi,
     /// 4-channel RGBW for the lamp's base and shade. Used to render
     /// the lamp icon next to the row.
     @JsonKey(name: 'base', fromJson: _rgbwFromJson)

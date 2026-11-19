@@ -365,6 +365,12 @@ seconds of that the app reconnects on its own. Then pull the open lamp's
 power instead: the screen shows the rotating "Reaching out" lines and
 `ble_timing connect` attempts follow, as before.
 
+P23 — **Lamp Network signal readings.** Connect to a lamp on firmware that
+sends the mesh reading and open Lamp Network. Every Mesh row reads
+`<mac> · Wi-Fi <n> dBm`, BT-only rows read `<mac> · BT <n> dBm`, and no row
+reads -127. On a lamp whose firmware predates the reading, mesh rows show the
+BT reading where the lamp has one and "no reading" otherwise.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -413,6 +419,7 @@ power instead: the screen shows the rotating "Reaching out" lines and
 - P22: a lamp that hangs up to send an update reads busy with no connect
   attempt until it advertises again, then reconnects with no tap; a power
   pull still climbs the reconnect ladder.
+- P23: every row's reading names its radio, and none reads -127.
 
 ## Not covered here
 
