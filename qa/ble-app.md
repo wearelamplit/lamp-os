@@ -344,8 +344,8 @@ mode=custom ... address='/lamp/palette'` once, "Waiting for OSC on
 address, the Send OSC to address and port 9000. Tap Save as preset, close
 and reopen the app: the `/lamp/palette` chip is still there. Tap Straylight,
 then Custom: the wisp goes straight back to `/lamp/palette` with no typing.
-Power the wisp off, type `/other` and send: within 45 s the field and switch
-go back with "Couldn't reach the wisp. Try again." A wisp with Maestro but
+Power the wisp off, type `/other` and send: within 45 s the field goes back
+to `/lamp/palette` with "Couldn't reach the wisp. Try again." A wisp with Maestro but
 not Custom shows Custom greyed out and "Update this wisp to use Custom.";
 tapping it does nothing.
 
