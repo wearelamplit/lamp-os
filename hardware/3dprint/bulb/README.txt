@@ -13,3 +13,7 @@ screw: M4 x 0.7 x 10mm
 These items are printed upside down and without supports. Align the Z-seam
 opposite to the lower screw hole for the bulb and to the nearest upright on
 the diffuser
+
+The universal bulb is a two part print, Lamp Universal Base and Lamp
+Universal Bulb. It fits more lampshade types and replaces the original metal
+part, so no brass socket is needed.
