@@ -566,7 +566,7 @@ void directHello(LampRoster& r, uint8_t tail, int8_t rssi) {
                           nullptr, nullptr, false, 0, false, nullptr, false, rssi);
 }
 
-// Two readings heard 30 s apart: the older drops when it goes stale, while
+// Of two readings heard 30 s apart, the older drops when it goes stale and
 // the younger stays until its own expiry.
 void test_the_soonest_stale_mrssi_drops_first() {
   Fixture f;
@@ -590,7 +590,7 @@ void test_the_soonest_stale_mrssi_drops_first() {
 }
 
 // A held list with no reading due and no roster change rebuilds nothing,
-// before a reading is listed and after the last one has dropped.
+// before a reading is listed, while it is fresh, and after it has dropped.
 void test_a_held_list_rebuilds_only_when_a_reading_is_due() {
   Fixture f;
   std::string out;
@@ -603,6 +603,14 @@ void test_a_held_list_rebuilds_only_when_a_reading_is_due() {
   }
   directHello(f.roster, 0, -71);
   const uint32_t staleAt = g_now + lamp::DirectRssi::kMaxAgeMs + 1;
+  at(g_now + 1000);
+  f.list.tick(f.roster, true, g_now);
+  f.list.read(out, g_now);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"mrssi\":-71"));
+  while (lampos::isLater(staleAt - 3000, g_now)) {
+    at(g_now + 1000);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(idle, takesInTick(f), "reading fresh");
+  }
   while (lampos::isLater(staleAt + 2000, g_now)) {
     at(g_now + 1000);
     f.list.tick(f.roster, true, g_now);
