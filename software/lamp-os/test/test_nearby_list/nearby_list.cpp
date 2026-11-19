@@ -547,8 +547,10 @@ size_t g_takes = 0;
 void countTake() { ++g_takes; }
 
 // Locks one loop tick takes; a tick that rebuilds takes more than one that
-// does not.
+// does not. The read before it keeps the list held.
 size_t takesInTick(Fixture& f) {
+  std::string out;
+  f.list.read(out, g_now);
   g_takes = 0;
   g_semaphoreTakeHook = countTake;
   f.list.tick(f.roster, true, g_now);
@@ -581,8 +583,8 @@ void test_the_soonest_stale_mrssi_drops_first() {
   for (uint32_t t = heard + 31250; t <= firstStale + 1000; t += 1000) {
     at(t);
     f.list.tick(f.roster, true, g_now);
+    f.list.read(out, g_now);
   }
-  f.list.read(out, g_now);
   TEST_ASSERT_EQUAL(std::string::npos, out.find("\"mrssi\":-71"));
   TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find("\"mrssi\":-64"));
 }
@@ -604,8 +606,8 @@ void test_a_held_list_rebuilds_only_when_a_reading_is_due() {
   while (lampos::isLater(staleAt + 2000, g_now)) {
     at(g_now + 1000);
     f.list.tick(f.roster, true, g_now);
+    f.list.read(out, g_now);
   }
-  f.list.read(out, g_now);
   TEST_ASSERT_EQUAL(std::string::npos, out.find("mrssi"));
   for (int i = 0; i < 5; i++) {
     at(g_now + 1000);
