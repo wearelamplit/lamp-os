@@ -36,6 +36,10 @@ class FbpBleClient extends BleClient {
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
+    // Handles may have changed since the last link (firmware re-registered
+    // the GATT database). Cleared before the link comes up, so a caller woken
+    // by the connected edge and the caller after connect share one discovery.
+    _serviceCache.remove(deviceId);
     await scanPause.during(() async {
       if (fbp.FlutterBluePlus.isScanningNow) {
         await fbp.FlutterBluePlus.stopScan();
@@ -61,10 +65,6 @@ class FbpBleClient extends BleClient {
     } catch (_) {
       // best-effort: not all platforms honor this
     }
-    // Drop the Dart-side service cache. Handles may have changed since
-    // last connect (e.g. firmware re-registered the GATT database), so
-    // the next _resolve() does a fresh discoverServices().
-    _serviceCache.remove(deviceId);
   }
 
   @override

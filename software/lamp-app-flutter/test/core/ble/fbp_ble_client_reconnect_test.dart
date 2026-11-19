@@ -143,4 +143,39 @@ void main() {
     expect(discovers.length, 2,
         reason: 'the rediscovery after a drop is timed as a cold discover');
   });
+
+  test('a read on the connected edge and one after connect share one '
+      'discovery', () async {
+    final lamp = _FakeLamp();
+    FlutterBluePlusPlatform.instance = lamp;
+    final discovers = <BleTimingEvent>[];
+    final savedSink = bleTimings.sink;
+    bleTimings.sink = (e) {
+      if (e.phase == BleTimingPhase.discover) discovers.add(e);
+    };
+    addTearDown(() {
+      bleTimings
+        ..sink = savedSink
+        ..linkDown(_id);
+    });
+    final client = FbpBleClient();
+    Future<Uint8List>? edgeRead;
+    final sub = client.watchConnected(_id).listen((up) {
+      if (up) {
+        edgeRead ??=
+            client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
+      }
+    });
+    addTearDown(sub.cancel);
+
+    await client.connect(_id);
+    expect(edgeRead, isNotNull, reason: 'the edge read began inside connect');
+    expect(
+      await client.read(_id, BleUuids.controlService, BleUuids.wispStatus),
+      [7],
+    );
+    expect(await edgeRead, [7]);
+    expect(lamp.discoveries, 1);
+    expect(discovers, hasLength(1));
+  });
 }
