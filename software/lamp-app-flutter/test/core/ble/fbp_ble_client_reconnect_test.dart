@@ -16,6 +16,7 @@ final class _FakeLamp extends FlutterBluePlusPlatform {
   final _services = StreamController<BmDiscoverServicesResult>.broadcast();
   final _values = StreamController<BmCharacteristicData>.broadcast();
   int discoveries = 0;
+  void Function()? afterDiscover;
 
   @override
   Stream<BmConnectionStateResponse> get onConnectionStateChanged =>
@@ -80,6 +81,7 @@ final class _FakeLamp extends FlutterBluePlusPlatform {
           errorCode: 0,
           errorString: '',
         )));
+    if (afterDiscover != null) scheduleMicrotask(afterDiscover!);
     return Future.value(true);
   }
 
@@ -142,5 +144,62 @@ void main() {
         reason: 'the old link\'s services do not exist on the new one');
     expect(discovers.length, 2,
         reason: 'the rediscovery after a drop is timed as a cold discover');
+  });
+
+  test('a read on the connected edge and one after connect share one '
+      'discovery', () async {
+    final lamp = _FakeLamp();
+    FlutterBluePlusPlatform.instance = lamp;
+    final discovers = <BleTimingEvent>[];
+    final savedSink = bleTimings.sink;
+    bleTimings.sink = (e) {
+      if (e.phase == BleTimingPhase.discover) discovers.add(e);
+    };
+    addTearDown(() {
+      bleTimings
+        ..sink = savedSink
+        ..linkDown(_id);
+    });
+    final client = FbpBleClient();
+    Future<Uint8List>? edgeRead;
+    final sub = client.watchConnected(_id).listen((up) {
+      if (up) {
+        edgeRead ??=
+            client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
+      }
+    });
+    addTearDown(sub.cancel);
+
+    await client.connect(_id);
+    expect(edgeRead, isNotNull, reason: 'the edge read began inside connect');
+    expect(
+      await client.read(_id, BleUuids.controlService, BleUuids.wispStatus),
+      [7],
+    );
+    expect(await edgeRead, [7]);
+    expect(lamp.discoveries, 1);
+    expect(discovers, hasLength(1));
+  });
+
+  test('a discovery on the old link that drops during connect is not '
+      'reused', () async {
+    final lamp = _FakeLamp();
+    FlutterBluePlusPlatform.instance = lamp;
+    addTearDown(() => bleTimings.linkDown(_id));
+    final client = FbpBleClient();
+    await client.connect(_id);
+
+    lamp.afterDiscover = lamp.drop;
+    final connecting = client.connect(_id);
+    final early = client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
+    await connecting;
+    try {
+      await early;
+    } catch (_) {}
+    lamp.afterDiscover = null;
+    expect(lamp.discoveries, 1, reason: 'the early read discovered link 1');
+
+    await client.read(_id, BleUuids.controlService, BleUuids.wispStatus);
+    expect(lamp.discoveries, 2, reason: 'link 1 services are not reused');
   });
 }

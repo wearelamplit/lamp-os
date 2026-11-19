@@ -58,7 +58,7 @@ app.
 | `connect ... fail attempt=i/n ms=` | one failed `connectWithRetry` attempt |
 | `connect ... ok attempt=i/n ms= aborted` | an attempt that reached link-up after its caller gave up; arms no `firstRead` |
 | `connect ... ok attempt=i/n ms= total_ms=` | `ms` is the winning attempt's `BleClient.connect` (scan stop, link, MTU and priority on Android); `total_ms` is call entry to link up, backoff included. `already_up` after `ms` means the stack still reported the lamp linked when the attempt began (a reboot it has not noticed, a disconnect still in flight, a link left up), so `ms` may be a no-op connect or include the wait for that disconnect |
-| `discover ... ok\|fail ms=` | a cold `discoverServices`, success or failure (`DiscoveryCache` miss; none on a bridge client) |
+| `discover ... ok\|fail ms=` | a cold `discoverServices`, success or failure (`DiscoveryCache` miss; resolves that arrive while one runs share it; none on a bridge client) |
 | `firstRead ... section= ms= since_link_ms=` | the first `readSectionVia` after a `connectWithRetry` link. `ms` is the read from the `readSectionVia` call, so it includes waiting behind an earlier section read on the same lamp. `since_link_ms` includes auth and the cold discover, since they run first. A busy answer counts as the first read |
 
 A failed `connect`, `discover` or `firstRead` line ends with
@@ -216,14 +216,18 @@ own scan around a connect, so the app does:
   threw.
 - `FbpBleClient.connect` (`core/ble/fbp_ble_client.dart`) stops a running scan
   and runs flutter_blue_plus's `BluetoothDevice.connect` inside
-  `scanPause.during`, with an 8 s connect timeout. Connection priority and
-  service discovery run after the hold ends. The client drops a lamp's cached
-  services on every disconnect event, not only in its own `connect`,
-  `disconnect` and `cycleAdapter`, because a caller woken by the connected
-  edge (the wisp and Wi-Fi notifiers renewing their notify subscriptions,
-  nearby peers restarting theirs) resolves before `connect` returns and has
-  to discover on the new link. `connect` still clears the cache once it
-  returns, so a discovery finished before then can run a second time.
+  `scanPause.during`, with an 8 s connect timeout. Connection priority runs
+  after the hold ends; a discovery started by a caller woken by the connected
+  edge can start inside it. `connect` clears the lamp's
+  cached services before the link comes up, and the client also clears them
+  on every disconnect event and in `disconnect` and `cycleAdapter`. A caller
+  woken by the connected edge (the wisp and Wi-Fi notifiers renewing their
+  notify subscriptions, nearby peers restarting theirs) resolves before
+  `connect` returns, so it discovers on the new link. Resolves for a lamp
+  that arrive while its discovery runs share that one discovery, so a
+  connect runs one discovery whichever caller asks first; a failed one is
+  not cached. A remove while a discovery runs leaves that discovery serving
+  only its own callers.
 - `FbpBleScanner` (`core/ble/ble_scanner.dart`) never starts a scan while
   `scanPause.isPaused`. On `released` it restarts through `_restartScan`, which
   waits `_restartBackoff` (3 s) first, and stops a scan that started while a

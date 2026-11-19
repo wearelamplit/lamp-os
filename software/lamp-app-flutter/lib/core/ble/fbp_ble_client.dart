@@ -12,16 +12,16 @@ import 'scan_pause.dart';
 /// resolves the device + service + characteristic from the plugin's live
 /// registry, errors out with a friendly exception type when it can't.
 class FbpBleClient extends BleClient {
-  /// Cache of discovered GATT services per device id. Populated lazily on the
-  /// first `read`/`write`/`subscribe` after a successful connect. Without this
-  /// every BLE write would re-run a full service discovery on the radio,
-  /// which is what tipped the lamp into LINK_SUPERVISION_TIMEOUT during rapid
-  /// slider drags. Cleared on disconnect so a reconnect gets a fresh discovery.
+  /// Cache of discovered GATT services per device id, filled by the first
+  /// `read`/`write`/`subscribe` on a link. Without this every BLE write would
+  /// re-run a full service discovery on the radio, which is what tipped the
+  /// lamp into LINK_SUPERVISION_TIMEOUT during rapid slider drags. Cleared
+  /// when a connect starts and when a link goes down.
   final _serviceCache = DiscoveryCache<List<fbp.BluetoothService>>();
 
-  // Also clears the cache when a link drops on its own, since a caller woken
-  // by the next connected edge resolves before [connect] returns. Lives as
-  // long as the client.
+  // Also clears the cache when a link drops on its own, so services
+  // discovered on a link that drops before the next one comes up are not
+  // reused on it. Lives as long as the client.
   // ignore: cancel_subscriptions
   StreamSubscription<fbp.OnConnectionStateChangedEvent>? _dropWatch;
 
@@ -36,6 +36,10 @@ class FbpBleClient extends BleClient {
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
+    // Handles may have changed since the last link (firmware re-registered
+    // the GATT database). Cleared before the link comes up, so a caller woken
+    // by the connected edge and the caller after connect share one discovery.
+    _serviceCache.remove(deviceId);
     await scanPause.during(() async {
       if (fbp.FlutterBluePlus.isScanningNow) {
         await fbp.FlutterBluePlus.stopScan();
@@ -61,10 +65,6 @@ class FbpBleClient extends BleClient {
     } catch (_) {
       // best-effort: not all platforms honor this
     }
-    // Drop the Dart-side service cache. Handles may have changed since
-    // last connect (e.g. firmware re-registered the GATT database), so
-    // the next _resolve() does a fresh discoverServices().
-    _serviceCache.remove(deviceId);
   }
 
   @override
