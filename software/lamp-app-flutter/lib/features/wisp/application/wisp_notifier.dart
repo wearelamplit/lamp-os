@@ -1228,23 +1228,26 @@ class WispNotifier extends _$WispNotifier {
             _repo.setSwatches(style == PaletteStyle.swatches, seq: seq),
       );
 
-  /// Set which OSC sender the wisp listens to, keeping the Maestro slot,
-  /// confirmed as [_sendConfigPick] describes. A slot still confirming rides
-  /// along. [OscMode.custom] sends the Custom address shown with it, and
-  /// throws [ArgumentError], sending nothing, while none the wisp takes is
-  /// shown.
+  /// Set which OSC sender the wisp listens to, keeping the Maestro slot and
+  /// Custom address, confirmed as [_sendConfigPick] describes. A slot or
+  /// Custom address still confirming rides along. [OscMode.custom] sends the
+  /// Custom address shown with it, and throws [ArgumentError], sending
+  /// nothing, while none the wisp takes is shown.
   Future<void> setOscMode(OscMode mode) {
     if (mode == OscMode.custom) {
       return setCustomOscAddress(state.value?.oscAddr ?? '');
     }
-    final slot = _oscPick.heldFor(state.value?.wispMac)?.slot;
-    return _sendOsc((mode: mode, slot: slot, address: null));
+    final held = _oscPick.heldFor(state.value?.wispMac);
+    return _sendOsc((mode: mode, slot: held?.slot, address: held?.address));
   }
 
   /// Listen to the Maestro on palette [slot], confirmed as [_sendConfigPick]
-  /// describes.
-  Future<void> setMaestroSlot(int slot) =>
-      _sendOsc((mode: OscMode.maestro, slot: slot, address: null));
+  /// describes. A Custom address still confirming rides along.
+  Future<void> setMaestroSlot(int slot) => _sendOsc((
+        mode: OscMode.maestro,
+        slot: slot,
+        address: _oscPick.heldFor(state.value?.wispMac)?.address,
+      ));
 
   /// Listen to OSC on [address] in Custom, mode and address in one op,
   /// confirmed as [_sendConfigPick] describes. A slot still confirming rides

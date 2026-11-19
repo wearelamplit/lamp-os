@@ -345,6 +345,45 @@ void main() {
       await Future.wait([slot, custom]);
     });
 
+    for (final (name, mode, pick)
+        in <(String, String, Future<void> Function(WispNotifier))>[
+          ('Straylight', 'straylight', (n) => n.setOscMode(OscMode.straylight)),
+          ('Maestro', 'maestro', (n) => n.setOscMode(OscMode.maestro)),
+          ('a Maestro slot', 'maestro', (n) => n.setMaestroSlot(2)),
+        ]) {
+      test('an address still confirming is kept through $name', () async {
+        final (ble, c, n) = await open();
+
+        final typed = n.setCustomOscAddress('/typed').catchError((Object _) {});
+        await pumpEventQueue();
+        final other = pick(n);
+        await pumpEventQueue();
+
+        expect(_oscOps(ble).last['mode'], mode);
+        expect(_oscOps(ble).last['address'], '/typed');
+        expect(shown(c).oscAddr, '/typed');
+
+        ble.seedSection(
+          _devId,
+          'wispconfig',
+          _b(_config(mode: mode, addr: '/typed')),
+        );
+        _notify(ble, _status(seen: 200));
+        await other;
+        expect(shown(c).oscAddr, '/typed');
+
+        final back = n.setOscMode(OscMode.custom).catchError((Object _) {});
+        await pumpEventQueue();
+        expect(_oscOps(ble).last, {
+          'char': 'wispOp',
+          'op': 'setOsc',
+          'mode': 'custom',
+          'address': '/typed',
+        });
+        await Future.wait([typed, back]);
+      });
+    }
+
     test(
       'an address the wisp refuses sends nothing and shows nothing',
       () async {
@@ -838,6 +877,37 @@ void main() {
       expect(find.text("Couldn't reach the wisp. Try again."), findsOneWidget);
       expect(fieldText(tester), '/a');
       expect(sendEnabled(tester), isFalse);
+    });
+
+    testWidgets('a typed address still confirming is kept through Maestro', (
+      tester,
+    ) async {
+      final (ble, c) = await container(config: _config());
+      addTearDown(c.dispose);
+      await pump(tester, c);
+
+      await tester.tap(find.text('Custom'));
+      await tester.pump();
+      await tester.enterText(field, '/typed');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.tap(find.text('Maestro'));
+      await tester.pump();
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.tap(find.text('Custom'));
+      await tester.pump();
+      await tester.runAsync(() => pumpEventQueue());
+
+      expect(selected(tester), {OscMode.custom});
+      expect(fieldText(tester), '/typed');
+      expect(_oscOps(ble).last, {
+        'char': 'wispOp',
+        'op': 'setOsc',
+        'mode': 'custom',
+        'address': '/typed',
+      });
+      await drain(tester);
     });
 
     testWidgets('an address arriving while typing leaves the typing alone', (

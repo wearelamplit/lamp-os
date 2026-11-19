@@ -48,9 +48,10 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   wisp switches to it in one step. Save the wisp's address as a preset to
   keep it on this phone for every wisp. With no address yet, Custom says so
   and sends nothing. A change shows at once and goes back with "Couldn't
-  reach the wisp." if the wisp never confirms it. Needs the wisp reflashed
-  with the Custom firmware above; a wisp with only Maestro shows Custom
-  greyed out and asks to be updated.
+  reach the wisp." if the wisp never confirms it. An address still on its
+  way when Straylight or Maestro is picked is kept for Custom. Needs the
+  wisp reflashed with the Custom firmware above; a wisp with only Maestro
+  shows Custom greyed out and asks to be updated.
 - **The wisp numbers each Gradient/Swatches pick.** A `setSwatches` from
   the app can carry a number the wisp echoes in its status as `swatchesSeq`,
   so the app can tell its latest pick landed rather than a late copy of an
