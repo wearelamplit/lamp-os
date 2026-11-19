@@ -50,7 +50,8 @@ void keepMostRelevant(std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
 }
 
 // Over the app-visible fields only. lastSeenMs and rssi freshen on every BLE
-// adv (~30 Hz); folding them would churn the rev.
+// adv (~30 Hz) and mrssi on every direct HELLO; folding them would churn the
+// rev.
 uint32_t membershipHash(const std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
   uint32_t hash = 2166136261u;
   for (const auto& p : lamps) {
@@ -104,6 +105,10 @@ void renderInto(const std::vector<lamp::ListedPeer>& lamps, uint32_t now, Out& o
     }
     if (p.lastRssi != -127) {
       snprintf(buf, sizeof(buf), ",\"rssi\":%d", p.lastRssi);
+      out += buf;
+    }
+    if (p.espnowRssi != -127) {
+      snprintf(buf, sizeof(buf), ",\"mrssi\":%d", p.espnowRssi);
       out += buf;
     }
     snprintf(buf, sizeof(buf),

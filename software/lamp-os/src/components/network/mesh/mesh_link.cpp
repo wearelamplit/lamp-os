@@ -324,15 +324,16 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
         lastHelloRxLogMs = nowMsLog;
         std::memcpy(lastHelloRxMac, h.sourceMac, 6);
         Serial.printf("[show] HELLO recv from %02X:%02X:%02X:%02X:%02X:%02X "
-                      "v=0x%08X rssi=%d\n",
+                      "v=0x%08X rssi=%d %s\n",
                       h.sourceMac[0], h.sourceMac[1], h.sourceMac[2],
                       h.sourceMac[3], h.sourceMac[4], h.sourceMac[5],
-                      (unsigned)h.firmwareVersion, (int)rssi);
+                      (unsigned)h.firmwareVersion, (int)rssi,
+                      isDirectHello(srcMac, h.sourceMac) ? "direct" : "relayed");
       }
     }
 #endif
 #endif
-    // RSSI feeds the roster's espnowRssi, the OTA offer signal floor.
+    // A direct copy's RSSI feeds the roster's DirectRssi, the OTA offer gate.
     // h.name is a NUL-terminated fixed field; pass it straight through so the
     // hot HELLO path never allocates a transient std::string.
     lampRoster.addOrUpdateFromEspNow(

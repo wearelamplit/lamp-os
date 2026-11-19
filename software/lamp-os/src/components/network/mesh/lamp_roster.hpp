@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "components/network/mesh/direct_rssi.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "util/bd_addr.hpp"
 #include "util/color.hpp"
@@ -104,11 +105,10 @@ struct RosterEntry {
   // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
   // snapshotNear() sorts descending; getMesh() does not.
   int8_t lastRssi = -127;
-  // RSSI (dBm) of the peer's own direct ESP-NOW HELLO, written only by
-  // addOrUpdateFromEspNow; a relayed copy never writes it. Distinct from
-  // lastRssi (BLE-scan RSSI): feeds the OTA distributor's signal-floor gate.
-  // -127 = unknown, not gated.
-  int8_t espnowRssi = -127;
+  // The peer's own direct ESP-NOW HELLOs, written only by
+  // addOrUpdateFromEspNow. Distinct from lastRssi (BLE-scan RSSI): feeds the
+  // OTA offer gate and the nearby list's `mrssi`.
+  DirectRssi directRssi;
 
   // Canonical uppercase colon-hex mac ("AA:BB:CC:DD:EE:FF"), the
   // disposition-store key format. Empty when hasMac is false.
@@ -156,7 +156,8 @@ struct MeshPeer {
   bool     hasFsDigest = false;
   bool     needsFs = false;
   bool     hasOtaSendingTo = false;
-  int8_t   espnowRssi = -127;
+  // DirectRssi::holdsOtaFloor when the snapshot was taken.
+  bool     otaLinkHeld = false;
   int8_t   lastRssi = -127;
 };
 static_assert(std::is_trivially_copyable<MeshPeer>::value,
@@ -174,6 +175,8 @@ struct ListedPeer {
   uint32_t lastSeenMeshMs = 0;
   uint32_t firmwareVersion = 0;
   int8_t   lastRssi = -127;
+  // DirectRssi::fresh when the snapshot was taken.
+  int8_t   espnowRssi = -127;
   uint8_t  otaState = 0;
   bool     hasMac = false;
   bool     hasOtaSendingTo = false;
@@ -212,6 +215,8 @@ class LampRoster {
                           const std::string& bleAddr,
                           const Color& base, const Color& shade,
                           int8_t rssi = -127);
+  // `rssi` is a direct HELLO's frame RSSI, -127 for a relayed copy
+  // (helloRosterRssi).
   void addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
                              const Color& base, const Color& shade,
                              uint32_t firmwareVersion = 0,
@@ -232,8 +237,8 @@ class LampRoster {
   // is older than `maxAgeMs`.
   void prune(uint32_t maxAgeMs);
 
-  // Retires every entry's sighting stamps, so a stale one cannot read as
-  // recent again one millis() wrap later. Call at least once per
+  // Retires every entry's sighting stamps and direct-RSSI reading, so a stale
+  // one cannot read as recent again one millis() wrap later. Call at least once per
   // lampos::kRetiredAgeMs.
   void retireSightings(uint32_t nowMs);
 

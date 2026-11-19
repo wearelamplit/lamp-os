@@ -357,7 +357,7 @@ bool needsFs() {
 void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
                   uint8_t peerProtocolVersion, uint32_t nowMs,
                   const char* peerFwChannel, const uint8_t* peerFsDigest,
-                  bool peerHasFsDigest, bool peerNeedsFs, int8_t peerRssi) {
+                  bool peerHasFsDigest, bool peerNeedsFs, bool peerLinkHeld) {
   // A peer with no digest and no need-FS flag is legacy / FS-disabled → skip.
   // A need-FS peer (empty/unmountable FS) has no digest to compare, so it takes
   // the offer unconditionally below.
@@ -381,7 +381,7 @@ void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
   if (firmwarePathBusy() || s_fsReceiver.isInProgress()) return;
   s_fsDistributor.considerPeerForOta(peerMac, peerFwVersion,
                                      peerProtocolVersion, nowMs, peerFwChannel,
-                                     /*peerMaxChunk=*/0, peerRssi);
+                                     /*peerMaxChunk=*/0, peerLinkHeld);
 }
 
 void handleControl(const lamp::PendingFirmwareControl& ctrl) {

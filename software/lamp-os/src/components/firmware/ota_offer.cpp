@@ -57,7 +57,7 @@ void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
       }
     }
     firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion, p.protocolVersion, nowMs,
-                                           p.fwChannel, p.maxChunk, p.espnowRssi,
+                                           p.fwChannel, p.maxChunk, p.otaLinkHeld,
                                            peerBeingServed);
   }
   if (!busy.fsWalkAllowed()) return;
@@ -65,7 +65,7 @@ void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
   for (const auto& p : peers) {
     if (!p.hasMac) continue;
     fs_ota::considerPeer(p.mac, p.firmwareVersion, p.protocolVersion, nowMs, p.fwChannel,
-                         p.fsDigest, p.hasFsDigest, p.needsFs, p.espnowRssi);
+                         p.fsDigest, p.hasFsDigest, p.needsFs, p.otaLinkHeld);
   }
 }
 

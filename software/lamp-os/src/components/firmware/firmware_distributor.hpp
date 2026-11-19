@@ -104,19 +104,16 @@ class FirmwareDistributor {
   // peerMaxChunk is the peer's HELLO_TLV_FW_MAX_CHUNK (0 = peer doesn't
   // advertise): the session chunk size becomes min(FW_CHUNK_SIZE_MAX,
   // peerMaxChunk) when advertised, else FW_CHUNK_SIZE_BASELINE.
-  // peerRssi is the peer's ESP-NOW HELLO RSSI (-127 = unknown, not gated):
-  // skips the offer below kOtaMinRssiDbm rather than starting a doomed
-  // direct-hop transfer.
+  // peerLinkHeld is DirectRssi::holdsOtaFloor for the peer: false skips the
+  // offer rather than starting a doomed direct-hop transfer.
   // peerBeingServed is the mesh-derived "another lamp already has this peer":
   // the peer reports otaState receiving, or some roster peer reports sending to
   // it. The caller computes it from the roster; the offer is skipped so
   // concurrent senders don't stomp a legacy receiver's erase+accept.
   void considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
                           uint8_t peerProtocolVersion, uint32_t nowMs,
-                          const char* peerFwChannel = nullptr,
-                          uint16_t peerMaxChunk = 0,
-                          int8_t peerRssi = -127,
-                          bool peerBeingServed = false);
+                          const char* peerFwChannel, uint16_t peerMaxChunk,
+                          bool peerLinkHeld, bool peerBeingServed = false);
 
   // Inbound packet hooks: mesh_link dispatches MSG_FW_ACCEPT/REQ/RESULT
   // from its WiFi recv task. Idempotent on irrelevant packets (wrong target

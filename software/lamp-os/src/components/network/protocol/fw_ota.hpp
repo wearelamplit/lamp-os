@@ -149,15 +149,12 @@ inline bool offerChunkCountOk(uint32_t totalLen, uint16_t chunkSize,
   return true;
 }
 
-// OTA-viable signal floor for a direct single-hop OFFER. Below this, chunk
-// transfer thrashes regardless of chunk size, so both the offering and
-// receiving side skip it and let cascade OTA reach the peer via a nearer
-// lamp instead. Tunable toward ~-85 pending bench calibration.
-// RSSI reads pessimistically on these radios, so the floor is lenient. A peer
-// weaker than this can't converge a full-image transfer and just thrashes the
-// single streaming slot, so skip it and let cascade OTA reach it via a nearer
-// lamp.
-constexpr int8_t kOtaMinRssiDbm = -92;
+// OTA-viable signal floor for a direct single-hop OFFER. A weaker link can't
+// converge a full-image transfer and thrashes the single streaming slot, so
+// both the offering and receiving side skip it and let cascade OTA reach the
+// peer via a nearer lamp. The offering side also needs the link to hold it
+// (DirectRssi::holdsOtaFloor).
+constexpr int8_t kOtaMinRssiDbm = -90;
 
 // Fixed-size frame totals. The byte layout for each is the per-builder
 // comment below.

@@ -63,7 +63,7 @@ bool needsFs();
 void considerPeer(const uint8_t peerMac[6], uint32_t peerFwVersion,
                   uint8_t peerProtocolVersion, uint32_t nowMs,
                   const char* peerFwChannel, const uint8_t* peerFsDigest,
-                  bool peerHasFsDigest, bool peerNeedsFs, int8_t peerRssi = -127);
+                  bool peerHasFsDigest, bool peerNeedsFs, bool peerLinkHeld);
 
 // Inbound dispatch, called from mesh_link's WiFi recv task.
 // MSG_FS_OFFER / MSG_FS_DONE post to the Core 1 drain, like firmware.

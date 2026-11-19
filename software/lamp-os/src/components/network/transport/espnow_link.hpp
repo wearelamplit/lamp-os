@@ -12,7 +12,7 @@ namespace lamp {
 // DO NOT do heap work or block. Copy the bytes into a queue and process in loop().
 //
 // `rssi` is the per-frame RSSI in dBm pulled from `recv_info->rx_ctrl->rssi`
-// (ESP-IDF 5.x). Receivers feed it into RosterEntry::espnowRssi, which gates
+// (ESP-IDF 5.x). A direct HELLO's feeds RosterEntry::directRssi, which gates
 // OTA offers on the signal floor. -127 indicates "unknown".
 using EspNowRecvFn = void (*)(const uint8_t* mac, const uint8_t* data, size_t len,
                               int8_t rssi);

@@ -393,6 +393,7 @@ void test_measured_length_matches_the_render() {
   p.lastSeenMeshMs = 4294967295u;
   p.firmwareVersion = 4294967295u;
   p.lastRssi = -128;
+  p.espnowRssi = -128;
   p.otaState = 255;
   std::vector<ListedPeer> lamps(NearbyList::kMaxLamps, p);
   std::string out;
@@ -500,6 +501,22 @@ void test_fw_channel_high_bytes_are_escaped() {
   for (const char c : out) TEST_ASSERT_TRUE(static_cast<unsigned char>(c) < 0x80);
 }
 
+// A peer's direct ESP-NOW reading renders as `mrssi` beside the BLE `rssi`,
+// and is left out when there is none.
+void test_direct_reading_renders_as_mrssi() {
+  ListedPeer p;
+  std::strcpy(p.name, "x");
+  p.lastRssi = -61;
+  p.espnowRssi = -88;
+  std::string out;
+  NearbyList::render({p}, 0, out);
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find(",\"mrssi\":-88"));
+  TEST_ASSERT_NOT_EQUAL(std::string::npos, out.find(",\"rssi\":-61"));
+  p.espnowRssi = -127;
+  NearbyList::render({p}, 0, out = "");
+  TEST_ASSERT_EQUAL(std::string::npos, out.find("mrssi"));
+}
+
 // fwChannel arrives over the air, so a quote in it cannot end the string.
 void test_fw_channel_is_escaped() {
   ListedPeer p;
@@ -548,6 +565,7 @@ int main(int, char**) {
   RUN_TEST(test_measured_length_matches_the_render);
   RUN_TEST(test_build_demand_tracks_the_list_length);
   RUN_TEST(test_fw_channel_is_escaped);
+  RUN_TEST(test_direct_reading_renders_as_mrssi);
   RUN_TEST(test_read_stamped_after_the_tick_clock_counts);
   RUN_TEST(test_each_visible_field_moves_the_rev);
   RUN_TEST(test_fw_channel_high_bytes_are_escaped);

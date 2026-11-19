@@ -16,7 +16,7 @@
 //   ✓ Per-peer backoff through the shipped PeerBackoffRing: ring
 //     eviction, ring-slot reuse for the same MAC
 //   ✓ considerPeerForOta gating: peer-in-backoff, peer-already-current,
-//     distributor-not-Idle
+//     distributor-not-Idle, direct link held at the real OTA floor
 //   ✓ OFFER retry interval + cap
 //   ✓ Streaming chunk-cursor advance + currentChunkRetries_ + stall
 //   ✓ FW_REQ rewind cursor + reqCountThisSession_ budget hardening
@@ -38,6 +38,7 @@
 
 #include "components/firmware/ota_channel.hpp"
 #include "components/firmware/ota_channel.cpp"
+#include "components/network/mesh/direct_rssi.hpp"
 #include "components/firmware/firmware_signature.hpp"
 #include "../../src/components/firmware/discover_image_length.cpp"
 #include "../../src/components/firmware/peer_backoff_ring.cpp"
@@ -71,8 +72,6 @@ constexpr uint32_t kDoneRetryIntervalMs   = 300;
 // Lamp-side hardening — caps how many MSG_FW_REQ a peer can
 // send in one session before the session tombstones with a peer backoff.
 constexpr uint16_t kMaxReqPerSession      = 32;
-// Mirrors kOtaMinRssiDbm (fw_ota.hpp).
-constexpr int8_t   kOtaMinRssiDbm         = -80;
 
 enum class State : uint8_t {
   Disabled = 0,
@@ -156,11 +155,12 @@ struct DistAlgo {
 
   // Event-driven targeting — caller (tickOtaOffers) supplies a peer
   // observed via ESP-NOW HELLO. Idempotent on non-Idle. peerMaxChunk mirrors
-  // the peer's HELLO FW_MAX_CHUNK TLV (0 = not advertised).
+  // the peer's HELLO FW_MAX_CHUNK TLV (0 = not advertised). peerLinkHeld
+  // defaults to held so the other gates' tests isolate their own gate.
   bool considerPeerForOta(const uint8_t peerMac[6], uint32_t peerVersion,
                           uint32_t nowMs, const char* peerChannel = nullptr,
                           uint16_t peerMaxChunk = 0,
-                          int8_t peerRssi = -127,
+                          bool peerLinkHeld = true,
                           bool peerBeingServed = false) {
     if (state_ != State::Idle) return false;
     // Another lamp already owns this peer's transfer; don't stomp it.
@@ -176,8 +176,7 @@ struct DistAlgo {
       // channel TLV still get offered if they're behind).
       if (peerVersion >= myVersion) return false;
     }
-    // Skip peers below the OTA signal floor; unknown RSSI (-127) isn't gated.
-    if (peerRssi != -127 && peerRssi < kOtaMinRssiDbm) return false;
+    if (!peerLinkHeld) return false;
     if (peerIsInBackoff(peerMac, nowMs)) return false;
     std::memcpy(targetMac_, peerMac, 6);
     state_              = State::OfferSent;
@@ -488,7 +487,7 @@ void test_considerPeerForOta_peer_being_served_skips(void) {
   auto d = makeAlgo();
   uint8_t mac[6]; macFromTail(mac, 1);
   TEST_ASSERT_FALSE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0,
-                                         -127, /*peerBeingServed=*/true));
+                                         true, /*peerBeingServed=*/true));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::Idle),
                           static_cast<uint8_t>(d.state_));
 }
@@ -497,7 +496,7 @@ void test_considerPeerForOta_not_served_offers(void) {
   auto d = makeAlgo();
   uint8_t mac[6]; macFromTail(mac, 1);
   TEST_ASSERT_TRUE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0,
-                                        -127, /*peerBeingServed=*/false));
+                                        true, /*peerBeingServed=*/false));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::OfferSent),
                           static_cast<uint8_t>(d.state_));
 }
@@ -570,30 +569,42 @@ void test_considerPeerForOta_peer_already_current_is_noop(void) {
                           static_cast<uint8_t>(d.state_));
 }
 
-// RSSI gate: a fair-signal peer still gets offered.
-void test_considerPeerForOta_rssi_above_floor_offers(void) {
+// The link gate, driven by the real DirectRssi at the real OTA floor: a
+// steady 30 s HELLO cadence held for the hold window.
+bool heldLinkAt(int8_t rssi, uint32_t nowMs) {
+  lamp::DirectRssi link;
+  for (uint32_t t = 0; t <= lamp::DirectRssi::kOtaHoldMs; t += 30000) link.record(rssi, t);
+  return link.holdsOtaFloor(nowMs);
+}
+
+void test_considerPeerForOta_link_held_at_floor_offers(void) {
   auto d = makeAlgo();
   uint8_t mac[6]; macFromTail(mac, 1);
-  TEST_ASSERT_TRUE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0, -70));
+  const uint32_t now = lamp::DirectRssi::kOtaHoldMs;
+  TEST_ASSERT_TRUE(d.considerPeerForOta(mac, 0x00010003u, now, nullptr, 0,
+                                        heldLinkAt(lamp_protocol::kOtaMinRssiDbm, now)));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::OfferSent),
                           static_cast<uint8_t>(d.state_));
 }
 
-// RSSI gate: a peer below the signal floor is skipped, no OFFER.
-void test_considerPeerForOta_rssi_below_floor_skips(void) {
+void test_considerPeerForOta_link_below_floor_skips(void) {
   auto d = makeAlgo();
   uint8_t mac[6]; macFromTail(mac, 1);
-  TEST_ASSERT_FALSE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0, -85));
+  const uint32_t now = lamp::DirectRssi::kOtaHoldMs;
+  TEST_ASSERT_FALSE(d.considerPeerForOta(mac, 0x00010003u, now, nullptr, 0,
+                                         heldLinkAt(lamp_protocol::kOtaMinRssiDbm - 1, now)));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::Idle),
                           static_cast<uint8_t>(d.state_));
 }
 
-// RSSI gate: the unknown-RSSI sentinel (-127) is never gated.
-void test_considerPeerForOta_rssi_unknown_offers(void) {
+// No direct reading at all is no offer.
+void test_considerPeerForOta_no_reading_skips(void) {
   auto d = makeAlgo();
   uint8_t mac[6]; macFromTail(mac, 1);
-  TEST_ASSERT_TRUE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0, -127));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::OfferSent),
+  const lamp::DirectRssi none;
+  TEST_ASSERT_FALSE(d.considerPeerForOta(mac, 0x00010003u, 1000, nullptr, 0,
+                                         none.holdsOtaFloor(1000)));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(State::Idle),
                           static_cast<uint8_t>(d.state_));
 }
 
@@ -1247,9 +1258,9 @@ int main(int, char**) {
   RUN_TEST(test_considerPeerForOta_nonIdle_is_noop);
   RUN_TEST(test_considerPeerForOta_peer_in_backoff_is_noop);
   RUN_TEST(test_considerPeerForOta_peer_already_current_is_noop);
-  RUN_TEST(test_considerPeerForOta_rssi_above_floor_offers);
-  RUN_TEST(test_considerPeerForOta_rssi_below_floor_skips);
-  RUN_TEST(test_considerPeerForOta_rssi_unknown_offers);
+  RUN_TEST(test_considerPeerForOta_link_held_at_floor_offers);
+  RUN_TEST(test_considerPeerForOta_link_below_floor_skips);
+  RUN_TEST(test_considerPeerForOta_no_reading_skips);
   // OFFER retry + ACCEPT
   RUN_TEST(test_offer_retry_advances_with_interval);
   RUN_TEST(test_accept_timeout_failures_peer);
