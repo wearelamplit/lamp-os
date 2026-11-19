@@ -12,6 +12,7 @@
 namespace lamp {
 
 class DispositionStore;
+class ExpressionRegistry;
 struct NearbyCopy;
 
 // Expression types with their own energy weight, in FondnessTuning::typeWeight
@@ -57,9 +58,10 @@ struct FondnessTuning {
 bool setFondnessTuning(FondnessTuning& t, const char* key, uint32_t value);
 
 // Whether a peer's `type` is one this lamp plays itself, the overlap rule's
-// input: an expression it has enabled, or yawn when it registers yawn
-// (`yawns`), which it fires on its own and never configures.
-bool isOwnType(const ExpressionSettings& settings, bool yawns, const std::string& type);
+// input: an expression it has enabled, or yawn when `registry` holds yawn,
+// which the lamp fires on its own and never configures.
+bool isOwnType(const ExpressionSettings& settings, const ExpressionRegistry& registry,
+               const std::string& type);
 
 // Turns what this lamp observes of its peers into disposition drift through
 // the DispositionStore: expression energy and overlap batched per peer per

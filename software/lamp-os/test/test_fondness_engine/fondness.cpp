@@ -14,6 +14,8 @@
 #include "config/config_store.hpp"
 #include "../../src/config/disposition_store.cpp"
 #include "../../src/core/fondness_engine.cpp"
+#include "../../src/expressions/expression_registry.cpp"
+#include "expressions/bloom/bloom_expression.hpp"
 #include "../../src/util/color.cpp"
 #include "../../src/util/heap_guard.cpp"
 #include "../replaced_new/replaced_new.hpp"
@@ -522,7 +524,8 @@ void test_full_step_log_refuses() {
 }
 
 // Overlap counts a type this lamp has enabled, and yawn on a lamp that
-// yawns, though yawn is never configured. Bloom, built in too, never counts.
+// registers it, though yawn is never configured. Bloom, built in too, never
+// counts.
 void test_own_type() {
   ExpressionSettings s;
   s.expressions.resize(2);
@@ -530,13 +533,19 @@ void test_own_type() {
   s.expressions[0].enabled = true;
   s.expressions[1].type = "glitchy";
   s.expressions[1].enabled = false;
-  for (const bool yawns : {true, false}) {
-    TEST_ASSERT_TRUE(isOwnType(s, yawns, "pulse"));
-    TEST_ASSERT_FALSE(isOwnType(s, yawns, "glitchy"));
-    TEST_ASSERT_FALSE(isOwnType(s, yawns, "spotty"));
-    TEST_ASSERT_FALSE(isOwnType(s, yawns, "bloom"));
-    TEST_ASSERT_EQUAL(yawns, isOwnType(s, yawns, "yawn"));
+  ExpressionRegistry staff;
+  staff.add(kYawnDescriptorData);
+  staff.add(kBloomDescriptorData);
+  ExpressionRegistry noYawn;
+  noYawn.add(kBloomDescriptorData);
+  for (const ExpressionRegistry* reg : {&staff, &noYawn}) {
+    TEST_ASSERT_TRUE(isOwnType(s, *reg, "pulse"));
+    TEST_ASSERT_FALSE(isOwnType(s, *reg, "glitchy"));
+    TEST_ASSERT_FALSE(isOwnType(s, *reg, "spotty"));
+    TEST_ASSERT_FALSE(isOwnType(s, *reg, "bloom"));
   }
+  TEST_ASSERT_TRUE(isOwnType(s, staff, "yawn"));
+  TEST_ASSERT_FALSE(isOwnType(s, noYawn, "yawn"));
 }
 
 // A crowd of 500 peers holds 16 slots and allocates nothing.
