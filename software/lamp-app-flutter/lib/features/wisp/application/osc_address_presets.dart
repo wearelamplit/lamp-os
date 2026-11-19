@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -7,7 +8,8 @@ const _presetsKey = 'wisp_osc_presets.v1';
 
 /// Custom OSC addresses the owner saved, kept on this phone and shared by
 /// every wisp, in the order saved. Only addresses the wisp's rule takes are
-/// kept. Changes apply in the order made.
+/// kept. Changes apply in the order made, and one the phone fails to store
+/// throws and leaves the list as it was.
 class OscAddressPresets extends AsyncNotifier<List<String>> {
   Future<void> _lastWrite = Future.value();
 
@@ -39,12 +41,18 @@ class OscAddressPresets extends AsyncNotifier<List<String>> {
     final write = _lastWrite.then((_) async {
       final changed = next(await future);
       if (changed == null) return;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(_presetsKey, changed);
+      if (!await store(changed)) throw StateError('presets not stored');
       state = AsyncData(changed);
     });
     _lastWrite = write.catchError((Object _) {});
     return write;
+  }
+
+  /// Write [next] to the phone, true once stored.
+  @visibleForTesting
+  Future<bool> store(List<String> next) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.setStringList(_presetsKey, next);
   }
 }
 

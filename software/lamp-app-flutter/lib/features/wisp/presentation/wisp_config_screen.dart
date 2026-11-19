@@ -214,6 +214,16 @@ class _SourcesTabState extends ConsumerState<_SourcesTab> {
     _runWispOp(() => widget.notifier.setOscMode(picked));
   }
 
+  Future<void> _runPresetOp(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      debugPrint('[wisp_config] preset change failed: $e');
+      if (!mounted) return;
+      AppSnackbar.error(context, "Couldn't save presets. Try again.");
+    }
+  }
+
   Future<void> _runWispOp(Future<void> Function() op) async {
     try {
       await op();
@@ -291,8 +301,8 @@ class _SourcesTabState extends ConsumerState<_SourcesTab> {
             setState(() => _customDraft = false);
             _runWispOp(() => notifier.setCustomOscAddress(a));
           },
-          onSavePreset: (a) => unawaited(presets.add(a)),
-          onDeletePreset: (a) => unawaited(presets.remove(a)),
+          onSavePreset: (a) => _runPresetOp(() => presets.add(a)),
+          onDeletePreset: (a) => _runPresetOp(() => presets.remove(a)),
         ),
     ];
   }

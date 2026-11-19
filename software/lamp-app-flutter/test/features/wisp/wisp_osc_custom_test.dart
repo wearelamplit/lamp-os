@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart' show Override;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
@@ -27,6 +28,15 @@ import '../../_support/seed.dart';
 class _FakePeers extends LampNearbyPeersNotifier {
   @override
   Future<List<LampNearbyPeer>> build(String lampId) async => const [];
+}
+
+// A phone whose preset store refuses writes while [refuse] is set.
+class _RefusingPresets extends OscAddressPresets {
+  bool refuse = true;
+
+  @override
+  Future<bool> store(List<String> next) async =>
+      refuse ? false : super.store(next);
 }
 
 const _devId = 'lamp-osc-custom';
@@ -442,6 +452,30 @@ void main() {
       expect(await c.read(oscAddressPresetsProvider.future), ['/ok']);
     });
 
+    test(
+      'a change the phone fails to store throws and changes nothing',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'flutter.wisp_osc_presets.v1': ['/a'],
+        });
+        final refusing = _RefusingPresets();
+        final c = ProviderContainer(
+          overrides: [oscAddressPresetsProvider.overrideWith(() => refusing)],
+        );
+        addTearDown(c.dispose);
+        final p = c.read(oscAddressPresetsProvider.notifier);
+        await c.read(oscAddressPresetsProvider.future);
+
+        await expectLater(p.add('/b'), throwsStateError);
+        await expectLater(p.remove('/a'), throwsStateError);
+        expect(c.read(oscAddressPresetsProvider).value, ['/a']);
+
+        refusing.refuse = false;
+        await p.add('/b');
+        expect(c.read(oscAddressPresetsProvider).value, ['/a', '/b']);
+      },
+    );
+
     test('changes made together all land', () async {
       SharedPreferences.setMockInitialValues({
         'flutter.wisp_osc_presets.v1': ['/a', '/b'],
@@ -463,6 +497,7 @@ void main() {
       required String config,
       String? status,
       List<String> presets = const [],
+      List<Override> overrides = const [],
     }) async {
       SharedPreferences.setMockInitialValues({
         'flutter.wisp_osc_presets.v1': presets,
@@ -478,6 +513,7 @@ void main() {
           lampNearbyPeersNotifierProvider(
             _devId,
           ).overrideWith(() => _FakePeers()),
+          ...overrides,
         ],
       );
       await c.read(inventoryNotifierProvider.future);
@@ -697,6 +733,25 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getStringList('wisp_osc_presets.v1'), ['/saved']);
       await drain(tester);
+    });
+
+    testWidgets('a preset the phone fails to store says so', (tester) async {
+      final (_, c) = await container(
+        config: _config(mode: 'custom', addr: '/live'),
+        overrides: [
+          oscAddressPresetsProvider.overrideWith(_RefusingPresets.new),
+        ],
+      );
+      addTearDown(c.dispose);
+      await pump(tester, c);
+
+      await tester.tap(find.byKey(const Key('wisp-osc-save-preset')));
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pump();
+
+      expect(find.text("Couldn't save presets. Try again."), findsOneWidget);
+      expect(find.byKey(const Key('wisp-osc-preset-/live')), findsNothing);
+      expect(find.byKey(const Key('wisp-osc-save-preset')), findsOneWidget);
     });
 
     testWidgets('a pick the wisp never confirms says so', (tester) async {
