@@ -30,7 +30,7 @@ struct FondnessTuning {
   std::array<uint8_t, kEnergyTypeCount> typeWeight = {3, 2, 2, 2, 1, 1, 0};
   // Events per peer per minute that count.
   uint8_t eventsPerMin = 4;
-  // Per counted event of a type this lamp has enabled itself.
+  // Per counted event of a type this lamp plays itself (isOwnType).
   uint8_t overlap = 2;
   // Per greet whose COLOR_INFO stop 0 sits within hueBand degrees of this
   // lamp's base or its complement.
@@ -56,8 +56,10 @@ struct FondnessTuning {
 // unknown key or a value out of range.
 bool setFondnessTuning(FondnessTuning& t, const char* key, uint32_t value);
 
-// Whether this lamp has `type` enabled itself, the overlap rule's input.
-bool hasEnabledType(const ExpressionSettings& settings, const std::string& type);
+// Whether a peer's `type` is one this lamp plays itself, the overlap rule's
+// input: an expression it has enabled, or yawn when it registers yawn
+// (`yawns`), which it fires on its own and never configures.
+bool isOwnType(const ExpressionSettings& settings, bool yawns, const std::string& type);
 
 // Turns what this lamp observes of its peers into disposition drift through
 // the DispositionStore: expression energy and overlap batched per peer per
@@ -89,8 +91,8 @@ class FondnessEngine {
   // the minute's slots and ages rows each tracked hour.
   void tick(uint64_t nowMs);
 
-  // A peer's announced expression of `type`; `ownType` when this lamp has the
-  // type enabled itself.
+  // A peer's announced expression of `type`; `ownType` when this lamp plays
+  // the type itself (isOwnType).
   void observeExpression(const uint8_t mac[6], const char* type, bool ownType,
                          SocialMode mode, uint64_t nowMs);
   // An organic greet of `mac`: counts a meeting, and arms one colour reading.

@@ -8,6 +8,7 @@
 
 #include "components/network/mesh/lamp_roster.hpp"
 #include "config/disposition_store.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "util/bd_addr.hpp"
 
 namespace lamp {
@@ -190,7 +191,8 @@ void FondnessEngine::seen(const uint8_t mac[6], uint64_t nowMs) {
   if (tracking()) store_.markSeen(mac, nowMs);
 }
 
-bool hasEnabledType(const ExpressionSettings& settings, const std::string& type) {
+bool isOwnType(const ExpressionSettings& settings, bool yawns, const std::string& type) {
+  if (type == kYawnDescriptorData.id) return yawns;
   for (const ExpressionConfig& e : settings.expressions) {
     if (e.enabled && e.type == type) return true;
   }

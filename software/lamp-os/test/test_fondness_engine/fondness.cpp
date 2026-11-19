@@ -118,7 +118,7 @@ void test_type_weights() {
   TEST_ASSERT_EQUAL(0, moved[2]);
 }
 
-// Overlap warms only for a type this lamp has enabled itself.
+// Overlap warms only for a type this lamp plays itself.
 void test_overlap_only_own_types() {
   const auto m = peer(1);
   Rig own;
@@ -521,17 +521,22 @@ void test_full_step_log_refuses() {
   TEST_ASSERT_EQUAL_INT8(126, rig.store.peer(next.data(), rig.now).score);
 }
 
-// Overlap counts a type only when this lamp has it enabled.
-void test_has_enabled_type() {
+// Overlap counts a type this lamp has enabled, and yawn on a lamp that
+// yawns, though yawn is never configured. Bloom, built in too, never counts.
+void test_own_type() {
   ExpressionSettings s;
   s.expressions.resize(2);
   s.expressions[0].type = "pulse";
   s.expressions[0].enabled = true;
   s.expressions[1].type = "glitchy";
   s.expressions[1].enabled = false;
-  TEST_ASSERT_TRUE(hasEnabledType(s, "pulse"));
-  TEST_ASSERT_FALSE(hasEnabledType(s, "glitchy"));
-  TEST_ASSERT_FALSE(hasEnabledType(s, "spotty"));
+  for (const bool yawns : {true, false}) {
+    TEST_ASSERT_TRUE(isOwnType(s, yawns, "pulse"));
+    TEST_ASSERT_FALSE(isOwnType(s, yawns, "glitchy"));
+    TEST_ASSERT_FALSE(isOwnType(s, yawns, "spotty"));
+    TEST_ASSERT_FALSE(isOwnType(s, yawns, "bloom"));
+    TEST_ASSERT_EQUAL(yawns, isOwnType(s, yawns, "yawn"));
+  }
 }
 
 // A crowd of 500 peers holds 16 slots and allocates nothing.
@@ -601,7 +606,7 @@ int main(int, char**) {
   RUN_TEST(test_churn_keeps_the_cap);
   RUN_TEST(test_home_drops_the_pending_minute);
   RUN_TEST(test_full_step_log_refuses);
-  RUN_TEST(test_has_enabled_type);
+  RUN_TEST(test_own_type);
   RUN_TEST(test_crowd_stays_bounded);
   RUN_TEST(test_tuning_keys_are_checked);
   return UNITY_END();

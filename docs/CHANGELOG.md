@@ -59,6 +59,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   expression to add or configure; lamps still yawn on their own, a tired
   introvert now and then and a lamp yawning back at a peer. A lamp that had
   Yawn added drops it on update and keeps its other expressions.
+- **A peer's yawn grows fondness on every lamp that yawns.** With Yawn built
+  in, a lamp counts a peer's yawn as an expression it shares, as it did when
+  Yawn was added to it. No other expression's fondness changes.
 - **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
   app's Test with colours, or a mushroom's tint, fades back and stops; a
   configured Shifty still chains into Glitchy.

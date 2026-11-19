@@ -49,6 +49,7 @@
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
 #include "expressions/expression_manager.hpp"
+#include "expressions/yawn/yawn_expression.hpp"
 #include "expressions/expression_upsert.hpp"
 #include "behaviors/configurator.hpp"
 #include "behaviors/fade_out.hpp"
@@ -260,8 +261,9 @@ class FondnessFeed : public lamp::IExpressionObserver {
  public:
   void onPeerExpression(const uint8_t sourceMac[6],
                         const lamp::ExpressionInvocation& inv) override {
+    const bool yawns = expressionManager.registry().find(lamp::kYawnDescriptorData.id) != nullptr;
     fondnessEngine.observeExpression(sourceMac, inv.type.c_str(),
-                                     lamp::hasEnabledType(config.expressions, inv.type),
+                                     lamp::isOwnType(config.expressions, yawns, inv.type),
                                      config.lamp.socialMode, lamp::uptimeMs());
   }
 };
