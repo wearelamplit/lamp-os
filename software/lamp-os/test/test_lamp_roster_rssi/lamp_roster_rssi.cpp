@@ -208,6 +208,20 @@ void test_direct_reading_leaves_the_list_once_stale() {
   TEST_ASSERT_EQUAL_INT8(-127, espnowRssiByName(r, "peer"));
 }
 
+// The roster's stamp retirement covers the direct reading, so one millis()
+// wrap later it does not come back as fresh.
+void test_retired_direct_reading_stays_stale_across_the_wrap() {
+  LampRoster r;
+  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x65};
+  const uint32_t t0 = 100000;
+  hello(r, mac, mac, -66, t0);
+  for (uint64_t t = t0; t <= uint64_t{t0} + (uint64_t{1} << 32); t += 3600000) {
+    r.retireSightings(static_cast<uint32_t>(t));
+  }
+  set_mock_millis(t0 + 1000);  // one wrap past the reading
+  TEST_ASSERT_EQUAL_INT8(-127, espnowRssiByName(r, "peer"));
+}
+
 // ---- MAC identity --------------------------------------------------------
 
 void test_esp_now_stores_raw_mac() {
@@ -406,6 +420,7 @@ int main(int argc, char** argv) {
   RUN_TEST(test_direct_hellos_at_the_floor_hold_the_ota_link);
   RUN_TEST(test_relayed_copies_never_hold_the_ota_link);
   RUN_TEST(test_direct_reading_leaves_the_list_once_stale);
+  RUN_TEST(test_retired_direct_reading_stays_stale_across_the_wrap);
 
   return UNITY_END();
 }
