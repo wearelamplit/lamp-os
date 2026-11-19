@@ -57,9 +57,7 @@ class _HoldBle extends InMemoryBleClient {
 
 const _devId = 'lamp-osc-send-to';
 const _mac = 'AA:BB:CC:DD:EE:FF';
-const _noAddress =
-    'No address yet. The wisp joins Wi-Fi while OSC is on '
-    '(set it in Settings), or plug in Ethernet.';
+const _noAddress = 'Connect to a network to receive OSC.';
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
@@ -206,7 +204,7 @@ void main() {
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
 
-      expect(find.text('SEND OSC TO'), findsNothing);
+      expect(find.text('LISTENING ON'), findsNothing);
       expect(find.text(_noAddress), findsNothing);
     });
 

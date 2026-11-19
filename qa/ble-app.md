@@ -304,14 +304,13 @@ palette from wisp…" with no tap.
 
 P19 — **the OSC source shows where to send.** Needs a wisp flashed from 1.3.8
 or later and the app from this tree. The third source pill reads "OSC". With
-the wisp in OSC and joined to Wi-Fi, the Palette tab shows "Send OSC to" with
+the wisp in OSC and joined to Wi-Fi, the Palette tab shows "LISTENING ON" with
 the wisp's address and "port 9000"; the address matches the wisp console's
 `wifi:show`, and tapping it copies the address. Unplug the wisp's Wi-Fi
 router (or clear Wi-Fi with no Ethernet): within about 30 s the row turns to
-"No address yet. The wisp joins Wi-Fi while OSC is on (set it in Settings), or
-plug in Ethernet." Plug the router back in: the address returns. With a wisp
+"Connect to a network to receive OSC." Plug the router back in: the address returns. With a wisp
 on firmware before 1.3.8 on Ethernet, the row shows its Ethernet address; on
-Wi-Fi it shows no "Send OSC to" section. In Manual, the Settings tab's Wi-Fi
+Wi-Fi it shows no "LISTENING ON" section. In Manual, the Settings tab's Wi-Fi
 row reads "Joins only while the source is OSC."
 
 P20 — **Maestro under the OSC source.** Same setup as P19, a wisp from 1.3.8
@@ -320,7 +319,7 @@ with the Maestro firmware, and a Maestro (or a laptop sending
 tab shows "OSC SENDER" with Straylight lit and the Straylight role picker. Tap
 Maestro: it lights at once, the role picker gives way to "MAESTRO PALETTE
 SLOT" with the wisp's slot, the line "On the Maestro, send palette slot <n> to
-<address>, port 9000." matches the Send OSC to row, and "Waiting for the
+<address>, port 9000." matches the LISTENING ON row, and "Waiting for the
 Maestro" shows until a palette arrives; the wisp's serial prints `setOsc
 mode=maestro` and the stored slot. Pick Slot 3 and send to slot 3: lamps go
 home at the pick and take the palette when it lands; the wisp's serial
@@ -341,7 +340,7 @@ Type `lamp`: the field reads "Start with /." and Send on the keyboard does
 nothing. Type `/lamp/palette` and send: the serial prints `setOsc
 mode=custom ... address='/lamp/palette'` once, "Waiting for OSC on
 /lamp/palette" shows until the laptop sends, and the help line names the
-address, the Send OSC to address and port 9000. Tap Save as preset, close
+address, the LISTENING ON address and port 9000. Tap Save as preset, close
 and reopen the app: the `/lamp/palette` chip is still there. Tap Straylight,
 then Custom: the wisp goes straight back to `/lamp/palette` with no typing.
 Power the wisp off, type `/other` and send: within 45 s the field goes back

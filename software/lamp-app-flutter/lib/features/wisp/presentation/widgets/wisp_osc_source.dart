@@ -449,8 +449,7 @@ class _OscSendToState extends State<OscSendTo> {
       body = WispSettingsPending(lampId: widget.lampId);
     } else if (status.ip != null) {
       body = Text(
-        'No address yet. The wisp joins Wi-Fi while OSC is on (set it in '
-        'Settings), or plug in Ethernet.',
+        'Connect to a network to receive OSC.',
         key: const Key('wisp-osc-no-address'),
         style: Theme.of(context).textTheme.bodySmall,
       );
@@ -460,7 +459,7 @@ class _OscSendToState extends State<OscSendTo> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeader('Send OSC to'),
+        const SectionHeader('Listening on'),
         const SizedBox(height: AppSpace.sm),
         body,
       ],
