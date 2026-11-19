@@ -754,6 +754,32 @@ void main() {
       expect(find.byKey(const Key('wisp-osc-save-preset')), findsOneWidget);
     });
 
+    testWidgets('a preset delete the phone fails to store says so', (
+      tester,
+    ) async {
+      final (_, c) = await container(
+        config: _config(mode: 'custom', addr: '/live'),
+        presets: ['/saved'],
+        overrides: [
+          oscAddressPresetsProvider.overrideWith(_RefusingPresets.new),
+        ],
+      );
+      addTearDown(c.dispose);
+      await pump(tester, c);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('wisp-osc-preset-/saved')),
+          matching: find.byTooltip('Delete preset'),
+        ),
+      );
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pump();
+
+      expect(find.text("Couldn't save presets. Try again."), findsOneWidget);
+      expect(find.byKey(const Key('wisp-osc-preset-/saved')), findsOneWidget);
+    });
+
     testWidgets('a pick the wisp never confirms says so', (tester) async {
       final (ble, c) = await container(config: _config());
       addTearDown(c.dispose);
