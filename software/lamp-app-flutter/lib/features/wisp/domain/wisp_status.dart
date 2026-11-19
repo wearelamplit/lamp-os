@@ -232,8 +232,8 @@ class WispStatus {
   /// until a config carrying it is merged.
   final int? oscSlot;
 
-  /// The Custom OSC address the wisp stores, from its `wispConfig`: `""` while
-  /// it has none. Null until a config carrying it is merged; a wisp that
+  /// The Custom OSC address the wisp stores, from its `wispConfig`, and `""`
+  /// while it has none. Null until a config carrying it is merged; a wisp that
   /// predates Custom never sends one.
   final String? oscAddr;
 

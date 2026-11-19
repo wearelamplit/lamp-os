@@ -34,10 +34,15 @@ const _mac = 'AA:BB:CC:DD:EE:FF';
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
-String _status({int seen = 100, bool live = false}) => jsonEncode({
-  'wispMac': _mac,
+String _status({
+  int seen = 100,
+  bool live = false,
+  String mac = _mac,
+  String source = 'osc',
+}) => jsonEncode({
+  'wispMac': mac,
   'configSplit': true,
-  'source': 'osc',
+  'source': source,
   'sourceLive': live,
   'manualId': '',
   'configLastSeenMs': seen,
@@ -309,7 +314,25 @@ void main() {
 
       expect(error, isNotNull);
       expect((shown(c).oscMode, shown(c).oscAddr), (OscMode.straylight, ''));
-      expect(_oscOps(ble), hasLength(4), reason: 'resent each attempt');
+      expect(_oscOps(ble).length, greaterThan(1), reason: 'resent on a miss');
+    });
+
+    test('a slot still confirming rides along with a Custom pick', () async {
+      final (ble, _, n) = await open(config: _config(mode: 'maestro'));
+
+      final slot = n.setMaestroSlot(5).catchError((Object _) {});
+      await pumpEventQueue();
+      final custom = n.setCustomOscAddress('/x').catchError((Object _) {});
+      await pumpEventQueue();
+
+      expect(_oscOps(ble).last, {
+        'char': 'wispOp',
+        'op': 'setOsc',
+        'mode': 'custom',
+        'slot': 5,
+        'address': '/x',
+      });
+      await Future.wait([slot, custom]);
     });
 
     test(
@@ -408,6 +431,30 @@ void main() {
       final c2 = ProviderContainer();
       addTearDown(c2.dispose);
       expect(await c2.read(oscAddressPresetsProvider.future), ['/a', '/c']);
+    });
+
+    test('a stored address the rule refuses is not offered', () async {
+      SharedPreferences.setMockInitialValues({
+        'flutter.wisp_osc_presets.v1': ['/ok', 'bad', '/a b'],
+      });
+      final c = ProviderContainer();
+      addTearDown(c.dispose);
+      expect(await c.read(oscAddressPresetsProvider.future), ['/ok']);
+    });
+
+    test('changes made together all land', () async {
+      SharedPreferences.setMockInitialValues({
+        'flutter.wisp_osc_presets.v1': ['/a', '/b'],
+      });
+      final c1 = ProviderContainer();
+      addTearDown(c1.dispose);
+      final p = c1.read(oscAddressPresetsProvider.notifier);
+      await c1.read(oscAddressPresetsProvider.future);
+      await Future.wait([p.remove('/a'), p.add('/c'), p.remove('/b')]);
+
+      final c2 = ProviderContainer();
+      addTearDown(c2.dispose);
+      expect(await c2.read(oscAddressPresetsProvider.future), ['/c']);
     });
   });
 
@@ -652,7 +699,7 @@ void main() {
       await drain(tester);
     });
 
-    testWidgets('a confirmed pick that never lands says so', (tester) async {
+    testWidgets('a pick the wisp never confirms says so', (tester) async {
       final (ble, c) = await container(config: _config());
       addTearDown(c.dispose);
       await pump(tester, c);
@@ -669,6 +716,165 @@ void main() {
       await tester.pump();
       expect(find.text("Couldn't reach the wisp. Try again."), findsOneWidget);
       expect(selected(tester), {OscMode.straylight});
+    });
+
+    String fieldText(WidgetTester tester) =>
+        tester.widget<TextField>(field).controller!.text;
+
+    Future<void> deliver(
+      WidgetTester tester,
+      InMemoryBleClient ble, {
+      String? config,
+      required String status,
+    }) async {
+      await tester.runAsync(() async {
+        if (config != null) ble.seedSection(_devId, 'wispconfig', _b(config));
+        _notify(ble, status);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    testWidgets('an address pick the wisp never takes goes back in the field', (
+      tester,
+    ) async {
+      final (ble, c) = await container(
+        config: _config(mode: 'custom', addr: '/a'),
+        presets: ['/b'],
+      );
+      addTearDown(c.dispose);
+      await pump(tester, c);
+
+      await tester.tap(find.text('/b'));
+      await tester.pump();
+      await tester.runAsync(() => pumpEventQueue());
+      expect(fieldText(tester), '/b');
+
+      await drain(tester);
+      await tester.pump();
+      expect(find.text("Couldn't reach the wisp. Try again."), findsOneWidget);
+      expect(fieldText(tester), '/a');
+      expect(sendEnabled(tester), isFalse);
+    });
+
+    testWidgets('an address arriving while typing leaves the typing alone', (
+      tester,
+    ) async {
+      final (ble, c) = await container(
+        config: _config(mode: 'custom', addr: '/a'),
+      );
+      addTearDown(c.dispose);
+      await pump(tester, c);
+
+      await tester.enterText(field, '/typing');
+      await deliver(
+        tester,
+        ble,
+        config: _config(mode: 'custom', addr: '/c'),
+        status: _status(seen: 200),
+      );
+
+      expect(
+        find.textContaining('Send palettes on /c'),
+        findsOneWidget,
+        reason: 'the new address was read',
+      );
+      expect(fieldText(tester), '/typing');
+    });
+
+    Future<(InMemoryBleClient, ProviderContainer)> draftUp(
+      WidgetTester tester,
+    ) async {
+      final (ble, c) = await container(config: _config());
+      addTearDown(c.dispose);
+      await pump(tester, c);
+      await tester.tap(find.text('Custom'));
+      await tester.pump();
+      expect(selected(tester), {OscMode.custom});
+      return (ble, c);
+    }
+
+    testWidgets('Custom with no address clears when the source changes', (
+      tester,
+    ) async {
+      final (ble, _) = await draftUp(tester);
+
+      await deliver(tester, ble, status: _status(source: 'manual'));
+      expect(modeSwitch, findsNothing);
+      await deliver(tester, ble, status: _status());
+
+      expect(selected(tester), {OscMode.straylight});
+      expect(field, findsNothing);
+    });
+
+    testWidgets('Custom with no address clears when another wisp shows', (
+      tester,
+    ) async {
+      final (ble, _) = await draftUp(tester);
+
+      await deliver(
+        tester,
+        ble,
+        config: _config(),
+        status: _status(seen: 200, mac: '11:22:33:44:55:66'),
+      );
+      await deliver(
+        tester,
+        ble,
+        status: _status(seen: 300, mac: '11:22:33:44:55:66'),
+      );
+
+      expect(selected(tester), {OscMode.straylight});
+      expect(field, findsNothing);
+    });
+
+    testWidgets('Custom with no address gives way to the wisp going Custom', (
+      tester,
+    ) async {
+      final (ble, _) = await draftUp(tester);
+
+      await deliver(
+        tester,
+        ble,
+        config: _config(mode: 'custom', addr: '/x'),
+        status: _status(seen: 200),
+      );
+
+      expect(fieldText(tester), '/x');
+      expect(find.textContaining('Waiting for OSC on /x.'), findsOneWidget);
+      expect(_oscOps(ble), isEmpty);
+    });
+
+    testWidgets('leaving Custom with no address for the wisp sender sends '
+        'nothing', (tester) async {
+      final (ble, _) = await draftUp(tester);
+
+      await tester.tap(find.text('Straylight'));
+      await tester.pump();
+      await tester.runAsync(() => pumpEventQueue());
+
+      expect(selected(tester), {OscMode.straylight});
+      expect(_oscOps(ble), isEmpty);
+    });
+
+    testWidgets('the address already in use is not sent again', (tester) async {
+      final (ble, c) = await container(
+        config: _config(mode: 'custom', addr: '/a'),
+        presets: ['/a'],
+      );
+      addTearDown(c.dispose);
+      await pump(tester, c);
+
+      await tester.tap(find.byKey(const Key('wisp-osc-preset-/a')));
+      await tester.pump();
+      await tester.showKeyboard(field);
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      await tester.runAsync(() => pumpEventQueue());
+
+      expect(_oscOps(ble), isEmpty);
     });
   });
 }

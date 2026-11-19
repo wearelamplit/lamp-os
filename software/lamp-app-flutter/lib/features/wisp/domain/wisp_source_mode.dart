@@ -105,10 +105,8 @@ enum OscAddressProblem { empty, noLeadingSlash, tooLong, badCharacter }
 const String _kOscAddressForbidden = '"\\#*,?[]{}';
 
 /// What is wrong with [address] as a Custom OSC address, or null when the
-/// wisp takes it: printable ASCII without `"` `\` `#` `*` `,` `?` `[` `]` `{`
-/// `}`, starting with `/`, at most [kOscCustomAddressMaxLen] bytes. The wisp's
-/// own rule is `oscCustomAddressValid` in `software/wisp/src/osc/osc_target.cpp`,
-/// and the test runs its cases against this one.
+/// wisp takes it. The rule is the wisp's `setOsc` address rule in
+/// `docs/dev/networking.md`.
 OscAddressProblem? oscCustomAddressProblem(String address) {
   if (address.isEmpty) return OscAddressProblem.empty;
   if (!address.startsWith('/')) return OscAddressProblem.noLeadingSlash;

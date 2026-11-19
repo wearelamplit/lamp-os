@@ -50,8 +50,8 @@ class WispConfig {
   final int? oscSlot;
 
   /// The Custom OSC address the wisp stores (`oscAddr`), kept while it listens
-  /// to another sender: `""` while it has none. Null from a wisp that predates
-  /// Custom.
+  /// to another sender, and `""` while it has none. Null from a wisp that
+  /// predates Custom.
   final String? oscAddr;
 
   /// Parse the section bytes. Null for an empty read (a lamp that predates

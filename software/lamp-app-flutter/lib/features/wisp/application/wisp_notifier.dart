@@ -1247,13 +1247,15 @@ class WispNotifier extends _$WispNotifier {
       _sendOsc((mode: OscMode.maestro, slot: slot, address: null));
 
   /// Listen to OSC on [address] in Custom, mode and address in one op,
-  /// confirmed as [_sendConfigPick] describes. Throws [ArgumentError], sending
-  /// nothing, for an address the wisp's rule refuses.
+  /// confirmed as [_sendConfigPick] describes. A slot still confirming rides
+  /// along. Throws [ArgumentError], sending nothing, for an address the wisp's
+  /// rule refuses.
   Future<void> setCustomOscAddress(String address) {
     if (!oscCustomAddressValid(address)) {
       return Future.error(ArgumentError.value(address, 'address'));
     }
-    return _sendOsc((mode: OscMode.custom, slot: null, address: address));
+    final slot = _oscPick.heldFor(state.value?.wispMac)?.slot;
+    return _sendOsc((mode: OscMode.custom, slot: slot, address: address));
   }
 
   Future<void> _sendOsc(_OscPick osc) => _sendConfigPick(

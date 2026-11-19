@@ -188,7 +188,8 @@ class _SourcesTab extends ConsumerStatefulWidget {
 }
 
 class _SourcesTabState extends ConsumerState<_SourcesTab> {
-  // Custom picked for a wisp with no address to send: shown, nothing sent.
+  // Custom is picked for a wisp with no address to send, so it shows and
+  // nothing is sent.
   bool _customDraft = false;
 
   @override
