@@ -83,6 +83,21 @@ void main() {
     },
   );
 
+  test('a stale discovery failing leaves the fresh one shared', () async {
+    final stale = cache.resolve('x', discover.call);
+    cache.remove('x');
+    final fresh = cache.resolve('x', discover.call);
+    final err = StateError('stale');
+    discover.runs[0].completeError(err);
+    await expectLater(stale, throwsA(same(err)));
+
+    final joined = cache.resolve('x', discover.call);
+    expect(discover.runs, hasLength(2), reason: 'joins the fresh one');
+    discover.runs[1].complete(2);
+    expect(await fresh, 2);
+    expect(await joined, 2);
+  });
+
   test('a discovery that ends after a remove is not cached', () async {
     final stale = cache.resolve('x', discover.call);
     cache.remove('x');

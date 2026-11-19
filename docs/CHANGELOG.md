@@ -53,6 +53,9 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   files at boot without splitting its memory, and stops holding them open
   afterwards, so more of its memory stays in one piece. The web config page
   and web UI updates over the mesh work as before.
+- **The app looks up a lamp's services once per connect.** Its first reads
+  after connecting each ran their own lookup, about a second of radio time
+  apiece; they now share one.
 
 ### Changed
 - **Yawn is built in.** The app and Web Config no longer offer Yawn as an
