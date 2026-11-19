@@ -15,7 +15,8 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   playing it as a 2 s sparkle. No change to the mesh messages or the app.
 - **The app shows where to send OSC.** The third palette source is now called
   OSC, with the Straylight role picker under it, and shows the wisp's address
-  and port 9000 with a copy button, or says the wisp has no address yet. Needs
+  and port 9000 under "Listening on" with a copy button, or asks you to
+  connect the wisp to a network. Needs
   the wisp on 1.3.8; an older wisp on Ethernet shows its Ethernet address.
 - **Gradient or Swatches for the wisp's palette, in the app.** Under Manual
   and OSC a Gradient | Swatches switch picks how lamps take the palette; the
