@@ -35,10 +35,10 @@ struct WispStatusMergeInput {
 // controllingShade only when true. "{}" when nothing is known. With
 // maxLen > 0 the lamp-side fields helloPaletteIdPrefix, helloLastSeenMs,
 // statusLastSeenMs and helloFlags are shed in that order until the document
-// fits. The app reads
-// only statusLastSeenMs, and treats a status missing it as the fresher one.
-// It can still exceed maxLen when the wisp's own payload does. Empty when the
-// heap could not hold the document; may throw std::bad_alloc.
+// fits. The app reads only statusLastSeenMs, and treats a status missing it
+// as the fresher one. It can still exceed maxLen when the wisp's own payload
+// does. Empty when the heap could not hold the document; may throw
+// std::bad_alloc.
 std::string mergeWispStatusJson(const WispStatusMergeInput& in, size_t maxLen);
 
 // Replace `cached` with the payload when its bytes differ, returning whether
