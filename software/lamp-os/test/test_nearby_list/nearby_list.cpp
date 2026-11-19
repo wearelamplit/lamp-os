@@ -135,13 +135,13 @@ void test_released_a_hold_after_the_last_read() {
   const size_t baseline = g_liveBytes;
   std::string out;
   f.list.read(out, g_now);
-  out = std::string();
+  std::string().swap(out);
   TEST_ASSERT_TRUE(g_liveBytes > baseline);
   at(kT0 + NearbyList::kHoldMs - 1);
   f.list.tick(f.roster, true, g_now);
   TEST_ASSERT_TRUE(f.list.built());
   f.list.read(out, g_now);
-  out = std::string();
+  std::string().swap(out);
   at(g_now + NearbyList::kHoldMs - 1);
   f.list.tick(f.roster, true, g_now);
   TEST_ASSERT_TRUE(f.list.built());
@@ -158,7 +158,7 @@ void test_ended_hold_frees_on_the_next_tick() {
   const size_t baseline = g_liveBytes;
   std::string out;
   f.list.read(out, g_now);
-  out = std::string();
+  std::string().swap(out);
   TEST_ASSERT_TRUE(g_liveBytes > baseline);
   f.list.endHold();
   at(g_now + 50);
@@ -182,7 +182,7 @@ void test_social_close_frees_and_a_replayed_close_keeps_the_hold() {
   std::string out;
   auto readList = [&] {
     f.list.read(out, g_now);
-    out = std::string();
+    std::string().swap(out);
   };
   auto freedNextTick = [&] {
     at(g_now + 50);
@@ -228,7 +228,7 @@ void test_disconnect_frees_and_reconnect_waits_for_a_read() {
   const size_t baseline = g_liveBytes;
   std::string out;
   f.list.read(out, g_now);
-  out = std::string();
+  std::string().swap(out);
   at(g_now + 100);
   f.list.tick(f.roster, false, g_now);
   TEST_ASSERT_FALSE(f.list.built());
@@ -323,7 +323,7 @@ void test_held_list_follows_the_roster() {
   const size_t baseline = g_liveBytes;
   std::string out;
   f.list.read(out, g_now);
-  out = std::string();
+  std::string().swap(out);
   const size_t at22 = g_liveBytes - baseline;
   touch(f.roster, 22, 25);
   at(g_now + 1000);
@@ -337,7 +337,7 @@ void test_held_list_follows_the_roster() {
   f.list.tick(f.roster, true, g_now);
   f.list.read(out, g_now);
   TEST_ASSERT_EQUAL_UINT(4, entries(out));
-  out = std::string();
+  std::string().swap(out);
   const size_t at4 = g_liveBytes - baseline;
   TEST_ASSERT_TRUE(at4 < at22 / 4);
 }
@@ -515,7 +515,7 @@ void test_refused_copy_gives_the_lock_back() {
   Fixture f;
   std::string out;
   f.list.read(out, g_now);
-  out = std::string();
+  std::string().swap(out);
   g_refuse = true;
   bool threw = false;
   try {
