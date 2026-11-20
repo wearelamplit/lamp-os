@@ -7,6 +7,7 @@ import 'package:lamp_app/core/ble/ble_client.dart';
 /// schedule encryption failures, and broadcasts writes to subscribers.
 class InMemoryBleClient extends BleClient {
   final Set<String> _connected = {};
+  final Map<String, LinkDropCause> _dropCauses = {};
   final Map<String, Uint8List> _values = {};
   final Map<String, StreamController<Uint8List>> _streams = {};
   final Map<String, StreamController<bool>> _connStreams = {};
@@ -73,15 +74,29 @@ class InMemoryBleClient extends BleClient {
 
   @override
   Future<void> connect(String deviceId) async {
+    _dropCauses.remove(deviceId);
     _connected.add(deviceId);
     _ensureConnStream(deviceId).add(true);
   }
 
   @override
   Future<void> disconnect(String deviceId) async {
+    _dropCauses.remove(deviceId);
     _connected.remove(deviceId);
     _ensureConnStream(deviceId).add(false);
   }
+
+  /// Drops the link as the lamp ending it would: [lastDropCause] reports
+  /// [LinkDropCause.lampHungUp] when the disconnected edge lands.
+  void simulateLampHangUp(String deviceId) {
+    _dropCauses[deviceId] = LinkDropCause.lampHungUp;
+    _connected.remove(deviceId);
+    _ensureConnStream(deviceId).add(false);
+  }
+
+  @override
+  LinkDropCause lastDropCause(String deviceId) =>
+      _dropCauses[deviceId] ?? LinkDropCause.other;
 
   @override
   bool isConnected(String deviceId) => _connected.contains(deviceId);

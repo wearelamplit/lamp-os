@@ -37,6 +37,10 @@ abstract class ControlState with _$ControlState {
     ExpressionCatalog? catalog,
     @Default(true) bool connected,
     @Default(0) int reconnectAttempt,
+    // True while the link is down because the lamp ended it (it pauses
+    // Bluetooth to send or take a mesh firmware update). Nothing reconnects
+    // until the lamp is heard broadcasting again.
+    @Default(false) bool lampHungUp,
     // Firmware-truth bit for the expression editor's Test button. True
     // while the lamp is playing back an expression triggered via
     // dispatchLampAction("test_expression"); the firmware flips it back

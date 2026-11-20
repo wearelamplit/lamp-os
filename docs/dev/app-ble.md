@@ -178,8 +178,9 @@ and when the app returns to the foreground. It reads `CHAR_SCHEMA_VERSION`, one
 byte. A lamp from before GATT schema v1 has no such characteristic; the client
 finds it absent from the services it already discovered, with no radio time,
 and the probe reads the `lamp` section instead (a page-protocol session: a CTRL
-write and at least two reads). A disconnect error from either read starts the
-reconnect ladder; any other error is ignored. The probe skips while the app
+write and at least two reads). A disconnect error from either read is handled
+as a dropped link (see "A lamp that hangs up" below); any other error is
+ignored. The probe skips while the app
 pushes the lamp firmware (`FirmwareState.isPushing`): the push's own writes fail
 on a dead link, and a probe would queue behind its chunks.
 
@@ -203,6 +204,30 @@ while the state is loading starts no try, and a try or a reload already in
 flight when a build starts stops at its next step for good (`_buildsStarted`),
 either resuming the ladder as above, so each link gets one link
 session (`_beginLinkSession`).
+
+**A lamp that hangs up.** A lamp ends a working link itself when a mesh OTA
+starts in either direction, and stops advertising until it is done (OTA radio
+pause, [networking.md](networking.md)). When the link-down edge carries that
+reason (`BleClient.lastDropCause` reads `LinkDropCause.lampHungUp`; on Android
+flutter_blue_plus reports HCI 0x13, remote user terminated; a connect begun
+since the drop clears it), the ladder does not start. `ControlState.lampHungUp`
+holds, the gate shows "<Name> is swapping new tricks with a friend 🎓"
+(`otaSwapMessage`), and `_awaitLampBack` keeps the nearby scan running until it
+hears the lamp's first broadcast since the drop that does not carry the
+OTA-distributing bit, then makes one `_tryReconnect`. A lamp that hangs up
+again on that try is waited out again; any other failure clears `lampHungUp`
+and climbs the ladder. A drop during a reboot-save reload or the app's own
+firmware push never counts as a hang-up. A lamp not back
+`ControlNotifier.lampBackWait` (3 min) after the drop, silent or still
+advertising the busy bit, ends the wait: `_giveUpOnLampBack` clears
+`lampHungUp` and climbs the ladder as for any other drop. A new hang-up
+restarts that 3 min, and "pick another lamp" leaves the wait at any time. A Web
+Config join ends the link through the same call (`deinitForWebapp`), with
+NimBLE's default 0x13 if the disconnect goes out before the lamp shuts
+Bluetooth down (unmeasured), so it may show the swap copy for up to the 3 min.
+Only Android drops are classified; on iOS every drop counts as other. Every
+drop logs `[ble_drop] id=<id> code=<code> reason=<description>` with the
+platform's reason.
 
 ## Scan hold during a connect
 

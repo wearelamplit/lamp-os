@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderSubscription;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/ble/ble_client.dart';
@@ -20,6 +21,8 @@ import '../../firmware/application/firmware_notifier.dart';
 import '../../firmware/application/quiet_after_push.dart';
 import '../../firmware/domain/firmware_state.dart';
 import '../../inventory/application/inventory_notifier.dart';
+import '../../nearby/application/nearby_lamps_notifier.dart';
+import '../../nearby/domain/nearby_lamp.dart';
 import '../data/catalog_store.dart';
 import 'advanced_session.dart';
 import '../../lamp_shell/domain/expression_catalog.dart';
@@ -109,6 +112,18 @@ class ControlNotifier extends _$ControlNotifier {
   /// (`_onConnectionChange`) without stacking ble.connect + auth + section
   /// reads on top of each other.
   bool _reconnectInFlight = false;
+
+  /// Watches the scan for the lamp's next broadcast while
+  /// [ControlState.lampHungUp] holds; keeps the scan running. Null otherwise.
+  ProviderSubscription<List<NearbyLamp>>? _lampBackWatch;
+
+  /// Ends a [_lampBackWatch] the lamp never answers.
+  Timer? _lampBackCap;
+
+  /// How long the app waits for a lamp that hung up before it falls back to
+  /// the reconnect ladder.
+  @visibleForTesting
+  static const lampBackWait = Duration(minutes: 3);
 
   /// Set while a save that reboots the lamp owns reconnecting to it, from
   /// the save until its reload restores the link or gives up. The reconnect
@@ -381,6 +396,7 @@ class ControlNotifier extends _$ControlNotifier {
   Future<ControlState> build(String deviceId) async {
     _deviceId = deviceId;
     _buildsStarted++;
+    _lampBackWatch = null;
     // A rebuild keeps this instance and its held flags; the lamp clears them
     // on the new connection. A quiet report carries over so the new link
     // holds them back until the lamp listens.
@@ -559,6 +575,7 @@ class ControlNotifier extends _$ControlNotifier {
       _connSub?.cancel();
       _reconnectTimer?.cancel();
       _probeTimer?.cancel();
+      _lampBackCap?.cancel();
     });
 
     ref.onDispose(() => _stateNotifySub?.cancel());
@@ -2075,8 +2092,61 @@ class ControlNotifier extends _$ControlNotifier {
       _recordSeenNow();
       state = AsyncData(cur.copyWith(connected: false));
       ref.read(advancedSessionProvider(_deviceId).notifier).disable();
-      _scheduleReconnect();
+      if (_lampEndedLink()) {
+        _awaitLampBack();
+      } else {
+        _scheduleReconnect();
+      }
     }
+  }
+
+  /// True when the link just went down because the lamp ended it, outside a
+  /// reboot-save or firmware push this app started, which own the link.
+  bool _lampEndedLink() =>
+      !_rebootReloadOwnsLink &&
+      !ref.read(firmwareNotifierProvider(_deviceId)).isPushing &&
+      _ble.lastDropCause(_deviceId) == LinkDropCause.lampHungUp;
+
+  /// The lamp pauses Bluetooth while it sends or takes a mesh update and
+  /// advertises again once it is done, so a connect before then cannot land.
+  /// Reconnects on the first broadcast heard after now that does not carry
+  /// the busy bit.
+  void _awaitLampBack() {
+    _reconnectTimer?.cancel();
+    _stopAwaitingLamp();
+    final cur = state.value;
+    if (cur != null) {
+      state = AsyncData(cur.copyWith(lampHungUp: true, reconnectAttempt: 0));
+    }
+    final since = _now().millisecondsSinceEpoch;
+    _lampBackWatch = ref.listen<List<NearbyLamp>>(
+      nearbyLampsNotifierProvider,
+      (_, roster) {
+        final back = roster.any((l) =>
+            l.id == _deviceId &&
+            l.lastSeenEpochMs >= since &&
+            !l.otaDistributing);
+        if (!back) return;
+        _stopAwaitingLamp();
+        unawaited(_tryReconnect());
+      },
+    );
+    _lampBackCap = Timer(lampBackWait, _giveUpOnLampBack);
+  }
+
+  void _giveUpOnLampBack() {
+    _stopAwaitingLamp();
+    final cur = state.value;
+    if (cur == null) return;
+    state = AsyncData(cur.copyWith(lampHungUp: false));
+    _scheduleReconnect();
+  }
+
+  void _stopAwaitingLamp() {
+    _lampBackCap?.cancel();
+    _lampBackCap = null;
+    _lampBackWatch?.close();
+    _lampBackWatch = null;
   }
 
   /// Fires a no-op GATT read against the lamp to verify the link is
@@ -2225,6 +2295,7 @@ class ControlNotifier extends _$ControlNotifier {
       await _mirrorIdentityToInventory(fresh);
       if (standDown()) return;
       _reconnectTimer?.cancel();
+      _stopAwaitingLamp();
       _reassertHomeModeFocus = false;
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
       _beginLinkSession(ble);
@@ -2245,6 +2316,15 @@ class ControlNotifier extends _$ControlNotifier {
       // hadn't yet run, that next call would incorrectly skip itself
       // and the ladder would stall on its current attempt count.
       _reconnectInFlight = false;
+      // A lamp that hangs up again on the way back in is still busy.
+      if (state.value?.lampHungUp == true && _lampEndedLink()) {
+        _awaitLampBack();
+        return;
+      }
+      final cur = state.value;
+      if (cur != null && cur.lampHungUp) {
+        state = AsyncData(cur.copyWith(lampHungUp: false));
+      }
       _scheduleReconnect();
     } finally {
       // Defense-in-depth: the catch branches above clear the flag
@@ -2267,6 +2347,7 @@ class ControlNotifier extends _$ControlNotifier {
   void _resumeLadderAfterStandDown() {
     if (!ref.mounted) return;
     if (_reconnectTimer?.isActive ?? false) return;
+    if (_lampBackWatch != null) return;
     final cur = state;
     if (cur is AsyncData<ControlState> &&
         !cur.isLoading &&

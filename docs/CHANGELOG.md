@@ -18,6 +18,20 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   for minutes with the sending lamp unreachable from the app. The receiving
   lamp's floor moves from -92 to -90 too. Messages between lamps are
   unchanged, so older lamps work with these.
+- **A lamp swapping an update with another lamp says so, then comes back by
+  itself.** When a lamp hangs up on the phone to send or take a firmware update
+  over the mesh, the app shows "<Name> is swapping new tricks with a friend 🎓"
+  instead of "Reaching out…", makes no connect attempts while it waits, and
+  reconnects on its own as soon as it hears the lamp again. A lamp not back
+  after 3 minutes gets the usual "Reaching out…" retries. Other drops (out of
+  range, a reboot) reconnect as before. On an iPhone every drop behaves as
+  before.
+- **Lamp Network shows the mesh signal.** Each lamp's row shows how strongly
+  the connected lamp hears it over the mesh ("Wi-Fi -58 dBm"), falls back to
+  its Bluetooth reading ("BT -66 dBm") for a lamp with no mesh reading, and
+  says "no reading" when there is neither, instead of "-127 dBm" for lamps
+  heard only over the mesh. The Wi-Fi reading needs the connected lamp on
+  firmware that sends it.
 
 ### Added
 - **The nearby list carries each lamp's direct Wi-Fi reading.** The app's
