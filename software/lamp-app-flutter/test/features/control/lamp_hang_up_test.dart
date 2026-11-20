@@ -1,8 +1,9 @@
-// A lamp that ends a working link (it pauses Bluetooth to send firmware) is
+// A lamp that ends a working link (it pauses Bluetooth for a mesh update) is
 // waited out: the app shows it busy and reconnects on its next broadcast,
 // with no connect attempts in between. Any other drop runs the reconnect
 // ladder.
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
@@ -31,17 +32,25 @@ import 'package:lamp_app/features/nearby/application/nearby_lamps_notifier.dart'
 const _devId = 'lamp-busy';
 const _busyCopy = 'Jacko is swapping new tricks with a friend 🎓';
 
-/// Counts connects; can fail them, or have the lamp hang up right after one.
-/// A failed connect reports a disconnect of its own, as flutter_blue_plus
-/// does for a cancelled or refused connect.
+/// Counts connects; can fail them, hold one until [holdConnect] completes and
+/// then fail it, or have the lamp hang up right after one. A failed connect
+/// reports a disconnect of its own, as flutter_blue_plus does for a cancelled
+/// or refused connect.
 class _Ble extends InMemoryBleClient {
   int connects = 0;
   int failConnects = 0;
   bool hangUpOnConnect = false;
+  Completer<void>? holdConnect;
 
   @override
   Future<void> connect(String deviceId) async {
     connects++;
+    final hold = holdConnect;
+    if (hold != null) {
+      holdConnect = null;
+      await hold.future;
+      throw StateError('held connect failed');
+    }
     if (failConnects > 0) {
       failConnects--;
       await disconnect(deviceId);
@@ -282,6 +291,58 @@ void main() {
       expect(rig.ble.connects, connectsAfterReload,
           reason: 'nothing was waiting on the lamp to broadcast');
       nearby.close();
+      rig.close();
+    });
+  });
+
+  test('a stale ladder try that stands down leaves the wait alone', () {
+    fakeAsync((async) {
+      final rig = _Rig(async);
+      final hold = rig.ble.holdConnect = Completer<void>();
+      rig.ble.disconnect(_devId);
+      rig.elapse(const Duration(seconds: 1));
+
+      rig.c.invalidate(controlNotifierProvider(_devId));
+      rig.elapse(const Duration(seconds: 2));
+      expect(rig.state.connected, isTrue, reason: 'the rebuild took the link');
+
+      rig.ble.simulateLampHangUp(_devId);
+      rig.elapse(const Duration(seconds: 1));
+      expect(rig.state.lampHungUp, isTrue);
+      final connectsBefore = rig.ble.connects;
+
+      hold.complete();
+      rig.elapse(const Duration(minutes: 2));
+      expect(rig.ble.connects, connectsBefore,
+          reason: 'the stood-down try does not restart the ladder');
+      expect(rig.state.lampHungUp, isTrue);
+      rig.close();
+    });
+  });
+
+  test('a rebuild during the wait leaves no wait to block the ladder', () {
+    fakeAsync((async) {
+      final rig = _Rig(async);
+      rig.ble.simulateLampHangUp(_devId);
+      rig.elapse(const Duration(seconds: 1));
+      rig.c.invalidate(controlNotifierProvider(_devId));
+      rig.elapse(const Duration(seconds: 2));
+      expect(rig.state.connected, isTrue);
+
+      final hold = rig.ble.holdConnect = Completer<void>();
+      rig.ble.disconnect(_devId);
+      rig.elapse(const Duration(seconds: 1));
+      rig.c.invalidate(controlNotifierProvider(_devId));
+      rig.elapse(const Duration(seconds: 2));
+      expect(rig.state.connected, isTrue);
+
+      // The ladder step this drop arms finds the held try still in flight.
+      rig.ble.disconnect(_devId);
+      rig.elapse(const Duration(seconds: 1));
+      hold.complete();
+      rig.elapse(const Duration(seconds: 5));
+      expect(rig.state.connected, isTrue,
+          reason: 'the stood-down try resumed the ladder');
       rig.close();
     });
   });
