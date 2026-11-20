@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 import 'ble_client.dart';
@@ -23,6 +23,17 @@ LinkDropCause linkDropCauseOf(fbp.ErrorPlatform platform, int? code) =>
 /// resolves the device + service + characteristic from the plugin's live
 /// registry, errors out with a friendly exception type when it can't.
 class FbpBleClient extends BleClient {
+  FbpBleClient({@visibleForTesting this.errorPlatform});
+
+  /// Stands in for the platform flutter_blue_plus reads a drop's reason from,
+  /// which host tests cannot change.
+  final fbp.ErrorPlatform? errorPlatform;
+
+  /// Devices with a connect begun since their last disconnected event. fbp
+  /// keeps the previous drop's reason through a connect Android refuses
+  /// without an event (Bluetooth off, a missing permission).
+  final _connectSinceDrop = <String>{};
+
   /// Cache of discovered GATT services per device id, filled by the first
   /// `read`/`write`/`subscribe` on a link. Without this every BLE write would
   /// re-run a full service discovery on the radio, which is what tipped the
@@ -42,6 +53,7 @@ class FbpBleClient extends BleClient {
         .listen((e) {
       if (e.connectionState == fbp.BluetoothConnectionState.disconnected) {
         _serviceCache.remove(e.device.remoteId.str);
+        _connectSinceDrop.remove(e.device.remoteId.str);
         // fbp records the reason in its own listener on the same stream,
         // which may run after this one; a microtask runs after every
         // listener has seen the event.
@@ -59,6 +71,7 @@ class FbpBleClient extends BleClient {
     // the GATT database). Cleared before the link comes up, so a caller woken
     // by the connected edge and the caller after connect share one discovery.
     _serviceCache.remove(deviceId);
+    _connectSinceDrop.add(deviceId);
     await scanPause.during(() async {
       if (fbp.FlutterBluePlus.isScanningNow) {
         await fbp.FlutterBluePlus.stopScan();
@@ -109,8 +122,10 @@ class FbpBleClient extends BleClient {
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
     final reason = device.disconnectReason;
-    if (!device.isDisconnected || reason == null) return LinkDropCause.other;
-    return linkDropCauseOf(reason.platform, reason.code);
+    if (_connectSinceDrop.contains(deviceId) || reason == null) {
+      return LinkDropCause.other;
+    }
+    return linkDropCauseOf(errorPlatform ?? reason.platform, reason.code);
   }
 
   @override
