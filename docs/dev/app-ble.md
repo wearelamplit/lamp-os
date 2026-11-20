@@ -217,15 +217,17 @@ hears the lamp's first broadcast since the drop that does not carry the
 OTA-distributing bit, then makes one `_tryReconnect`. A lamp that hangs up
 again on that try is waited out again; any other failure clears `lampHungUp`
 and climbs the ladder. A drop during a reboot-save reload or the app's own
-firmware push never counts as a hang-up. A lamp still dark
-`ControlNotifier.lampBackWait` (3 min) after the drop ends the wait:
-`_giveUpOnLampBack` clears `lampHungUp` and climbs the ladder as for any other
-drop. A new hang-up restarts that 3 min, and "pick another lamp" leaves the
-wait at any time. A Web Config join also hangs up with 0x13 (`deinitForWebapp`
-ends the link through the same call), so it may show the swap copy for up to
-the 3 min. Only Android drops are classified; on iOS every drop counts as
-other. Every drop logs `[ble_drop] id=<id> code=<code> reason=<description>`
-with the platform's reason.
+firmware push never counts as a hang-up. A lamp not back
+`ControlNotifier.lampBackWait` (3 min) after the drop, silent or still
+advertising the busy bit, ends the wait: `_giveUpOnLampBack` clears
+`lampHungUp` and climbs the ladder as for any other drop. A new hang-up
+restarts that 3 min, and "pick another lamp" leaves the wait at any time. A Web
+Config join ends the link through the same call (`deinitForWebapp`), with
+NimBLE's default 0x13 if the disconnect goes out before the lamp shuts
+Bluetooth down (unmeasured), so it may show the swap copy for up to the 3 min.
+Only Android drops are classified; on iOS every drop counts as other. Every
+drop logs `[ble_drop] id=<id> code=<code> reason=<description>` with the
+platform's reason.
 
 ## Scan hold during a connect
 

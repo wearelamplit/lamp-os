@@ -12,7 +12,7 @@ Highlights grouped Added / Fixed / Changed, not every commit.
   itself.** When a lamp hangs up on the phone to send or take a firmware update
   over the mesh, the app shows "<Name> is swapping new tricks with a friend 🎓"
   instead of "Reaching out…", makes no connect attempts while it waits, and
-  reconnects on its own as soon as it hears the lamp again. A lamp still silent
+  reconnects on its own as soon as it hears the lamp again. A lamp not back
   after 3 minutes gets the usual "Reaching out…" retries. Other drops (out of
   range, a reboot) reconnect as before. On an iPhone every drop behaves as
   before.

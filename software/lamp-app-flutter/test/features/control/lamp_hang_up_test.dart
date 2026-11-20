@@ -32,6 +32,9 @@ import 'package:lamp_app/features/nearby/application/nearby_lamps_notifier.dart'
 const _devId = 'lamp-busy';
 const _busyCopy = 'Jacko is swapping new tricks with a friend 🎓';
 
+/// The owner's ruled length of the hang-up wait.
+const _ruledWait = Duration(minutes: 3);
+
 /// Counts connects; can fail them, hold one until [holdConnect] completes and
 /// then fail it, or have the lamp hang up right after one. A failed connect
 /// reports a disconnect of its own, as flutter_blue_plus does for a cancelled
@@ -303,7 +306,7 @@ void main() {
       rig.ble.simulateLampHangUp(_devId);
       async.flushMicrotasks();
 
-      rig.elapse(ControlNotifier.lampBackWait - const Duration(seconds: 1));
+      rig.elapse(_ruledWait - const Duration(seconds: 1));
       expect(rig.state.lampHungUp, isTrue);
       expect(rig.ble.connects, connectsBefore);
 
@@ -447,6 +450,7 @@ void main() {
       bleScannerProvider.overrideWithValue(FakeBleScanner()),
       appRouterProvider.overrideWithValue(router),
     ]);
+    addTearDown(container.dispose);
     await container.read(inventoryNotifierProvider.future);
     await container.read(inventoryNotifierProvider.notifier).add(
         const InventoryLamp(id: _devId, name: 'jacko', controlPassword: ''));
