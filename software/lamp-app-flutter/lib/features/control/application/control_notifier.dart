@@ -117,6 +117,14 @@ class ControlNotifier extends _$ControlNotifier {
   /// [ControlState.lampHungUp] holds; keeps the scan running. Null otherwise.
   ProviderSubscription<List<NearbyLamp>>? _lampBackWatch;
 
+  /// Ends a [_lampBackWatch] the lamp never answers.
+  Timer? _lampBackCap;
+
+  /// How long the app waits for a lamp that hung up before it falls back to
+  /// the reconnect ladder.
+  @visibleForTesting
+  static const lampBackWait = Duration(minutes: 3);
+
   /// Set while a save that reboots the lamp owns reconnecting to it, from
   /// the save until its reload restores the link or gives up. The reconnect
   /// ladder starts no try meanwhile, so the restored link is never
@@ -567,6 +575,7 @@ class ControlNotifier extends _$ControlNotifier {
       _connSub?.cancel();
       _reconnectTimer?.cancel();
       _probeTimer?.cancel();
+      _lampBackCap?.cancel();
     });
 
     ref.onDispose(() => _stateNotifySub?.cancel());
@@ -2104,7 +2113,7 @@ class ControlNotifier extends _$ControlNotifier {
   /// the busy bit.
   void _awaitLampBack() {
     _reconnectTimer?.cancel();
-    _lampBackWatch?.close();
+    _stopAwaitingLamp();
     final cur = state.value;
     if (cur != null) {
       state = AsyncData(cur.copyWith(lampHungUp: true, reconnectAttempt: 0));
@@ -2122,9 +2131,20 @@ class ControlNotifier extends _$ControlNotifier {
         unawaited(_tryReconnect());
       },
     );
+    _lampBackCap = Timer(lampBackWait, _giveUpOnLampBack);
+  }
+
+  void _giveUpOnLampBack() {
+    _stopAwaitingLamp();
+    final cur = state.value;
+    if (cur == null) return;
+    state = AsyncData(cur.copyWith(lampHungUp: false));
+    _scheduleReconnect();
   }
 
   void _stopAwaitingLamp() {
+    _lampBackCap?.cancel();
+    _lampBackCap = null;
     _lampBackWatch?.close();
     _lampBackWatch = null;
   }

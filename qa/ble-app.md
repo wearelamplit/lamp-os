@@ -364,7 +364,10 @@ reason, REMOTE_USER_TERMINATED_CONNECTION; this pass confirms it) and no
 `ble_timing connect` line until the lamp's serial prints `resumed adv + scan
 after OTA`; within a few seconds of that the app reconnects on its own. Then
 pull the open lamp's power instead: the screen shows the rotating "Reaching
-out" lines and `ble_timing connect` attempts follow, as before.
+out" lines and `ble_timing connect` attempts follow, as before. Last, start an
+update again and cut the open lamp's power once its screen shows the swap line:
+about 3 minutes after the drop the screen goes to the rotating "Reaching out"
+lines and `ble_timing connect` attempts start.
 
 P23 — **Lamp Network signal readings.** Connect to a lamp on firmware that
 sends the mesh reading and open Lamp Network. Every Mesh row reads
@@ -418,8 +421,9 @@ BT reading where the lamp has one and "no reading" otherwise.
   wisp's serial, lamps follow the picked slot, and a pick the wisp never
   takes goes back with the error.
 - P22: a lamp that hangs up to send an update reads busy with no connect
-  attempt until it advertises again, then reconnects with no tap; a power
-  pull still climbs the reconnect ladder.
+  attempt until it advertises again, then reconnects with no tap; a lamp still
+  dark 3 minutes after the drop goes to "Reaching out"; a power pull still
+  climbs the reconnect ladder.
 - P23: every row's reading names its radio, and none reads -127.
 
 ## Not covered here

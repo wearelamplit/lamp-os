@@ -295,6 +295,88 @@ void main() {
     });
   });
 
+  test('a lamp still dark after the wait falls back to the reconnect ladder',
+      () {
+    fakeAsync((async) {
+      final rig = _Rig(async);
+      final connectsBefore = rig.ble.connects;
+      rig.ble.simulateLampHangUp(_devId);
+      async.flushMicrotasks();
+
+      rig.elapse(ControlNotifier.lampBackWait - const Duration(seconds: 1));
+      expect(rig.state.lampHungUp, isTrue);
+      expect(rig.ble.connects, connectsBefore);
+
+      rig.elapse(const Duration(milliseconds: 1100));
+      expect(rig.state.lampHungUp, isFalse,
+          reason: 'the busy copy is gone before the first retry');
+      expect(rig.ble.connects, connectsBefore);
+
+      rig.elapse(const Duration(seconds: 1));
+      expect(rig.ble.connects, greaterThan(connectsBefore),
+          reason: 'the ladder retries');
+      expect(rig.state.connected, isTrue);
+      rig.close();
+    });
+  });
+
+  test('a fresh hang-up restarts the wait', () {
+    fakeAsync((async) {
+      final rig = _Rig(async);
+      rig.ble.simulateLampHangUp(_devId);
+      async.flushMicrotasks();
+      rig.elapse(const Duration(minutes: 2));
+
+      rig.ble.hangUpOnConnect = true;
+      rig.scanner.emit(_ad(_devId));
+      async.flushMicrotasks();
+      expect(rig.state.lampHungUp, isTrue);
+      final connectsAfter = rig.ble.connects;
+
+      rig.elapse(ControlNotifier.lampBackWait - const Duration(seconds: 1));
+      expect(rig.state.lampHungUp, isTrue,
+          reason: 'the wait counts from the second hang-up');
+      expect(rig.ble.connects, connectsAfter);
+
+      rig.elapse(const Duration(seconds: 2));
+      expect(rig.state.lampHungUp, isFalse);
+      rig.close();
+    });
+  });
+
+  test('the wait never ends into the ladder after the lamp is back', () {
+    fakeAsync((async) {
+      final rig = _Rig(async);
+      rig.ble.simulateLampHangUp(_devId);
+      async.flushMicrotasks();
+      rig.elapse(const Duration(minutes: 1));
+      rig.scanner.emit(_ad(_devId));
+      rig.elapse(const Duration(seconds: 2));
+      expect(rig.state.connected, isTrue);
+      final connectsAfter = rig.ble.connects;
+
+      rig.elapse(ControlNotifier.lampBackWait);
+      expect(rig.ble.connects, connectsAfter);
+      expect(rig.state.connected, isTrue);
+      rig.close();
+    });
+  });
+
+  test('leaving the lamp during the wait ends it', () {
+    fakeAsync((async) {
+      final rig = _Rig(async);
+      rig.ble.simulateLampHangUp(_devId);
+      async.flushMicrotasks();
+      final connectsBefore = rig.ble.connects;
+
+      rig.sub.close();
+      rig.elapse(ControlNotifier.lampBackWait * 2);
+      expect(rig.ble.connects, connectsBefore);
+      rig.c.dispose();
+      async.flushTimers();
+    });
+  });
+
   test('a stale ladder try that stands down leaves the wait alone', () {
     fakeAsync((async) {
       final rig = _Rig(async);
@@ -365,7 +447,6 @@ void main() {
       bleScannerProvider.overrideWithValue(FakeBleScanner()),
       appRouterProvider.overrideWithValue(router),
     ]);
-    addTearDown(container.dispose);
     await container.read(inventoryNotifierProvider.future);
     await container.read(inventoryNotifierProvider.notifier).add(
         const InventoryLamp(id: _devId, name: 'jacko', controlPassword: ''));
@@ -390,5 +471,6 @@ void main() {
     expect(find.text('← pick another lamp'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
+    container.dispose();
   });
 }
