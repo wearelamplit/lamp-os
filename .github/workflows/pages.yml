@@ -36,6 +36,23 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # The flasher serves the Latest release's firmware, so its label must
+      # name that release. release.yml redeploys this site after each tag.
+      - name: Stamp stable manifest version from the Latest release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          version=${tag#v}
+          if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Latest release tag '$tag' is not vX.Y.Z"
+            exit 1
+          fi
+          manifest=docs/update-site/manifest_format.json
+          jq --arg v "$version" '.version = $v' "$manifest" > "$RUNNER_TEMP/manifest_format.json"
+          mv "$RUNNER_TEMP/manifest_format.json" "$manifest"
+          echo "manifest_format.json version: $version"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
