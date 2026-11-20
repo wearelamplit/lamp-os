@@ -113,8 +113,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// reads on top of each other.
   bool _reconnectInFlight = false;
 
-  /// Watches the scan for the lamp's next broadcast while [ControlState.
-  /// lampHungUp] holds; keeps the scan running. Null otherwise.
+  /// Watches the scan for the lamp's next broadcast while
+  /// [ControlState.lampHungUp] holds; keeps the scan running. Null otherwise.
   ProviderSubscription<List<NearbyLamp>>? _lampBackWatch;
 
   /// Set while a save that reboots the lamp owns reconnecting to it, from
@@ -2098,8 +2098,8 @@ class ControlNotifier extends _$ControlNotifier {
       !ref.read(firmwareNotifierProvider(_deviceId)).isPushing &&
       _ble.lastDropCause(_deviceId) == LinkDropCause.lampHungUp;
 
-  /// The lamp pauses Bluetooth while it sends firmware and advertises again
-  /// once it is done, so a connect before then cannot land. Reconnects on
+  /// The lamp pauses Bluetooth while it sends or takes a mesh update and
+  /// advertises again once it is done, so a connect before then cannot land. Reconnects on
   /// the first broadcast heard after now that does not carry the busy bit.
   void _awaitLampBack() {
     _reconnectTimer?.cancel();

@@ -243,7 +243,7 @@ return $default(_that.name,_that.lampId,_that.rssi,_that.mrssi,_that.baseRgbw,_t
 @JsonSerializable()
 
 class _LampNearbyPeer implements LampNearbyPeer {
-  const _LampNearbyPeer({required this.name, this.lampId = '', this.rssi = -127, this.mrssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson) final  List<int> baseRgbw = const <int>[0, 0, 0, 0], @JsonKey(name: 'shade', fromJson: _rgbwFromJson) final  List<int> shadeRgbw = const <int>[0, 0, 0, 0], this.viaBle = false, this.viaEspNow = false, this.lastSeenMs = 0, this.fwVersion = 0, this.fwChannel = '', this.otaState = 0, this.otaSendingTo, this.near = false}): _baseRgbw = baseRgbw,_shadeRgbw = shadeRgbw;
+  const _LampNearbyPeer({required this.name, this.lampId = '', this.rssi = kNoRssi, this.mrssi, @JsonKey(name: 'base', fromJson: _rgbwFromJson) final  List<int> baseRgbw = const <int>[0, 0, 0, 0], @JsonKey(name: 'shade', fromJson: _rgbwFromJson) final  List<int> shadeRgbw = const <int>[0, 0, 0, 0], this.viaBle = false, this.viaEspNow = false, this.lastSeenMs = 0, this.fwVersion = 0, this.fwChannel = '', this.otaState = 0, this.otaSendingTo, this.near = false}): _baseRgbw = baseRgbw,_shadeRgbw = shadeRgbw;
   factory _LampNearbyPeer.fromJson(Map<String, dynamic> json) => _$LampNearbyPeerFromJson(json);
 
 @override final  String name;

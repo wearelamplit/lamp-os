@@ -3,6 +3,9 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'lamp_nearby_peer.freezed.dart';
 part 'lamp_nearby_peer.g.dart';
 
+/// The lamp's "no BLE reading" RSSI sentinel.
+const kNoRssi = -127;
+
 /// One peer the connected lamp can hear. Decoded from the lamp's
 /// `nearby` page-protocol section JSON, NOT from the phone's direct
 /// BLE scan. This is the LAMP'S vantage on its social context, used
@@ -24,7 +27,7 @@ abstract class LampNearbyPeer with _$LampNearbyPeer {
     /// Raw BLE-scan RSSI in dBm as observed by the connected lamp.
     /// `-127` means "no reading yet" (older firmware that doesn't emit
     /// RSSI, or a fresh peer not yet seen via BLE).
-    @Default(-127) int rssi,
+    @Default(kNoRssi) int rssi,
     /// The connected lamp's reading of this peer's mesh (Wi-Fi radio)
     /// traffic in dBm. Null when the lamp has none, and always on firmware
     /// that predates it.

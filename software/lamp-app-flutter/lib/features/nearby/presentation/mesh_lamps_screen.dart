@@ -357,12 +357,9 @@ typedef OtaPill = ({String label, bool isSend});
 String signalLabel(LampNearbyPeer peer) {
   final mesh = peer.mrssi;
   if (mesh != null) return 'Wi-Fi $mesh dBm';
-  if (peer.rssi != _noRssi) return 'BT ${peer.rssi} dBm';
+  if (peer.rssi != kNoRssi) return 'BT ${peer.rssi} dBm';
   return 'no reading';
 }
-
-/// The lamp's "no BLE reading" sentinel, the [LampNearbyPeer.rssi] default.
-const _noRssi = -127;
 
 /// Firmware line for a peer row. A reported version renders verbatim (`fw
 /// 1.2.3`, plus ` · channel` when present). `0.0.1` is the deliberate
