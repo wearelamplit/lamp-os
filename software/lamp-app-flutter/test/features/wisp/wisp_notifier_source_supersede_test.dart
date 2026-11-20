@@ -9,6 +9,19 @@ import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
 import 'package:lamp_app/features/wisp/domain/wisp_source_mode.dart';
 
+/// A lamp that serves the wisp sections, holding [status] and the wisp's
+/// default settings.
+void _seedWispSections(InMemoryBleClient ble, String lampId, String status) {
+  ble.seedSection(lampId, 'wispstatus', Uint8List.fromList(utf8.encode(status)));
+  ble.seedSection(
+    lampId,
+    'wispconfig',
+    Uint8List.fromList(utf8.encode('{"char":"wispConfig","ledType":"GRB",'
+        '"px":30,"brightness":100,"driftIntervalMs":120000,'
+        '"driftFadePct":50,"shuffleSeed":0,"opSeq":0}')),
+  );
+}
+
 /// A superseded setSource must stop resending: an older mode's late resend
 /// landing after a newer setSource is what flips the wisp back (Off then
 /// quick Manual reverts to Off seconds later).
@@ -43,8 +56,9 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       Uint8List.fromList(
-          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}')),
+          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}')),
     );
+    _seedWispSections(ble, lampId, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}');
     final c = makeContainer(ble);
     // Keep the provider alive across the confirm-timeout wait; a bare read
     // lets it autodispose and rebuild to a null-value loading state.
@@ -64,7 +78,7 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       Uint8List.fromList(
-          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual"}')),
     );
 
     await manualFut;
@@ -88,8 +102,9 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       Uint8List.fromList(
-          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"off"}')),
+          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off"}')),
     );
+    _seedWispSections(ble, lampId, '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"off"}');
     final c = makeContainer(ble);
     c.listen(wispNotifierProvider(lampId), (_, _) {});
     await c.read(wispNotifierProvider(lampId).future);
@@ -110,7 +125,7 @@ void main() {
       BleUuids.controlService,
       BleUuids.wispStatus,
       Uint8List.fromList(
-          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}')),
+          utf8.encode('{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual"}')),
     );
 
     await expectLater(firstFut, completes);

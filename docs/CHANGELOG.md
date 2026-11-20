@@ -5,6 +5,308 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
+## 1.3.9
+
+### Fixed
+- **A lamp no longer starts an update over a link too weak to finish it.** A
+  lamp now offers firmware or a web UI update to a neighbour only after its
+  direct Wi-Fi reading of that neighbour has held -90 dBm or better for 45 s
+  (at least two readings); one reading below -90 restarts the wait, and a
+  neighbour heard only through other lamps is never offered. A reading expires
+  about 75 s after the neighbour's last direct hello, so an old number can't
+  start a send. Before this, one lucky reading could start a send that looped
+  for minutes with the sending lamp unreachable from the app. The receiving
+  lamp's floor moves from -92 to -90 too. Messages between lamps are
+  unchanged, so older lamps work with these.
+- **A lamp swapping an update with another lamp says so, then comes back by
+  itself.** When a lamp hangs up on the phone to send or take a firmware update
+  over the mesh, the app shows "<Name> is swapping new tricks with a friend 🎓"
+  instead of "Reaching out…", makes no connect attempts while it waits, and
+  reconnects on its own as soon as it hears the lamp again. A lamp not back
+  after 3 minutes gets the usual "Reaching out…" retries. Other drops (out of
+  range, a reboot) reconnect as before. On an iPhone every drop behaves as
+  before.
+- **Lamp Network shows the mesh signal.** Each lamp's row shows how strongly
+  the connected lamp hears it over the mesh ("Wi-Fi -58 dBm"), falls back to
+  its Bluetooth reading ("BT -66 dBm") for a lamp with no mesh reading, and
+  says "no reading" when there is neither, instead of "-127 dBm" for lamps
+  heard only over the mesh. The Wi-Fi reading needs the connected lamp on
+  firmware that sends it.
+
+### Added
+- **The nearby list carries each lamp's direct Wi-Fi reading.** The app's
+  nearby section gains `mrssi`, the lamp's latest direct Wi-Fi signal in dBm,
+  left out when there's no fresh one. The Bluetooth layout is unchanged.
+- **The debug tap marks each hello as `direct` or `relayed`.** A relayed
+  hello's signal is the relaying lamp's link, not the sender's.
+
+## 1.3.8
+
+### Added
+- **The app logs how long each part of a lamp connect takes.** Scan to first
+  sighting, each connect attempt, service discovery and the first read, one
+  `ble_timing` line each in the Android log
+  (`adb logcat -s flutter | grep ble_timing`). Failed connect, discover and
+  first-read lines end with `reason=<Type>:<code>:<description>` (the Android
+  status such as 133, or flutter_blue_plus's own code, when given), so a failed
+  attempt can be told apart from a timeout or a disconnect race. Connect
+  behaviour is unchanged.
+- **The app shows where to send OSC.** The wisp's settings now carry its
+  Ethernet or WiFi address (never its own hotspot's). The app's third palette
+  source is now called OSC, with the Straylight role picker under it, and shows
+  that address and port 9000 under "Listening on" with a copy button, or asks
+  you to connect the wisp to a network. Needs the wisp reflashed; an older wisp
+  on Ethernet shows its Ethernet address.
+- **Swatches on the wisp, picked in the app.** Besides today's gradient, the
+  wisp can hand each lamp two of the palette's own colours exactly, and a
+  colour listed more than once is on the base of more lamps. Under Manual and
+  OSC a Gradient | Swatches switch picks it; the painted-lamps preview and the
+  palette bar follow, the bar drawing solid blocks in Swatches as the wisp's
+  ring does. A change the wisp never confirms goes back with "Couldn't reach
+  the wisp." The switch shows only for a wisp on 1.3.8, so the wisp needs
+  reflashing; `paint:swatches on|off` on the wisp's console sets it too.
+- **Mushrooms tint nearby lamps.** When a mushroom spores near a lamp, the
+  lamp sparkles in the strain's colour for 6 s, then the colour blooms over
+  its base, holds 20 s and fades back over up to 100 s. A lamp mid-tint
+  still sparkles at the next spore but doesn't tint again. Older lamps keep
+  playing it as a 2 s sparkle. No change to the mesh messages or the app.
+- **The wisp follows a Limbic Maestro.** Under the OSC source the wisp can
+  read a Maestro's live palette slot (1 to 10) instead of Straylight, in
+  either colour format the Maestro sends (hex, or a float layout with white
+  driving the lamps' white LEDs and amber mixed in as orange). Set it with
+  `osc:mode maestro` and `osc:slot <n>` on the wisp's console, then point the
+  Maestro at the wisp's address, port 9000. Lamps keep the last Maestro
+  palette when it goes quiet. Needs the wisp reflashed.
+- **Maestro under the OSC source, in the app.** A Straylight | Maestro switch
+  picks the sender; Maestro shows a palette slot picker (1 to 10) and says
+  what to set on the Maestro ("send palette slot 3 to 192.168.1.42, port
+  9000"), with the send-to address under both. A change shows at once and
+  goes back with "Couldn't reach the wisp." if the wisp never confirms it.
+  Needs the wisp reflashed with the Maestro firmware above; an older wisp
+  shows the Straylight role picker and asks to be updated.
+- **The wisp follows any OSC sender on a typed address.** A third OSC
+  sub-mode, Custom, reads one address you type (up to 15 characters,
+  starting with `/`), matched exactly, and works out the colour format from
+  the message itself. Set it with `osc:addr </path>` and `osc:mode custom` on
+  the wisp's console; the wisp reports the address in its settings. Needs the
+  wisp reflashed.
+- **Custom under the OSC source, in the app.** The OSC sender switch reads
+  Straylight | Maestro | Custom. Custom shows an address field: type an
+  address (up to 15 characters, starting with `/`) or tap a preset, and the
+  wisp switches to it in one step. Save the wisp's address as a preset to
+  keep it on this phone for every wisp. With no address yet, Custom says so
+  and sends nothing. A change shows at once and goes back with "Couldn't
+  reach the wisp." if the wisp never confirms it. An address still on its
+  way when Straylight or Maestro is picked is kept for Custom. Needs the
+  wisp reflashed with the Custom firmware above; a wisp with only Maestro
+  shows Custom greyed out and asks to be updated.
+- **The wisp numbers each Gradient/Swatches pick.** A `setSwatches` from
+  the app can carry a number the wisp echoes in its status as `swatchesSeq`,
+  so the app can tell its latest pick landed rather than a late copy of an
+  earlier one. Needs the wisp reflashed; an older app's pick works as before.
+  The app's Gradient | Swatches switch confirms on it, so it can't be left
+  showing a stale pick.
+
+### Fixed
+- **A Straylight palette with a NaN or infinite value is refused.** The wisp
+  applied it as a palette; now the whole message is ignored and the held
+  palette stays.
+- **A lamp updated straight from the original firmware keeps its look.** Its
+  colours, base gradient direction, base knockout and Home Mode carry over,
+  and the shade keeps all its pixels lit. A lamp that already updated to an
+  earlier mesh release has to be set again in the app.
+- **A pure white shade stays white.** A shade or base set to exactly the
+  factory colour came back as the lamp type's default after a reboot.
+- **A lamp that hangs a few minutes into every boot restarts less and less
+  often**, instead of on the same short cycle forever.
+- **Lion heads and snafu pick up a visiting lamp's colours more reliably in a
+  crowd.** Colour requests and replies no longer overwrite each other, and a
+  Lioness low on memory no longer asks for colours every frame.
+- **Web Config comes back after a lamp passes on an update**, and a lamp with
+  its Web Config page open waits to pass one on.
+- **The app hears again that a lamp has left update mode**, instead of staying
+  greyed out until its 75 s timeout.
+- **Update data sent over Bluetooth must come over the connection that
+  started the update.**
+- **The wisp and Wi-Fi screens keep updating after a reconnect.** They froze
+  on what they showed before the lamp dropped out.
+- **The wisp palette editor shows the wisp's palette as it is now**, including
+  an empty one, which no longer sticks on "Reading palette from wisp…".
+- **Reopening a lamp mid-update freezes editing until it is ready**, under
+  "Giving <name> a moment to settle", so changes made then are not lost.
+- **Home Mode keeps the right brightness after a reconnect or Retry.**
+- **Smaller app and Web Config fixes:** leaving Home Mode as an update finishes
+  sticks; a turned-down update no longer reloads the lamp; leaving Social after
+  a reconnect frees the lamp's nearby list straight away; a wisp palette save
+  stops resending once the wisp leaves Manual; leaving the web expressions tab
+  no longer replays an unsaved colour rotation.
+- **Tooling:** two firmware builds at once no longer corrupt each other (a
+  machine-wide build lock); `lamp:flash:release` always downloads a fresh
+  `beta`/`stable`; release tags include the wisp image; the lamp build's
+  compile cache is actually off.
+- **Saving a wisp palette with white on many colours keeps the white on all of
+  them.** The last colour could lose its white before.
+- **The wisp palette editor never shows an empty or out-of-date palette as
+  the wisp's own.** The wisp now says which palette it stores, an empty one
+  included, and the editor waits for a read that matches. After the lamp
+  reconnects it shows "Reading palette from wisp…" until the wisp's next
+  status, since another phone may have changed the palette meanwhile. Needs
+  the wisp reflashed.
+- **A wisp palette save shows saved only once the wisp has stored that
+  save.** The wisp echoes each save back, and the app waits for that echo,
+  even if the wisp switched to Osc or Off meanwhile; an empty save no longer
+  waits on an extra status read. Needs the wisp reflashed.
+- **A wisp setting that never reached the wisp stops showing.** A few
+  seconds after you change a wisp's drift, brightness or LED strip, the app
+  reads the wisp's settings back, so a change the wisp didn't get goes back
+  to what the wisp runs.
+- **A lamp that just booted or just found a new wisp shows "Reading palette
+  from wisp…"** until the wisp's own status arrives, so Save can't write the
+  lamp's empty palette over the wisp's.
+- **A wisp palette Save never writes over a palette the app hasn't read.**
+  While the editor shows "Reading palette from wisp…" (after a reconnect, or
+  a new display wisp, until the wisp's next status) Save sends nothing, and a
+  save already resending stops; a palette sheet left open greys its Save
+  under "Reading palette from wisp…" until the palette is read, keeping your
+  edits. The wisp screen also redraws when only the palette's state
+  changes, so the loading line shows without another tap.
+- **The wisp settings screen fills in even when the lamp missed the wisp's
+  settings.** The app asks the wisp again and keeps reading until they
+  arrive. Through a lamp older than 1.2.8 it asks you to update that lamp.
+- **More memory free once a lamp has booted.** The lamp checks its web UI
+  files at boot without splitting its memory, and stops holding them open
+  afterwards, so more of its memory stays in one piece. The web config page
+  and web UI updates over the mesh work as before.
+- **The app looks up a lamp's services once per connect.** The first reads
+  after a connect each ran their own lookup of the lamp's services; they now
+  share one.
+
+### Changed
+- **More refused writes show on the debug serial** as `[drop]` lines.
+- **The app is version 1.1.0, and the Info screen names the commit of bench
+  builds.** Builds made with `npm run app:run`, `app:bridge`, `app:bridge:ios`
+  and `app:install` show `App 1.1.0+1 (<sha>)`, with `-dirty` when the tree had
+  uncommitted changes at launch.
+- **A wisp's Manual palette holds up to 16 colours**, the most a Straylight
+  palette carries (the editor held 10). Needs the wisp reflashed.
+- **The wisp palette editor needs the wisp reflashed.** A wisp on 1.3.8 or
+  older doesn't say which palette it stores, so the editor shows "Reading
+  palette from wisp…" for it and Save sends nothing.
+- **A wrong current password on a wisp takes up to 10 s to report.** The app
+  waits that long for the wisp to confirm a password change.
+- **The wisp's status no longer repeats its settings**, which keeps it inside
+  the lamp's Bluetooth limit. The app reads them only from the wisp's
+  settings message. Update the app on every phone that opens a wisp first:
+  an older app shows default settings or never loads them. Through a lamp
+  older than 1.2.8 the wisp's settings don't show.
+- **Yawn is built in.** The app and Web Config no longer offer Yawn as an
+  expression to add or configure; lamps still yawn on their own, a tired
+  introvert now and then and a lamp yawning back at a peer. A lamp that had
+  Yawn added drops it on update and keeps its other expressions.
+- **A peer's yawn grows fondness on every lamp that yawns.** With Yawn built
+  in, a lamp counts a peer's yawn as an expression it shares, as it did when
+  Yawn was added to it. No other expression's fondness changes.
+- **A one-off Shifty no longer ends in a Glitchy.** A Shifty played from the
+  app's Test with colours, or a mushroom's tint, fades back and stops; a
+  configured Shifty still chains into Glitchy.
+- **A smaller wisp status for the app.** The status a lamp serves drops a
+  tag the app never reads and leaves the wisp-control flags out while they
+  are off, up to 69 bytes less, so more statuses fit the app's direct read.
+  The app shows the same thing.
+
+## 1.3.7
+
+### Added
+- **The boot history (`[boots]` on serial) shows more.** For a boot that
+  never finished starting up, the last startup step it got through. For every
+  boot, how many Tests and greetings were refused for lack of memory, how many
+  times a phone connected, and the least memory left in one piece while one
+  was connected. Older lamps' history carries over on update; reflashing an
+  older firmware starts its history over.
+
+### Fixed
+- **Lamps hold less memory between home-presence scans and greetings.** A
+  lamp with home mode on kept its last WiFi scan list (about 1-2 KB) between
+  the once-a-minute scans; it now keeps only which networks it saw. Snafu's
+  dots, the greeting frames, the OTA indicator and colour changes from the
+  app reuse or free their buffers instead of allocating afresh. One change you
+  can see: on a lamp with Home Mode on, opening the Home Mode or wisp network
+  picker on a newly connected lamp now scans for about 5 seconds before listing
+  networks, where it used to show the lamp's last background scan straight away.
+- **A local Test plays while the app is connected, even in a crowd.** The
+  lamp built its list of nearby lamps the moment a phone connected and held
+  it, plus a 50-lamp copy of its roster, for the whole connection, on every
+  screen. With 20 or so lamps around that left too little memory for a Test.
+  The lamp now builds the list only while a Social, mesh or wisp screen is
+  showing it, sized to the bytes it actually holds, and frees it the moment
+  you leave the Social screen, or about 30 s after you leave a mesh or wisp
+  screen. The lamp also frees its copy of each large section the app reads
+  (the nearby list, a long expression list) as soon as the read ends or
+  the app opens another section, instead of holding the largest one until
+  the phone disconnects; small sections keep their buffer for the next
+  read.
+- **A lamp short on memory no longer crashes while a wisp paints it.** With
+  the app connected and a wisp nearby, building the wisp's status for the app
+  could run out of memory and restart the lamp. The lamp now skips that one
+  update and logs it; the app keeps the status it last showed. A memory
+  failure in the lamp's own loop, in its answers to the app, or in its
+  handling of a nearby lamp's advert now skips that one step and logs it
+  instead of restarting the lamp. One inside the Bluetooth stack itself, or
+  with too little memory left to raise it, still restarts the lamp.
+- **A lamp with a malformed firmware channel no longer blanks the nearby
+  list.** A quote, backslash, control character or non-ASCII byte in a peer's
+  channel broke the list's JSON, so the app could not read the list at all.
+- **An update that hangs or crashes goes back to the previous firmware.**
+  Lamps were meant to undo a bad update but never did: every update was kept
+  whatever it did. Now an updated lamp that hangs, crashes or restarts in its
+  first ~30 s comes back on the firmware it had, and takes the update again
+  later. It also takes no other update, and no web-page update, until it has
+  run those 30 s and its Bluetooth has started, and passes the update on to
+  other lamps only once it has proven it runs. A power cut in that window
+  rolls back too. The boot history marks a boot that was rolled back with
+  `rolledback`.
+- **A lamp that hangs while starting up restarts itself.** A lamp could go
+  dark during startup, after an update or not, and stay dark until it was
+  unplugged. The startup is now watched: a step that hangs restarts the lamp
+  within 30 s, and the boot history says which step it was.
+- **A lamp stuck in a restart loop no longer freezes for good.** After three
+  quick watchdog restarts in a row a lamp used to stop watching itself, so the
+  next hang froze it until it was unplugged. It now gives itself 5 minutes
+  before restarting, and goes back to normal once it has run a minute, so it
+  keeps trying without restarting every few seconds.
+
+## 1.3.6
+
+### Fixed
+- **Lioness is easier on memory and the radio in a crowd.** Its lions took
+  memory every frame, and asked a peer that never answered for its colours
+  every frame. They now draw without taking memory, ask a silent peer at most
+  once every three seconds, and keep the colours of every peer they show, so
+  a lion in a crowd of five or more no longer drops to the Main colour while
+  it waits for an answer it already had. Newcomers are now greeted one at a
+  time, in turn, where a crowd used to restart the greeting every frame.
+- **Testing an expression in the app no longer makes other lamps play it
+  when cascade is off.** Test sent the cascade command to every nearby lamp
+  whatever the cascade toggle said, even when the lamp itself could not play
+  it. It now sends it only with cascade on, and only once the lamp has
+  played it; nearby lamps still hear that the lamp played it and may copy it
+  on their own, as they do for any expression it plays. A Test the lamp
+  could not play sends nothing, and tapping it again tries again at once
+  instead of waiting a second. The glitch shifty plays as it shifts back
+  follows the same rule. The pulse a lamp plays when you add it in the app
+  no longer forces nearby lamps to play it.
+- **A lamp low on memory no longer asks for its password.** When a lamp was
+  too short of memory to send its settings, the app took the empty answer for
+  a wrong password and showed the password prompt, or showed default colours
+  and settings for the parts it could not read. The lamp now says it is busy:
+  the app tries again a few times, then says the lamp is low on memory and
+  offers a retry.
+- **The native test suite passes on Linux, and CI runs on every push to dev.**
+  Four suites that passed on a Mac failed on the Linux CI runner. The web
+  save's memory check now sizes its largest block from the expression list
+  it actually builds, which on a lamp changes nothing today but keeps the
+  check honest as expressions grow.
+
 ## 1.3.5
 
 ### Fixed

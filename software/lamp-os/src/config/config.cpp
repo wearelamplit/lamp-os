@@ -23,32 +23,18 @@
 
 namespace lamp {
 
-// Seed every segment of a role from the variant defaults, but only while NVS
-// still holds the single class-default segment. A configured lamp (NVS parsed
-// its own segment list) keeps its saved segments untouched.
-static void seedRoleSegments(std::vector<SegmentSettings>& segs,
-                             const std::vector<Config::SegmentDefault>& seeds,
-                             const Color& factory) {
-  const bool factoryUnconfigured =
-      segs.size() == 1 && segs[0].colors.size() == 1 && segs[0].colors[0] == factory;
-  if (!factoryUnconfigured) return;
-  segs.clear();
-  for (const auto& s : seeds) {
-    segs.push_back({s.name, s.px, parseColorList(s.colors)});
-  }
-}
-
 // The stored config is read and written through this reserved buffer, so a
 // load or save never waits for a large free block. Loop task only: the load
 // runs in setup, and every save, the webapp's included (webapp::tick drains
 // it), runs there.
 static uint8_t s_settingsBuf[config_codec::kMaxSettingsBlobLen];
 
-Config::Config(ConfigStore* inStore) {
+Config::Config(ConfigStore* inStore, StripWinding winding) {
   store_ = inStore;
   dispositions_.attachStore(store_);
-  const config_codec::LoadedConfig loaded = config_codec::loadConfig(
-      *store_, lamp, base, shade, expressions, homeMode, s_settingsBuf, sizeof(s_settingsBuf));
+  const config_codec::LoadedConfig loaded =
+      config_codec::loadConfig(*store_, lamp, base, shade, expressions, homeMode, s_settingsBuf,
+                               sizeof(s_settingsBuf), winding);
   storeForm_ = loaded.form;
 
 #ifdef LAMP_DEBUG
@@ -330,89 +316,35 @@ JsonDocument Config::asHomeModeJson() {
   return doc;
 }
 
-// Per-section JSON caches. Invariant: a cache string is touched only while
-// this mutex is held, and a read rebuilds and copies out under one hold, so a
-// rebuild or a release on the other core never lands between the two. A
-// dirty flag is set without it (invalidate*), which at worst costs a rebuild.
+// Per-section JSON caches. Invariant: a cache is touched only while this mutex
+// is held, and a read rebuilds and copies out under one hold, so a rebuild or a
+// release on the other core never lands between the two. invalidate*() runs
+// without it.
 static SemaphoreHandle_t cacheMutex() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
   return m;
 }
 
-// The heap check before each of these cannot reserve the block: another
-// task can take it first. The catch is the last line, best effort since the
-// build has no exception emergency pool.
-static bool assignNoThrow(std::string& dst, const char* src, size_t len) {
-  try {
-    dst.assign(src, len);
-    return true;
-  } catch (const std::bad_alloc&) {
-    return false;
-  }
-}
+// Holds the cache mutex for a scope, so a throw from a rebuild cannot leave it
+// held and block every later section read.
+class CacheLock {
+ public:
+  CacheLock() { xSemaphoreTake(cacheMutex(), portMAX_DELAY); }
+  ~CacheLock() { xSemaphoreGive(cacheMutex()); }
+  CacheLock(const CacheLock&) = delete;
+  CacheLock& operator=(const CacheLock&) = delete;
+};
 
-// A field OOM must stay visible without spamming: warn on the degrade path
-// on every channel, throttled to one line per LAMP_SECTION_OOM_MIN_MS.
-static void logSectionOom(const char* msg) {
-  static constexpr uint32_t LAMP_SECTION_OOM_MIN_MS = 5000;
-  static uint64_t lastMs = 0;
-  const uint64_t now = lamp::uptimeMs();
-  if (now - lastMs < LAMP_SECTION_OOM_MIN_MS && lastMs != 0) return;
-  lastMs = now;
-  Serial.printf("[cfg] %s section OOM; serving stale\n", msg);
-}
-
-// A web/BLE section read must never panic the lamp or serve a truncated
-// section. The rebuild serializes into one guarded buffer (an Arduino String
-// grown on a fragmented heap silently stops appending and would cache a cut-off
-// JSON as valid). On failure keep the last-good cache, leave the dirty flag
-// set so it retries when heap recovers, and serve the stale (or empty) bytes.
-// Caller holds the cache mutex. A failed rebuild keeps the last good copy and
-// stays dirty.
-template <class Build>
-static void rebuildLocked(std::string& cache, bool& dirty, const char* name, Build build) {
-  if (!dirty) return;
-  size_t len = 0;
-  std::unique_ptr<char[]> json;
-  if (heapCanSpare(kHeapHeadroom)) {
-    JsonDocument doc = build();
-    json = serializeGuarded(doc, len);
-  }
-  if (json && (cache.capacity() >= len || heapCanSpare(len)) &&
-      assignNoThrow(cache, json.get(), len)) {
-    dirty = false;
-  } else {
-    logSectionOom(name);
-  }
-}
-
-static void copyOutLocked(const std::string& cache, std::string& out, const char* name) {
-  if (!((out.capacity() >= cache.size() || heapCanSpare(cache.size())) &&
-        assignNoThrow(out, cache.data(), cache.size()))) {
-    out.clear();
-    logSectionOom(name);
-  }
-}
-
-#define LAMP_DEFINE_SECTION_CACHED(NAME, BUILDER)                                     \
+#define LAMP_DEFINE_SECTION_CACHED(NAME, REBUILD)                                     \
   void Config::NAME##SectionRebuildIfDirty() {                                        \
-    xSemaphoreTake(cacheMutex(), portMAX_DELAY);                                      \
-    rebuildLocked(NAME##SectionJson_, NAME##SectionDirty_, #NAME,                     \
-                  [this] { return BUILDER(); });                                      \
-    xSemaphoreGive(cacheMutex());                                                     \
+    CacheLock lock;                                                                   \
+    REBUILD;                                                                          \
   }                                                                                   \
-  void Config::NAME##SectionJsonCached(std::string& out) {                            \
-    xSemaphoreTake(cacheMutex(), portMAX_DELAY);                                      \
-    rebuildLocked(NAME##SectionJson_, NAME##SectionDirty_, #NAME,                     \
-                  [this] { return BUILDER(); });                                      \
-    copyOutLocked(NAME##SectionJson_, out, #NAME);                                    \
-    xSemaphoreGive(cacheMutex());                                                     \
+  bool Config::NAME##SectionJsonCached(std::string& out) {                            \
+    CacheLock lock;                                                                   \
+    REBUILD;                                                                          \
+    return NAME##Section_.copyOut(out, #NAME);                                        \
   }
-
-LAMP_DEFINE_SECTION_CACHED(lamp, asLampJson)
-LAMP_DEFINE_SECTION_CACHED(base, asBaseJson)
-LAMP_DEFINE_SECTION_CACHED(shade, asShadeJson)
-LAMP_DEFINE_SECTION_CACHED(home, asHomeModeJson)
 
 // The largest section (about 4 KB at the caps) is written straight into a
 // string measured first, so a rebuild takes one exactly-sized block and never
@@ -423,52 +355,29 @@ static void writeExpressionsSection(JsonWriter& w, const ExpressionSettings& s) 
   w.endArray();
 }
 
-void Config::expressionsSectionRebuildLocked() {
-  if (!expressionsSectionDirty_) return;
-  JsonWriter measure(nullptr, 0);
-  writeExpressionsSection(measure, expressions);
-  const size_t len = measure.length();
-  if (heapCanSpare(len + 1) &&
-      writeExactly(expressionsSectionJson_, len,
-                   [this](JsonWriter& w) { writeExpressionsSection(w, expressions); })) {
-    expressionsSectionDirty_ = false;
-  } else {
-    logSectionOom("expressions");
-  }
-}
-
-void Config::expressionsSectionRebuildIfDirty() {
-  xSemaphoreTake(cacheMutex(), portMAX_DELAY);
-  expressionsSectionRebuildLocked();
-  xSemaphoreGive(cacheMutex());
-}
-
-void Config::expressionsSectionJsonCached(std::string& out) {
-  xSemaphoreTake(cacheMutex(), portMAX_DELAY);
-  expressionsSectionRebuildLocked();
-  copyOutLocked(expressionsSectionJson_, out, "expressions");
-  xSemaphoreGive(cacheMutex());
-}
+LAMP_DEFINE_SECTION_CACHED(lamp, lampSection_.rebuild("lamp", [this] { return asLampJson(); }))
+LAMP_DEFINE_SECTION_CACHED(base, baseSection_.rebuild("base", [this] { return asBaseJson(); }))
+LAMP_DEFINE_SECTION_CACHED(shade, shadeSection_.rebuild("shade", [this] { return asShadeJson(); }))
+LAMP_DEFINE_SECTION_CACHED(home, homeSection_.rebuild("home", [this] { return asHomeModeJson(); }))
+LAMP_DEFINE_SECTION_CACHED(expressions, expressionsSection_.rebuildExactly("expressions",
+    [this](JsonWriter& w) { writeExpressionsSection(w, expressions); }))
 
 void Config::releaseSectionCaches() {
-  xSemaphoreTake(cacheMutex(), portMAX_DELAY);
-  for (auto* entry : {&lampSectionJson_, &baseSectionJson_, &shadeSectionJson_,
-                      &expressionsSectionJson_, &homeSectionJson_}) {
-    if (entry->capacity() > 15) std::string().swap(*entry);
+  CacheLock lock;
+  for (auto* section : {&lampSection_, &baseSection_, &shadeSection_,
+                        &expressionsSection_, &homeSection_}) {
+    section->release();
   }
-  lampSectionDirty_ = baseSectionDirty_ = shadeSectionDirty_ =
-      expressionsSectionDirty_ = homeSectionDirty_ = true;
-  xSemaphoreGive(cacheMutex());
 }
 
 #undef LAMP_DEFINE_SECTION_CACHED
 
 void Config::invalidateLampSection() {
-  lampSectionDirty_ = true;
+  lampSection_.invalidate();
 }
 
 void Config::invalidateBaseSection() {
-  baseSectionDirty_ = true;
+  baseSection_.invalidate();
 }
 
 void Config::setDrawAnchors(uint16_t idleMa, uint16_t fullMa) {
@@ -479,30 +388,28 @@ void Config::setDrawAnchors(uint16_t idleMa, uint16_t fullMa) {
 }
 
 void Config::invalidateShadeSection() {
-  shadeSectionDirty_ = true;
+  shadeSection_.invalidate();
 }
 
 void Config::invalidateExpressionsSection() {
-  expressionsSectionDirty_ = true;
+  expressionsSection_.invalidate();
 }
 
 void Config::invalidateHomeSection() {
-  homeSectionDirty_ = true;
+  homeSection_.invalidate();
 }
 
 void Config::invalidateAllSections() {
-  lampSectionDirty_ = true;
-  baseSectionDirty_ = true;
-  shadeSectionDirty_ = true;
-  expressionsSectionDirty_ = true;
-  homeSectionDirty_ = true;
+  lampSection_.invalidate();
+  baseSection_.invalidate();
+  shadeSection_.invalidate();
+  expressionsSection_.invalidate();
+  homeSection_.invalidate();
 }
 
 void Config::applyDefaults(const Defaults& d) {
-  // Called AFTER Config::Config(ConfigStore*) loads from NVS so that NVS
-  // values are authoritative and only truly-factory-default fields are
-  // overwritten. Subclass defaults() returns values that are used as
-  // first-boot baselines.
+  // Runs after Config::Config loads, so a stored value wins and the variant's
+  // defaults fill only what the store left unset.
   //
   // Name: resolve `named` (migrating pre-flag NVS from the stored name), then
   // substitute the variant default only for a lamp the user never named. A
@@ -515,36 +422,8 @@ void Config::applyDefaults(const Defaults& d) {
   if (!d.name.empty() && !lamp.named) {
     lamp.name = d.name;
   }
-  // Colors: apply the variant's injected default when the vector still holds
-  // only the single class-default entry. A user-configured lamp has a
-  // different saved color and won't match, so its choice is preserved. A
-  // multi-segment variant seeds its whole segment list instead of the scalar
-  // single-color path.
-  if (!d.baseSegments.empty()) {
-    seedRoleSegments(base.segments, d.baseSegments, kBaseDefaultColor);
-  } else if (!d.baseColor.empty() && base.broadcastColors().size() == 1 &&
-             base.broadcastColors()[0] == kBaseDefaultColor) {
-    base.broadcastColors() = parseColorList(d.baseColor);
-  }
-  if (!d.shadeSegments.empty()) {
-    seedRoleSegments(shade.segments, d.shadeSegments, kShadeDefaultColor);
-  } else if (!d.shadeColor.empty() && shade.broadcastColors().size() == 1 &&
-             shade.broadcastColors()[0] == kShadeDefaultColor) {
-    shade.broadcastColors() = parseColorList(d.shadeColor);
-  }
-  base.colorsEditable  = d.baseColorsEditable;
-  shade.colorsEditable = d.shadeColorsEditable;
-  base.rotationSupported = d.rotationSupported;
-  shade.rotationSupported = d.rotationSupported;
   if (d.setup) lamp.setup = true;
-
-  // Per-segment pixel count. A loaded px of 0 means "unset" (a fresh lamp, or
-  // a doc without the key). Fill those from the variant default; any real
-  // stored value wins, so a configured lamp's px is sacred. The scalar
-  // basePx/shadePx default seeds the role's first segment.
-  base.segments.front().px = resolveConfiguredPx(base.segments.front().px, d.basePx);
-  base.knockoutPixels.resize(base.sumPx(), 100);
-  shade.segments.front().px = resolveConfiguredPx(shade.segments.front().px, d.shadePx);
+  applyRoleDefaults(d, storeForm_, base, shade);
 }
 
 }  // namespace lamp

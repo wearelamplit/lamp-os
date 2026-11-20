@@ -11,7 +11,6 @@ import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/confirm_discard.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/lamp_card.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
@@ -26,6 +25,7 @@ import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
 import 'widgets/expression_params_panel.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 class ExpressionEditorScreen extends ConsumerStatefulWidget {
   const ExpressionEditorScreen({
@@ -299,15 +299,7 @@ class _ExpressionEditorScreenState
         lampId: widget.lampId,
         child: async.when(
           loading: () => const SizedBox.expand(),
-          error: (e, _) => FriendlyError.page(
-            title: "Couldn't reach your lamp.",
-            subtitle:
-                "They may have wandered out of range. Bring your phone closer "
-                'and try again.',
-            rawError: e,
-            onRetry: () =>
-                ref.invalidate(controlNotifierProvider(widget.lampId)),
-          ),
+          error: (e, _) => LampErrorPage(lampId: widget.lampId, error: e),
           data: (state) {
             final notifier =
                 ref.read(controlNotifierProvider(widget.lampId).notifier);

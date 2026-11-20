@@ -34,7 +34,7 @@ class WispLedConfig extends ConsumerWidget {
       children: [
         const SettingsGroupHeading('LED strip'),
         if (!status.configKnown)
-          const LampCard(child: WispSettingsPending())
+          LampCard(child: WispSettingsPending(lampId: lampId))
         else
           LampCard(
             child: Column(

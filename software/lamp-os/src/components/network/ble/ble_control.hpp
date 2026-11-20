@@ -136,7 +136,7 @@ void disableBtModemSleep();
 
 void start(lamp::Config* config);
 
-// Loop task only: also frees the nearby-JSON cache and roster buffer, which
+// Loop task only: also frees the nearby list and its roster copy, which
 // tick() stops maintaining once the service is down.
 void stop();
 bool isRunning();
@@ -146,10 +146,9 @@ bool isRunning();
 bool deinitForWebapp();
 bool isDownForWebapp();
 
-// Copies the nearby-lamps JSON out. Materialized on Core 1 only while an app
-// or webapp client is connected (and freed otherwise), so it reads back "[]"
-// when no client is attached. Safe to call from any task; never serializes on
-// the caller's thread.
+// Copies the nearby-lamps JSON out, "[]" while the list is not built (it is
+// built only while the app reads it). Any task; never serializes on the
+// caller's thread.
 void copyNearbyJson(std::string& out);
 
 /**
@@ -161,11 +160,13 @@ void copyNearbyJson(std::string& out);
 void tick();
 
 /**
- * Send a state-change notification to all subscribed clients.
- *        Payload is `{"previewActive":<bool>}`, used by the app's Test
- *        button to debounce its label without an app-side timer.
+ * Send a state-change notification to the connected client, when it has
+ *        turned notifications on. Payload: docs/dev/networking.md
+ *        (CHAR_STATE_NOTIFY). False when nothing went out: no client, not
+ *        subscribed, no heap for the build, or NimBLE could not queue the
+ *        send.
  */
-void notifyStateChange();
+bool notifyStateChange();
 
 /**
  * Send a WiFi-state-change notification on CHAR_WIFI_STATE.

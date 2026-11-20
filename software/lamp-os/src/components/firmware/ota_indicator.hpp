@@ -49,5 +49,8 @@ void paint(FrameBuffer* fb, const Color& localBase, uint32_t nowMs,
 void paintSilent(FrameBuffer* shadeFb, FrameBuffer* baseFb, uint32_t nowMs,
                  bool quietEntered);
 
+// Call on the tick quiet mode ends, so a settle cut short frees its frames.
+void quietExited();
+
 }  // namespace ota_indicator
 }  // namespace lamp

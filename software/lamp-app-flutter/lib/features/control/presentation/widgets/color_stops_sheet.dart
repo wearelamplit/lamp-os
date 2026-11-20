@@ -30,6 +30,7 @@ class ColorStopsSheet extends StatefulWidget {
     this.onRotationChanged,
     this.rotationStop0AtBottom = false,
     this.contentSized = false,
+    this.saveUnavailable,
   });
 
   final List<LampColor> initial;
@@ -71,6 +72,9 @@ class ColorStopsSheet extends StatefulWidget {
   /// The sheet sizes to its content, for a launcher that bounds the height
   /// with [ColorSheetHeight]. Off, it fills a launcher's fixed height.
   final bool contentSized;
+
+  /// While set, Save is disabled and this shows above the buttons saying why.
+  final Widget? saveUnavailable;
 
   @override
   State<ColorStopsSheet> createState() => _ColorStopsSheetState();
@@ -286,20 +290,32 @@ class _ColorStopsSheetState extends State<ColorStopsSheet> {
     ];
   }
 
-  Widget _buttons() => Row(
-        children: [
-          TextButton(
-            onPressed: () => _close(revert: true),
-            child: const Text('Cancel'),
-          ),
-          const Spacer(),
-          FilledButton.icon(
-            icon: const Icon(Icons.check, size: 18),
-            label: const Text('Save'),
-            onPressed: _save,
-          ),
+  Widget _buttons() {
+    final unavailable = widget.saveUnavailable;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (unavailable != null) ...[
+          unavailable,
+          const SizedBox(height: AppSpace.sm),
         ],
-      );
+        Row(
+          children: [
+            TextButton(
+              onPressed: () => _close(revert: true),
+              child: const Text('Cancel'),
+            ),
+            const Spacer(),
+            FilledButton.icon(
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Save'),
+              onPressed: unavailable == null ? _save : null,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   Widget _fixedLayout(BuildContext context) => Padding(
         padding: const EdgeInsets.all(AppSpace.lg),
@@ -389,6 +405,18 @@ class ColorSheetHeight extends StatelessWidget {
       );
 }
 
+/// Opens the colour sheet [builder] makes as a modal bottom sheet, a fixed
+/// 0.6 of the available height.
+Future<void> showFixedColorSheet(
+  BuildContext context, {
+  required WidgetBuilder builder,
+}) =>
+    showAppSheet<void>(
+      context,
+      builder: (ctx) =>
+          FractionallySizedBox(heightFactor: 0.6, child: builder(ctx)),
+    );
+
 /// Opens [ColorStopsSheet] as a modal bottom sheet. Mirrors
 /// [showColorPickerSheet].
 Future<void> showColorStopsSheet(
@@ -403,21 +431,18 @@ Future<void> showColorStopsSheet(
   int bpp = 4,
   ValueChanged<List<LampColor>>? onChanged,
 }) {
-  return showAppSheet<void>(
+  return showFixedColorSheet(
     context,
-    builder: (ctx) => FractionallySizedBox(
-      heightFactor: 0.6,
-      child: ColorStopsSheet(
-        initial: initial,
-        title: title,
-        max: max,
-        onSave: onSave,
-        description: description,
-        allowEmpty: allowEmpty,
-        reorderable: reorderable,
-        bpp: bpp,
-        onChanged: onChanged,
-      ),
+    builder: (ctx) => ColorStopsSheet(
+      initial: initial,
+      title: title,
+      max: max,
+      onSave: onSave,
+      description: description,
+      allowEmpty: allowEmpty,
+      reorderable: reorderable,
+      bpp: bpp,
+      onChanged: onChanged,
     ),
   );
 }

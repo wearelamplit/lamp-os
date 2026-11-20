@@ -42,6 +42,44 @@ Callers:
 reboots, is a separate policy: it drops the stale handle, waits out the reboot
 and calls `BleClient.connect` directly with a per-attempt timeout.
 
+## Connect timing: `bleTimings`
+
+`bleTimings` (`core/ble/ble_timing.dart`) is the one recorder for how long
+each phase of getting to a lamp takes. It is a measurement for tuning, not a
+behaviour: it adds no awaits, retries or timeouts, and a sink that throws is
+swallowed. Each phase is one line, tagged `[ble_timing]`, sent to the sink
+(default `debugPrint`). Read a session off the phone with
+`adb logcat -s flutter | grep ble_timing`. Nothing is stored or shown in the
+app.
+
+| Line | Measures |
+|---|---|
+| `scanSeen ... scan_session=N ms=` | scan start to a lamp's first advert in that scan session |
+| `connect ... fail attempt=i/n ms=` | one failed `connectWithRetry` attempt |
+| `connect ... ok attempt=i/n ms= aborted` | an attempt that reached link-up after its caller gave up; arms no `firstRead` |
+| `connect ... ok attempt=i/n ms= total_ms=` | `ms` is the winning attempt's `BleClient.connect` (scan stop, link, MTU and priority on Android); `total_ms` is call entry to link up, backoff included. `already_up` after `ms` means the stack still reported the lamp linked when the attempt began (a reboot it has not noticed, a disconnect still in flight, a link left up), so `ms` may be a no-op connect or include the wait for that disconnect |
+| `discover ... ok\|fail ms=` | a cold `discoverServices`, success or failure (`DiscoveryCache` miss; resolves that arrive while one runs share it; none on a bridge client) |
+| `firstRead ... section= ms= since_link_ms=` | the first `readSectionVia` after a `connectWithRetry` link. `ms` is the read from the `readSectionVia` call, so it includes waiting behind an earlier section read on the same lamp. `since_link_ms` includes auth and the cold discover, since they run first. A busy answer counts as the first read |
+
+A failed `connect`, `discover` or `firstRead` line ends with
+`reason=<Type>:<code>:<description>` (`bleFailureReason`). Code and description
+come from a `FlutterBluePlusException` or `PlatformException`, looked through
+a `BleDisconnectedException`'s cause. The code is flutter_blue_plus's own error
+index or the platform status (Android 133 for a failed link), so read it with
+the description. Spaces become `_`, a description is capped at 48 characters
+and `-` stands for an absent part; any other error gives its type alone, e.g.
+`reason=TimeoutException`. Successful lines carry no `reason`.
+
+Every scan start or restart opens a new `scan_session` (counted from 1 per app
+run); a lamp is timed once per session from that session's own start, so a
+restarted scan shows a lamp again with a fresh, small `ms`.
+
+`firstRead` is armed by `connectWithRetry` and cleared by a disconnect, a
+`cycleAdapter` or a bridge-reported drop; a read that began before the link
+came up never consumes it. A reconnect that bypasses `connectWithRetry`
+(onboarding's verify) records no `firstRead`, and an unsolicited drop on the
+phone's own stack does not clear the arm until the next `disconnect`.
+
 ## Link ownership: `claimLink` / `ownsLink`
 
 A connect can outlive the screen that started it: the user backs out while an
@@ -125,7 +163,13 @@ reboot-save reload) authenticates, then reads each section once through
 to a link that has not authenticated, since it carries the password, so empty
 bytes make `_readSections` throw `LampAuthRequiredException`. The control
 screen turns that into a password prompt; on a ladder reconnect it also parks
-the ladder.
+the ladder. A lamp too short of heap to build or copy out one of the five
+sections answers `!` instead (`isSectionBusy`). `_readSections` reads that
+section again, `ControlNotifier.sectionBusyRetries` more times
+`sectionBusyRetryGap` apart, then throws `LampBusyException`, which every lamp
+screen shows as a low-on-memory error with a retry (`LampErrorPage`) and which
+parks the ladder the same way. A re-read after a push that ends without a reboot
+(`_rereadSections`) keeps what is on screen, a busy section included.
 
 **Liveness probe.** flutter_blue_plus can miss the link-down edge when the lamp
 drops the link itself (a mesh OTA kicking the GATT client, a reboot), so
@@ -134,8 +178,9 @@ and when the app returns to the foreground. It reads `CHAR_SCHEMA_VERSION`, one
 byte. A lamp from before GATT schema v1 has no such characteristic; the client
 finds it absent from the services it already discovered, with no radio time,
 and the probe reads the `lamp` section instead (a page-protocol session: a CTRL
-write and at least two reads). A disconnect error from either read starts the
-reconnect ladder; any other error is ignored. The probe skips while the app
+write and at least two reads). A disconnect error from either read is handled
+as a dropped link (see "A lamp that hangs up" below); any other error is
+ignored. The probe skips while the app
 pushes the lamp firmware (`FirmwareState.isPushing`): the push's own writes fail
 on a dead link, and a probe would queue behind its chunks.
 
@@ -153,7 +198,36 @@ A drop after the restore climbs the ladder as usual, even when a try from
 before the save is still running: when that try stands down it arms the next
 step if the link is down and none is pending
 (`_resumeLadderAfterStandDown`). A reload that gives up leaves its error on
-screen; the ladder does not take over.
+screen; the ladder does not take over. A build (opening the lamp, or a Retry
+or other rebuild) owns its link the same way: a connected edge that arrives
+while the state is loading starts no try, and a try or a reload already in
+flight when a build starts stops at its next step for good (`_buildsStarted`),
+either resuming the ladder as above, so each link gets one link
+session (`_beginLinkSession`).
+
+**A lamp that hangs up.** A lamp ends a working link itself when a mesh OTA
+starts in either direction, and stops advertising until it is done (OTA radio
+pause, [networking.md](networking.md)). When the link-down edge carries that
+reason (`BleClient.lastDropCause` reads `LinkDropCause.lampHungUp`; on Android
+flutter_blue_plus reports HCI 0x13, remote user terminated; a connect begun
+since the drop clears it), the ladder does not start. `ControlState.lampHungUp`
+holds, the gate shows "<Name> is swapping new tricks with a friend 🎓"
+(`otaSwapMessage`), and `_awaitLampBack` keeps the nearby scan running until it
+hears the lamp's first broadcast since the drop that does not carry the
+OTA-distributing bit, then makes one `_tryReconnect`. A lamp that hangs up
+again on that try is waited out again; any other failure clears `lampHungUp`
+and climbs the ladder. A drop during a reboot-save reload or the app's own
+firmware push never counts as a hang-up. A lamp not back
+`ControlNotifier.lampBackWait` (3 min) after the drop, silent or still
+advertising the busy bit, ends the wait: `_giveUpOnLampBack` clears
+`lampHungUp` and climbs the ladder as for any other drop. A new hang-up
+restarts that 3 min, and "pick another lamp" leaves the wait at any time. A Web
+Config join ends the link through the same call (`deinitForWebapp`), with
+NimBLE's default 0x13 if the disconnect goes out before the lamp shuts
+Bluetooth down (unmeasured), so it may show the swap copy for up to the 3 min.
+Only Android drops are classified; on iOS every drop counts as other. Every
+drop logs `[ble_drop] id=<id> code=<code> reason=<description>` with the
+platform's reason.
 
 ## Scan hold during a connect
 
@@ -167,8 +241,18 @@ own scan around a connect, so the app does:
   threw.
 - `FbpBleClient.connect` (`core/ble/fbp_ble_client.dart`) stops a running scan
   and runs flutter_blue_plus's `BluetoothDevice.connect` inside
-  `scanPause.during`, with an 8 s connect timeout. Connection priority and
-  service discovery run after the hold ends.
+  `scanPause.during`, with an 8 s connect timeout. Connection priority runs
+  after the hold ends; a discovery started by a caller woken by the connected
+  edge can start inside it. `connect` clears the lamp's
+  cached services before the link comes up, and the client also clears them
+  on every disconnect event and in `disconnect` and `cycleAdapter`. A caller
+  woken by the connected edge (the wisp and Wi-Fi notifiers renewing their
+  notify subscriptions, nearby peers restarting theirs) resolves before
+  `connect` returns, so it discovers on the new link. Resolves for a lamp
+  that arrive while its discovery runs share that one discovery, so a
+  connect runs one discovery whichever caller asks first; a failed one is
+  not cached. A remove while a discovery runs leaves that discovery serving
+  only its own callers.
 - `FbpBleScanner` (`core/ble/ble_scanner.dart`) never starts a scan while
   `scanPause.isPaused`. On `released` it restarts through `_restartScan`, which
   waits `_restartBackoff` (3 s) first, and stops a scan that started while a

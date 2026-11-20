@@ -4,10 +4,10 @@ import 'package:lamp_app/core/utils/string_case.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/back_button_leading.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../application/control_notifier.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
+import 'lamp_error_page.dart';
 
 /// Per-pixel knockout editor with a region-split gesture model:
 /// - Touch in the **left+middle zone** (label + bar): paint. y picks
@@ -172,15 +172,7 @@ class _KnockoutScreenState extends ConsumerState<KnockoutScreen> {
           lampId: widget.lampId,
           child: async.when(
             loading: () => const SizedBox.expand(),
-            error: (e, _) => FriendlyError.page(
-              title: "Couldn't reach your lamp.",
-              subtitle:
-                  "They may have wandered out of range. Bring your phone closer "
-                  'and try again.',
-              rawError: e,
-              onRetry: () =>
-                  ref.invalidate(controlNotifierProvider(widget.lampId)),
-            ),
+            error: (e, _) => LampErrorPage(lampId: widget.lampId, error: e),
             data: (state) {
               _original ??= Map.of(state.base.knockout);
               final notifier =

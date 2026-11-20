@@ -14,6 +14,7 @@
 #include "core/wisp_controller.hpp"
 #include "wire/lamp_protocol.hpp"
 #include "status/status_json.hpp"
+#include "status/wisp_config_fields.hpp"
 #include "status/seq_source.hpp"
 #include "util/fnv1a.hpp"
 
@@ -145,7 +146,11 @@ void StatusEmitter::emitStatus() {
   bool hasOffColor = false;
   const char* wispName = "";
   bool hasPassword = false;
+  ManualPaletteStatus manual{};
+  uint16_t swatchesSeq = 0;
   if (config_) {
+    swatchesSeq = config_->swatchesSeq();
+    manual = config_->manualPaletteStatus();
     const auto off = config_->offColor();
     offR = off.r; offG = off.g; offB = off.b; offW = off.w;
     hasOffColor = true;
@@ -155,12 +160,12 @@ void StatusEmitter::emitStatus() {
   const WispStatusFields fields{
       wifiConn, sourceLive, paletteIdPrefix,
       sourceName, oscRole, offR, offG, offB, offW, hasOffColor,
-      wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp };
-  const WispConfigFields configCopy = configFields();
+      wispName, hasPassword, wifiChannelMismatch, wifiApChannel, ethIp,
+      manual.id, manual.seq, swatchesSeq };
 
   char jsonBuf[kStatusJsonBufLen];
   const size_t jsonLen = buildWispStatusJson(
-      fields, &configCopy, jsonBuf, sizeof(jsonBuf),
+      fields, jsonBuf, sizeof(jsonBuf),
       lamp_protocol::CONTROL_MAX_PAYLOAD);
 
   // Emit palette first: a wispStatus build failure must not suppress it.
@@ -174,15 +179,14 @@ void StatusEmitter::emitStatus() {
 }
 
 WispConfigFields StatusEmitter::configFields() const {
-  WispConfigFields c;
-  if (!config_) return c;
-  c.ledType = lampos::led::byteOrderToString(config_->ledFormat());
-  c.pixelCount = config_->pixelCount();
-  c.brightness = config_->brightness();
-  c.driftIntervalMs = config_->driftIntervalMs();
-  c.driftFadePct = config_->driftFadePct();
-  c.shuffleSeed = config_->shuffleSeed();
-  c.opSeq = config_->opSeq();
+  if (!config_) return WispConfigFields{};
+  WispConfigFields c = wispConfigFields(*config_);
+  char ethIp[16];
+  eth::formatIp(ethIp, sizeof(ethIp));
+  const bool staConnected = WiFi.isConnected();
+  char staIp[16] = "";
+  if (staConnected) eth::formatAddr(WiFi.localIP(), staIp, sizeof(staIp));
+  pickOscSendToIp(ethIp, staConnected, staIp, c.ip, sizeof(c.ip));
   return c;
 }
 

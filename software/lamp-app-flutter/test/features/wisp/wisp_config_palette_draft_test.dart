@@ -20,6 +20,7 @@ import 'package:lamp_app/features/wisp/presentation/wisp_config_screen.dart';
 
 import '../../_support/in_memory_ble_client.dart';
 import '../../_support/seed.dart';
+import '../../_support/wisp_palette_ble.dart';
 
 class _FakePeers extends LampNearbyPeersNotifier {
   @override
@@ -57,8 +58,9 @@ void main() {
       _devId,
       BleUuids.controlService,
       BleUuids.wispStatus,
-      _b('{"wispMac":"$_mac","source":"manual",'
-          '"paletteIdPrefix":"${WispRepository.paletteIdHash(_saved)}"}'),
+      _b('{"wispMac":"$_mac","configSplit":true,"source":"manual",'
+          '"manualId":"${WispRepository.statusManualId(_saved)}",'
+          '"paletteIdPrefix":"${WispRepository.manualPaletteId(_saved)}"}'),
     );
     final c = ProviderContainer(
       overrides: [
@@ -107,7 +109,7 @@ void main() {
     await pumpScreen(tester, c);
 
     final n = c.read(wispNotifierProvider(_devId).notifier);
-    expect(c.read(manualPaletteDraftProvider(_devId)), _saved);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, _saved);
     expect(n.manualPaletteDirty, isFalse);
   });
 
@@ -116,7 +118,7 @@ void main() {
     final c = await makeContainer();
     await pumpScreen(tester, c);
     final n = c.read(wispNotifierProvider(_devId).notifier);
-    expect(c.read(manualPaletteDraftProvider(_devId)), _saved);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, _saved);
 
     n.setManualPaletteDraft(const []);
     Object? err;
@@ -124,18 +126,18 @@ void main() {
     // Frames before the wisp answers rebuild the screen around the pending
     // save.
     await settle(tester);
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty,
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty,
         reason: 'a pending empty save is not refilled');
 
     ble.seedSection(_devId, 'wisppalette', Uint8List(0));
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual"}'));
+        _b(echoOfLastPaletteSave(ble, _devId, mac: _mac)));
     await settle(tester);
     await save;
 
     expect(err, isNull);
     expect(n.savedManualPalette, isEmpty);
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
     expect(n.manualPaletteDirty, isFalse);
     expect(n.manualPaletteWriteFailed, isFalse);
   });
@@ -162,19 +164,20 @@ void main() {
       ]),
     );
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual",'
-            '"paletteIdPrefix":"${WispRepository.paletteIdHash(moved)}"}'));
+        _b('{"wispMac":"$_mac","configSplit":true,"source":"manual",'
+            '"manualId":"${WispRepository.statusManualId(moved)}",'
+            '"paletteIdPrefix":"${WispRepository.manualPaletteId(moved)}"}'));
     await settle(tester);
     expect(n.savedManualPalette, moved, reason: 'the read landed');
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
 
     ble.seedSection(_devId, 'wisppalette', Uint8List(0));
     ble.simulateNotify(_devId, BleUuids.controlService, BleUuids.wispStatus,
-        _b('{"wispMac":"$_mac","source":"manual"}'));
+        _b(echoOfLastPaletteSave(ble, _devId, mac: _mac)));
     await settle(tester);
     await save;
 
-    expect(c.read(manualPaletteDraftProvider(_devId)), isEmpty);
+    expect(c.read(manualPaletteDraftProvider(_devId)).colors, isEmpty);
     expect(n.manualPaletteDirty, isFalse);
   });
 }

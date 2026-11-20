@@ -18,16 +18,6 @@
 
 namespace lamp {
 
-namespace {
-// The unacked broadcast types have no per-frame retry, and per-frame loss on
-// a coex-contended link runs ~0.65 (correlated, not independent). 2 extra
-// copies (3 total) spaced kResendGapMs apart give each receiver one copy per
-// scan-listen gap; the gap must exceed the ~15 ms scan window so the copies
-// don't share a hole. Dedup collapses the copies to one apply.
-constexpr uint8_t kResends = 2;
-constexpr uint32_t kResendGapMs = 40;
-}  // namespace
-
 MeshLink* MeshLink::s_instance = nullptr;
 
 void MeshLink::onRecv(const uint8_t* mac, const uint8_t* data, size_t len,
@@ -334,15 +324,16 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
         lastHelloRxLogMs = nowMsLog;
         std::memcpy(lastHelloRxMac, h.sourceMac, 6);
         Serial.printf("[show] HELLO recv from %02X:%02X:%02X:%02X:%02X:%02X "
-                      "v=0x%08X rssi=%d\n",
+                      "v=0x%08X rssi=%d %s\n",
                       h.sourceMac[0], h.sourceMac[1], h.sourceMac[2],
                       h.sourceMac[3], h.sourceMac[4], h.sourceMac[5],
-                      (unsigned)h.firmwareVersion, (int)rssi);
+                      (unsigned)h.firmwareVersion, (int)rssi,
+                      isDirectHello(srcMac, h.sourceMac) ? "direct" : "relayed");
       }
     }
 #endif
 #endif
-    // RSSI feeds the roster's espnowRssi, the OTA offer signal floor.
+    // A direct copy's RSSI feeds the roster's DirectRssi, the OTA offer gate.
     // h.name is a NUL-terminated fixed field; pass it straight through so the
     // hot HELLO path never allocates a transient std::string.
     lampRoster.addOrUpdateFromEspNow(
@@ -671,7 +662,7 @@ void MeshLink::handleRecv(const uint8_t* srcMac, const uint8_t* data,
     if (!admitAddressed(firmwareDedup_, p.sourceMac, lamp_protocol::MSG_FW_CHUNK, p.seq,
                         p.targetMac, myMac_, nowMs)) return;
     if (firmwareReceiver_) {
-      firmwareReceiver_->handleChunkOnRecvTask(p, FirmwareTransportKind::EspNow);
+      firmwareReceiver_->handleChunkOnRecvTask(p, FirmwareTransportKind::EspNow, 0);
     }
   } else if (msgType == lamp_protocol::MSG_FW_DONE) {
     lamp_protocol::ParsedFwDone p;

@@ -10,6 +10,7 @@ import '../../../core/widgets/critter_icon.dart';
 import '../../../core/widgets/empty_state_pane.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../control/application/control_notifier.dart';
+import '../../control/presentation/lamp_error_page.dart';
 import '../../control/domain/lamp_color.dart';
 import '../../inventory/application/inventory_notifier.dart';
 import '../../inventory/domain/inventory_lamp.dart';
@@ -77,11 +78,14 @@ class _SocialScreenState extends ConsumerState<SocialScreen> {
     final ctl = ref.watch(controlNotifierProvider(lampId).select((a) {
       final lamp = a.value?.lamp;
       return (
+        error: a.hasError ? a.error : null,
         hasState: lamp != null,
         mode: lamp?.socialMode ?? SocialMode.ambivert,
         selfLampId: lamp?.lampId ?? '',
       );
     }));
+    final error = ctl.error;
+    if (error != null) return LampErrorPage(lampId: lampId, error: error);
     if (!ctl.hasState) {
       return const Center(
         child: CircularProgressIndicator(),

@@ -22,6 +22,8 @@ static bool isApplied(DispatchResult r) {
     case DispatchResult::AppliedWifiChange:
     case DispatchResult::AppliedSourceChange:
     case DispatchResult::AppliedOscRole:
+    case DispatchResult::AppliedOscSettings:
+    case DispatchResult::AppliedOscRetarget:
     case DispatchResult::AppliedManualPalette:
     case DispatchResult::AppliedOffColor:
     case DispatchResult::AppliedShuffle:
@@ -30,10 +32,27 @@ static bool isApplied(DispatchResult r) {
     case DispatchResult::AppliedPasswordChange:
     case DispatchResult::AppliedLedStrip:
     case DispatchResult::AppliedBrightnessChange:
+    case DispatchResult::AppliedSwatches:
       return true;
     default:
       return false;
   }
+}
+
+// An op's echo seq: an integer in 1..65535, else 0, which clears the echo.
+static uint16_t echoSeq(JsonVariantConst v) {
+  return v.is<uint16_t>() ? v.as<uint16_t>() : uint16_t{0};
+}
+
+DispatchResult applyOscSettings(WispConfig& config, OscMode mode,
+                                uint8_t slot, const char* address) {
+  if (!address || (address[0] != '\0' && !oscCustomAddressValid(address)) ||
+      (mode == OscMode::Custom && address[0] == '\0')) {
+    return DispatchResult::Malformed;
+  }
+  return config.setOsc(mode, slot, address)
+             ? DispatchResult::AppliedOscRetarget
+             : DispatchResult::AppliedOscSettings;
 }
 
 DispatchResult WispOpDispatcher::dispatch(const uint8_t* payload, size_t len) {
@@ -166,6 +185,42 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     return DispatchResult::AppliedOscRole;
   }
 
+  if (strcmp(op, "setOsc") == 0) {
+    OscMode mode = OscMode::Straylight;
+    if (!oscModeFromName(doc["mode"].as<const char*>(), mode)) {
+      Serial.println("[wisp.op] setOsc missing/invalid 'mode'");
+      return DispatchResult::Malformed;
+    }
+    uint8_t slot = config_.oscSlot();
+    JsonVariantConst slotVar = doc["slot"];
+    if (!slotVar.isNull()) {
+      if (!slotVar.is<int>() || !maestroSlotValid(slotVar.as<int>())) {
+        Serial.println("[wisp.op] setOsc invalid 'slot'");
+        return DispatchResult::Malformed;
+      }
+      slot = static_cast<uint8_t>(slotVar.as<int>());
+    }
+    const char* address = config_.oscAddress();
+    JsonVariantConst addressVar = doc["address"];
+    if (!addressVar.isNull()) {
+      // A JSON string can carry \u0000; the C string would end there and
+      // pass the rule on what precedes it. A sent "" would clear the address.
+      const JsonString sent = addressVar.as<JsonString>();
+      address = sent.c_str() && sent.size() > 0 &&
+                        std::strlen(sent.c_str()) == sent.size()
+                    ? sent.c_str()
+                    : nullptr;
+    }
+    const DispatchResult res = applyOscSettings(config_, mode, slot, address);
+    if (res == DispatchResult::Malformed) {
+      Serial.println("[wisp.op] setOsc invalid 'address', or custom with none");
+      return res;
+    }
+    Serial.printf("[wisp.op] setOsc mode=%s slot=%u address='%s'\n",
+                  oscModeName(mode), (unsigned)slot, config_.oscAddress());
+    return res;
+  }
+
   if (strcmp(op, "setOffColor") == 0) {
     // Accepts "color":[r,g,b] or [r,g,b,w] tuple, or flat "r"/"g"/"b"
     // (+optional "w") fields.
@@ -228,11 +283,11 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
         continue;
       }
       parsed.push_back(c);
-      if (parsed.size() >= kManualPaletteMaxColors) break;
     }
-    Serial.printf("[wisp.op] setManualPalette colors=%u\n",
-                  (unsigned)parsed.size());
-    config_.setManualPalette(parsed);
+    const uint16_t seq = echoSeq(doc["seq"]);
+    Serial.printf("[wisp.op] setManualPalette colors=%u seq=%u\n",
+                  (unsigned)parsed.size(), (unsigned)seq);
+    config_.setManualPalette(parsed, seq);
     return DispatchResult::AppliedManualPalette;
   }
 
@@ -281,6 +336,18 @@ DispatchResult WispOpDispatcher::dispatchJson(const char* json, size_t len) {
     }
     config_.setBrightness(static_cast<uint8_t>(pct));
     return DispatchResult::AppliedBrightnessChange;
+  }
+
+  if (strcmp(op, "setSwatches") == 0) {
+    JsonVariantConst v = doc["swatches"];
+    if (!v.is<bool>()) {
+      Serial.println("[wisp.op] setSwatches missing/invalid 'swatches'");
+      return DispatchResult::Malformed;
+    }
+    config_.setPaletteStyle(
+        v.as<bool>() ? PaletteStyle::Swatches : PaletteStyle::Gradient,
+        echoSeq(doc["seq"]));
+    return DispatchResult::AppliedSwatches;
   }
 
   if (strcmp(op, "pollStatus") == 0) {

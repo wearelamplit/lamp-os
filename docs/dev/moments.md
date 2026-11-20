@@ -50,7 +50,7 @@ frame, so a trigger alone does not sparkle on cue. Two existing keys it does
 not otherwise read make a trigger one short burst, hidden from its descriptor
 so the app, `exprcat` and `test_builtin_descriptors` are unchanged:
 
-- `count` (stars) and `durationMax` (burst length, clamped 100 to 2000 ms),
+- `count` (stars) and `durationMax` (burst length, clamped 100 to 10000 ms),
   both above 0, on a transient (an instance whose auto-trigger is off). Absent
   either, or on a configured, auto-triggering flicker, it runs continuously as
   before.
@@ -58,7 +58,10 @@ so the app, `exprcat` and `test_builtin_descriptors` are unchanged:
   from the style's spark band; the rest stay at rest. Sparks rise for the first
   half of the burst and fall for the second (six step constants across it, so
   a spark reaches about 95% and falls back to about 5%), and the instance
-  completes at `durationMax`, so the transient GC reaps it.
+  completes at `durationMax`, so the transient GC reaps it. A burst longer
+  than 2000 ms (`kBurstSwellMaxMs`) keeps the 2000 ms burst's step and its
+  1 s fall, and holds its stars at peak from the rise until 1 s before the
+  end; up to 2000 ms the shape is unchanged, so Fireflies' 700 ms beat is too.
 - A cell below `kBurstPaintHeat` (0.37, the heat at which Twinkle paints its
   own anchor) is left untouched, so sparks fade in and out of the surface
   instead of dimming the cells around them. A fully saturated channel has no
@@ -72,6 +75,28 @@ so the app, `exprcat` and `test_builtin_descriptors` are unchanged:
   configs are unchanged. Math and tests: `expressions/shimmer/shimmer_math.hpp`,
   `test/test_shimmer_math/`; the real expression driven to completion:
   `test/test_shimmer_burst/`.
+
+**Spore tint.** A mushroom's spore reaches nearby lamps as a `MSG_COMMAND`
+whose invocation is a tinted flicker burst that also carries `fadeDuration`
+(seconds), a key flicker does not read. Every lamp plays the burst. A lamp
+that knows the spore tint (`SporeTint`, `expressions/spore_tint.hpp`) books a
+tint and starts it from the loop once the burst's length has passed and the
+burst has been reaped, so the tint takes the Remote slot the burst held. The
+tint is a transient `shifty` from the same sender on the base: Bloom fill, 4 s
+fade in, 20 s hold, opacity 80 **(T)**, fading back over the command's
+`fadeDuration`, capped at 100 s. Bloom staggers pixel starts, and shifty
+holds each fade's window open for half a fade past the fade length
+(`ShiftyExpression::maxCycleMs`), though every pixel has landed by then. So
+at the cap the tint holds its slot for 6 s + 20 s + 150 s = 176 s, the last
+50 s with nothing changing on the strip, inside the 180 s transient lifetime
+(a static assert in `spore_tint.cpp` ties the two). Only a
+command that started its burst at once (no `delayMs`) is followed. While a
+tint is booked or a peer's `shifty` transient is in flight, another spore
+still sparkles but tints nothing. A booked tint the manager refuses when its
+time comes (home mode, no Remote slot free) is dropped. No lamp sends this
+shape: flicker is continuous, so the cascade and announce paths never send
+it, and Fireflies' beat carries no `fadeDuration`. Tests:
+`test/test_spore_tint/`, `test/test_shifty_one_shot/`.
 
 **Colours.** Whisper's origin
 colour rides the frame as `c`, so a hop far from the origin still has it. Any

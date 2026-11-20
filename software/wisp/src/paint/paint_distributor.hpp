@@ -77,6 +77,14 @@ class PaintDistributor {
   // per-lamp color assignments on the next pass.
   void setShuffleSeed(uint8_t s) { shuffleSeed_ = s; }
 
+  // Style TupleSampler assigns with. True when it changed, so the caller
+  // re-assigns lamps only then, and a resend cuts no drift fade.
+  bool setPaletteStyle(PaletteStyle style) {
+    if (style == style_) return false;
+    style_ = style;
+    return true;
+  }
+
   // intervalMs: how often each lamp is re-colored [30000..3600000].
   // fadePct [0..100]: sets each re-color's fade length (see driftFadeMs).
   void setDrift(uint32_t intervalMs, uint8_t fadePct);
@@ -109,6 +117,7 @@ class PaintDistributor {
   MeshLink* mesh_ = nullptr;
   CurrentPalette* palette_ = nullptr;
   uint8_t shuffleSeed_ = 0;
+  PaletteStyle style_ = PaletteStyle::Gradient;
   // Null roster: assignment is a no-op (used in tests).
   WispRoster* roster_ = nullptr;
   bool paintMode_ = false;

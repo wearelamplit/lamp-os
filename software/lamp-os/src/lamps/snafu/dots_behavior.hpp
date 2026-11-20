@@ -55,7 +55,8 @@ class DotsBehavior : public AnimatedBehavior {
   uint32_t borrowDuration_ = 0;
   std::vector<Color> borrowBase_, borrowShade_;
   // Own-palette equivalent of cur_ during borrow, melt target for draw()'s
-  // second-half crossfade. Rebuilt only alongside cur_, never per frame.
+  // second-half crossfade and the drift-back melt it hands over. Rebuilt only
+  // alongside cur_, never per frame; empty once neither runs.
   std::vector<Color> ownMelt_;
   // The drift-back crossfade home mode started is under way. A melt it cut
   // off keeps its span and position at that moment, eased out over the
@@ -64,10 +65,14 @@ class DotsBehavior : public AnimatedBehavior {
   uint32_t driftMeltSpan_ = 0;
   uint32_t driftMeltPos_ = 0;
 
-  // Full-buffer scene: each segment's slice filled from its own palette,
-  // arranged by perm_.
-  std::vector<Color> buildScene();
-  std::vector<Color> buildSceneWith(bool useBorrow);
+  // Full-buffer scene built into `scene`: each segment's slice filled from its
+  // own palette, arranged by perm_.
+  void buildScene(std::vector<Color>& scene);
+  void buildSceneWith(std::vector<Color>& scene, bool useBorrow);
+  // prev_ takes the scene on show and cur_ a fresh one, reusing both buffers.
+  void rescatter();
+  // Frees the peer stops once the borrow is over.
+  void releaseBorrow();
   bool anyMultiColor() const;
   // Once the drift-back crossfade has ended or a colour edit cut it short,
   // returns the scene crossfade to its ambient length.

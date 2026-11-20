@@ -17,8 +17,14 @@ const _lampB = [0x02, 0, 0, 0, 0, 0x0B];
 
 Uint8List _b(String s) => Uint8List.fromList(utf8.encode(s));
 
-String _status(int seed) =>
-    '{"wispMac":"$_wispMac","source":"manual","shuffleSeed":$seed}';
+// The seed rides the wisp's config; a new config stamp on the status makes
+// the app read it.
+String _status(int seed) => '{"wispMac":"$_wispMac","configSplit":true,'
+    '"source":"manual","configLastSeenMs":$seed}';
+
+Uint8List _config(int seed) => _b('{"char":"wispConfig","ledType":"GRB",'
+    '"px":30,"brightness":100,"driftIntervalMs":120000,"driftFadePct":50,'
+    '"shuffleSeed":$seed,"opSeq":0}');
 
 // CHAR_WISP_CLAIMS with the paint section: lamp A painted `a`, lamp B `b`,
 // each colour on every base and shade channel.
@@ -44,13 +50,17 @@ void main() {
   Future<void> setClaims(Uint8List blob) => ble.write(
       _lampId, BleUuids.controlService, BleUuids.wispClaims, blob);
 
-  void notifyStatus(int seed) => ble.simulateNotify(
-      _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(_status(seed)));
+  void notifyStatus(int seed) {
+    ble.seedSection(_lampId, 'wispconfig', _config(seed));
+    ble.simulateNotify(
+        _lampId, BleUuids.controlService, BleUuids.wispStatus, _b(_status(seed)));
+  }
 
   setUp(() async {
     ble = InMemoryBleClient();
     await ble.connect(_lampId);
     ble.seedSection(_lampId, 'wispstatus', _b(_status(7)));
+    ble.seedSection(_lampId, 'wispconfig', _config(7));
     await setClaims(_claims(10, 20));
     c = ProviderContainer(overrides: [bleClientProvider.overrideWithValue(ble)]);
     addTearDown(c.dispose);
@@ -71,8 +81,12 @@ void main() {
     expect(n.colorsRecalculating, isTrue,
         reason: 'the wisp has not re-rolled; seed still 7');
 
-    // The wisp re-rolls: its status reports seed 8, the cache the new colours.
+    // The wisp re-rolls: its config reports seed 8, the cache the new
+    // colours. The config read the status starts holds the link, so the
+    // chips are read on the wisp's next status.
     await setClaims(_claims(40, 50));
+    notifyStatus(8);
+    await pumpEventQueue();
     notifyStatus(8);
     await pumpEventQueue();
     expect(n.colorsRecalculating, isFalse);

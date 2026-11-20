@@ -38,6 +38,7 @@
 #include "core/compositor.hpp"
 #include "core/moments.hpp"
 #include "core/frame_buffer.hpp"
+#include "core/setup_stage.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/personality_engine.hpp"
 #include "expressions/expression_invocation.hpp"
@@ -176,9 +177,10 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
     // app-supplied colors payload overwrites the restored baseline. An empty
     // payload leaves the pre-preview baseline standing so a preview can't stick.
     clearZonePreview();
-    // App may have edited saved colors during the test. Snap configurator
-    // to the new values + re-assert any active wisp paint so the new
-    // baseline doesn't briefly stomp it.
+    // The web config page sends the colours it shows. They go up on the
+    // saved rotation, since RAM config may still hold an abandoned app
+    // edit's. Then re-assert any active wisp paint so the new baseline doesn't
+    // briefly stomp it.
     lamp::stampConfiguratorActivity(millis());
 
     if (doc["shadeColors"]) {
@@ -188,10 +190,7 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
         for (JsonVariant shadeColor : shadeColors) {
           updatedColors.push_back(lamp::hexStringToColor(shadeColor));
         }
-        shadeConfiguratorBehavior.showScene(
-            lamp::buildRoleScene(shade.pixelCount, updatedColors,
-                                 config.shade.renderedRotation()),
-            0);
+        shadeConfiguratorBehavior.showOnSavedRotation(updatedColors);
       }
     }
     if (doc["baseColors"]) {
@@ -201,10 +200,7 @@ void dispatchLampAction(JsonDocument& doc, unsigned long updateTimeMs) {
         for (JsonVariant baseColor : baseColors) {
           updatedColors.push_back(lamp::hexStringToColor(baseColor));
         }
-        baseConfiguratorBehavior.showScene(
-            lamp::buildRoleScene(base.pixelCount, updatedColors,
-                                 config.base.renderedRotation()),
-            0);
+        baseConfiguratorBehavior.showOnSavedRotation(updatedColors);
       }
     }
     // If the wisp was painting either surface before the expression
@@ -397,6 +393,29 @@ void runSerialCommand(char* line, size_t len) {
     }
   }
 
+  // Arms a hang at a setup stage for the next boots, then restarts, so the
+  // setup watchdog and the boot-loop backoff can be seen on the rig.
+  if (strncmp(line, "loopwd.hangsetup ", 17) == 0) {
+    const char* arg = line + 17;
+    const char* space = std::strchr(arg, ' ');
+    const size_t nameLen = space ? static_cast<size_t>(space - arg) : std::strlen(arg);
+    char stageName[16] = {};
+    if (nameLen < sizeof(stageName)) std::memcpy(stageName, arg, nameLen);
+    char* end = nullptr;
+    const unsigned long boots = space ? std::strtoul(space + 1, &end, 10) : 1;
+    const lamp::boot_history::Stage stage = lamp::boot_history::stageFromName(stageName);
+    if (stage == lamp::boot_history::Stage::Unknown || stage == lamp::boot_history::Stage::Boot ||
+        (space && *end != '\0') || boots == 0 || boots > 255) {
+      Serial.println("[cmd] err loopwd.hangsetup <variant|config|wifi|ble|webapp|leds|"
+                     "behaviors|mesh|ota|loop> [boots 1..255]");
+      return;
+    }
+    lamp::setup_stage::armBenchHang(stage, static_cast<uint8_t>(boots));
+    Serial.printf("[cmd] ok loopwd.hangsetup %s %lu\n", lamp::boot_history::stageName(stage), boots);
+    Serial.flush();
+    esp_restart();
+  }
+
   if (strcmp(line, "yawn") == 0 || strncmp(line, "yawn ", 5) == 0) {
     runYawnCommand(line + 4);
     return;
@@ -414,7 +433,10 @@ void runSerialCommand(char* line, size_t len) {
 
   if (strcmp(line, "expr.get") == 0) {
     std::string out;
-    config.expressionsSectionJsonCached(out);
+    if (!config.expressionsSectionJsonCached(out)) {
+      Serial.println("[cmd] err busy");
+      return;
+    }
     // write() streams the JSON; printf would malloc the whole line first.
     Serial.print("[cmd] ok ");
     Serial.write(reinterpret_cast<const uint8_t*>(out.data()), out.size());
@@ -580,8 +602,10 @@ void runSerialCommand(char* line, size_t len) {
 
   if (strcmp(line, "cfg.get") == 0) {
     std::string base, shade;
-    config.baseSectionJsonCached(base);
-    config.shadeSectionJsonCached(shade);
+    if (!config.baseSectionJsonCached(base) || !config.shadeSectionJsonCached(shade)) {
+      Serial.println("[cmd] err busy");
+      return;
+    }
     Serial.printf("[cmd] ok base=%s shade=%s\n", base.c_str(), shade.c_str());
     return;
   }

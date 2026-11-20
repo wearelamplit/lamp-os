@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../../_support/in_memory_ble_client.dart';
+import '../../_support/wisp_palette_ble.dart';
 import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/features/wisp/application/wisp_notifier.dart';
@@ -38,7 +40,7 @@ void main() {
       final ble = InMemoryBleClient();
       await primeStatus(
         ble,
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
         '"oscRole":"secondary"}',
       );
       final c = makeContainer(ble);
@@ -60,11 +62,37 @@ void main() {
           reason: 'optimistic role flip reverted');
     });
 
+    // The op reaches the wisp and its echo lands, but the write call reports
+    // an error (a lost response).
+    test('setSource sends no second copy of an op the wisp echoed before its '
+        'write reported an error', () async {
+      final ble = PaletteBle(lampId);
+      final (_, n) = await openWisp(ble, '{"wispMac":"$wispA","configSplit":true,"source":"osc"}');
+
+      ble.holdSourceWrite = Completer<void>();
+      final result = n.setSource(WispSourceMode.off).then<Object?>(
+            (_) => null,
+            onError: (Object e) => e,
+          );
+      await pumpEventQueue();
+      ble.notifyStatus('{"wispMac":"$wispA","configSplit":true,"source":"off"}');
+      await pumpEventQueue();
+      ble.holdSourceWrite!.completeError(Exception('response lost'));
+      ble.holdSourceWrite = null;
+
+      expect(await result, isNull);
+      expect(n.state.value!.source, WispSourceMode.off);
+      final sourceWrites = ble
+          .writesTo(lampId, BleUuids.wispOp)
+          .where((w) => utf8.decode(w).contains('setSource'));
+      expect(sourceWrites, hasLength(1), reason: 'the op landed; no resend');
+    });
+
     test('setSource reverts source pill on BLE failure', () async {
       final ble = InMemoryBleClient();
       await primeStatus(
         ble,
-        '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc"}',
+        '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc"}',
       );
       final c = makeContainer(ble);
 

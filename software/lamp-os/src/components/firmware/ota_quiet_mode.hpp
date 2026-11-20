@@ -11,11 +11,12 @@ namespace ota_quiet_mode {
 // firmware distributor on its first Streaming step; exited on abort, failure
 // tombstone, or success (just before reboot).
 //
-// `tearDownRadio` controls whether adv/scan/webapp also stop and any
-// connected GATT client is kicked. The mesh OTA path passes true (the phone
-// isn't the transport, so kicking it just stops it from competing with chunk
-// RX for radio time). The BLE-pushed OTA path passes false (the phone IS the
-// chunk transport, so kicking it kills the session).
+// `tearDownRadio` controls whether adv/scan also stop, any connected GATT
+// client is kicked, and the softAP goes down (webapp::shutdownForOta). The
+// mesh OTA path passes true (the phone isn't the transport, so kicking it just
+// stops it from competing with chunk RX for radio time). The BLE-pushed OTA
+// path passes false (the phone IS the chunk transport, so kicking it kills the
+// session).
 //
 // When quiet is active:
 //   - Compositor::tick() short-circuits behaviors / expression draw but
@@ -45,6 +46,10 @@ bool isQuiet();
 
 // How many enterQuiet calls are unmatched; isQuiet() is holders() > 0.
 int holders();
+
+// True while a quiet entry holds the radio torn down, from its pause until
+// the resume of the exit that ends it.
+bool radioTornDown();
 
 // The active session's visibility, latched at the 0->1 enterQuiet that
 // started it. Meaningful only while isQuiet() is true.

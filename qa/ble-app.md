@@ -82,7 +82,18 @@ EOF
 - The EOF heuristic (chunk shorter than the first) tracks the negotiated
   MTU; page chunks are `min(MTU-3, 244)` bytes.
 - Other readable sections for `PAGE_CTRL`: `lamp`, `base`, `shade`, `home`,
-  `nearby`, `exprcat`.
+  `nearby`, `exprcat`. A config section (`lamp`, `base`, `shade`, `expr`,
+  `home`) reads `!` when the lamp is too short of heap to build it; read it
+  again after a moment. `nearby` is built only while it is read: the first
+  read waits up to 100 ms for the lamp to build it and reads empty if it
+  could not; it is freed 30 s after the last read, or on the next loop tick
+  once the app leaves Social (`editSession surface=0x08 closed`), also when
+  Social is opened and left while the app pushes firmware.
+- A section's copy over 1 KB (nearby, a big expr) is freed by the read that
+  returns the empty chunk; a smaller one keeps its buffer, so re-reading the
+  same small section on a tight heap serves it. A small section read right
+  after a large one can still read `!` on a tight heap (needs a bench
+  number: `largest` during a re-read with a big expr).
 
 H2 — schema version is 4 (`kGattSchemaVersion`, `gatt_layout.hpp`); reading
 it must work even later, after a password is set (it is the one un-gated
@@ -155,10 +166,12 @@ and the grey stay up the whole time, then both go together when the lamp's
 indicator ends, with no message (a cancel says nothing). Open an expression in
 the editor during the hold: Test is greyed. Change the base colour after: the
 lamp follows. On a lamp running 1.3.1 the strip and the grey go the moment you
-cancel, and a colour change in the next minute does nothing on the lamp. The
-Home Mode cases (a focus change dropped mid-update, a reconnect while Home Mode
-is open) can't be set up from the app's screens and are covered by
-push_resync_test.dart.
+cancel, and a colour change in the next minute does nothing on the lamp. On
+the current lamp, cancel again, go back to My Lamps and reopen it within the
+minute: the strip and the grey are back, and go when its indicator ends.
+Change the base colour after: the lamp follows. The Home Mode cases (a focus
+change dropped mid-update, a reconnect while Home Mode is open) can't be set
+up from the app's screens and are covered by push_resync_test.dart.
 
 P8 — **one reconnect after a save that restarts the lamp.** Needs a dev build
 on the lamp (the `[ble_control]` lines below are debug-only) and a password
@@ -218,6 +231,150 @@ its built-in pin.", and the row reads Built-in. Save a colour from the lamp's we
 with a pin set: the row still reads the pin afterwards. On a lamp running
 1.3.3, LED setup in advanced mode shows no data pin row.
 
+P12 — **the network picker scans on first open.** On a lamp with Home Mode on
+and no phone connected for at least two minutes, connect and open Home Mode:
+the picker shows its spinner for about 5 s, then lists the networks it found.
+Close and reopen it: the list shows at once. Disconnect for a minute,
+reconnect and open it again: the spinner shows again. With no phone connected
+the lamp still goes into Home Mode within about a minute while the saved
+network is in range, and leaves it within about two once the network is gone.
+On a lamp running 1.3.5 the first open lists networks at once.
+
+P13 — **the wisp screen across a reconnect and a revisit.** Needs a wisp in
+Manual near the lamp and two phones. Open the lamp's wisp screen on phone A,
+power-cycle the lamp and let A reconnect. Change the wisp's source from phone
+B: A follows within a few seconds. Back in Manual, change a swatch on A and
+Save: it saves, with no "not saved" after 20 s. Leave the lamp on A, change
+the palette from B, then open the lamp on A again: the editor shows B's
+palette. Empty the palette from B and reopen on A: the editor is empty.
+Change a swatch on A without saving, leave and reopen: the edit is still
+there. Open the lamp a few times on a wisp whose Manual palette is empty:
+"Reading palette from wisp…" never stays past a few seconds.
+
+P14 — **the palette editor shows the palette the wisp states.** Needs a wisp
+flashed from this branch (`npm run wisp:flash`), two phones, and
+`npm run lamp:tap` on the lamp, opened once. With the wisp in
+Manual and its palette empty, open the lamp: the editor shows empty within a
+second or two, and the lamp log's `[wisp_state] notify` preview carries
+`"manualId":""`. Put the new wisp in Osc with Straylight changing palettes and
+a non-empty Manual palette, then tap Manual: the loading line shows, then the
+real palette; never an empty editor with Save. Empty the palette from phone B
+while phone A is off the lamp, then open it on A: empty. Power-cycle the lamp
+while A has it open, and change the palette from B meanwhile: after A
+reconnects it shows "Reading palette from wisp…" until the wisp's next status
+(up to 30 s when idle), then B's palette, and never offers Save over the old
+one. Power-cycle the lamp, and open it on A the moment it connects: the editor
+shows "Reading palette from wisp…" with no Save until the lamp log's
+`[wisp_state] notify` preview carries `"source"`, then the wisp's palette.
+
+P15 — **a palette save confirms on the wisp's echo.** Same setup as P14. On
+the wisp, edit and Save: the wisp's serial prints `[wisp.op]
+setManualPalette colors=N seq=S`, the lamp log's `[wisp_state] notify` preview
+carries `"manualSeq":S`, and no "not saved" shows. Save, then reset the wisp
+at once: either the save confirms once the wisp is back, or "not saved" shows
+and reopening the lamp shows what the wisp holds; never "saved" while the wisp
+holds something else. Save different palettes from two phones (Pixel and the
+emulator bridge) within a second of each other: both end showing the wisp's
+palette, and at most one shows "not saved". Save, then tap Osc at once: the
+save confirms, and back in Manual the palette shows.
+Give the wisp a rich config (20-character name, password, oscRole
+secondary, brightness 80) and note the lamp's `notify len=`: saves still
+confirm within a few seconds.
+
+P16 — **a Manual palette holds 16 colours.** Same setup as P14. In the
+editor add colours: the `+` stops at 16. Save 16 colours with white on each:
+the wisp's serial prints `setManualPalette colors=16`, the save confirms, and
+the wisp's ring shows all 16.
+
+P17 — **a settings change the wisp never gets is read back.** Same setup as
+P14. Open the Settings tab, move brightness, and
+within a second power the wisp off: about 5 s later the slider goes back to
+the value the lamp last heard from the wisp. With the wisp up, change drift,
+brightness and the LED strip once each: each still shows its new value 10 s
+later.
+
+P18 — **no Save over a palette the app has not read.** Same setup as P14. Open
+the palette sheet, edit a swatch, and power-cycle the lamp:
+once the app reconnects the open sheet's Save greys under "Reading palette
+from wisp…" and the edit stays. When the palette is read the note goes and
+Save comes back with the sheet still open and the edit kept; until then the
+wisp's serial prints no `setManualPalette`. Tap Manual from Osc with the palette
+shown, then power-cycle the lamp within 20 s: the editor turns to "Reading
+palette from wisp…" with no tap.
+
+P19 — **the OSC source shows where to send.** Needs a wisp flashed from 1.3.8
+or later and the app from this tree. The third source pill reads "OSC". With
+the wisp in OSC and joined to Wi-Fi, the Palette tab shows "LISTENING ON" with
+the wisp's address and "port 9000"; the address matches the wisp console's
+`wifi:show`, and tapping it copies the address. Unplug the wisp's Wi-Fi
+router (or clear Wi-Fi with no Ethernet): within about 30 s the row turns to
+"Connect to a network to receive OSC." Plug the router back in: the address returns. With a wisp
+on firmware before 1.3.8 on Ethernet, the row shows its Ethernet address; on
+Wi-Fi it shows no "LISTENING ON" section. In Manual, the Settings tab's Wi-Fi
+row reads "Joins only while the source is OSC."
+
+P20 — **Maestro under the OSC source.** Same setup as P19, a wisp from 1.3.8
+with the Maestro firmware, and a Maestro (or a laptop sending
+`/palette/live/<n>`) on the wisp's network. With the source on OSC the Palette
+tab shows "OSC SENDER" with Straylight lit and the Straylight role picker. Tap
+Maestro: it lights at once, the role picker gives way to "MAESTRO PALETTE
+SLOT" with the wisp's slot, the line "On the Maestro, send palette slot <n> to
+<address>, port 9000." matches the LISTENING ON row, and "Waiting for the
+Maestro" shows until a palette arrives; the wisp's serial prints `setOsc
+mode=maestro` and the stored slot. Pick Slot 3 and send to slot 3: lamps go
+home at the pick and take the palette when it lands; the wisp's serial
+prints `[osc] now /palette/live/3`. Tap Straylight and back: the slot is kept.
+Power the wisp off and tap Straylight: within 45 s the switch goes back to
+Maestro with "Couldn't reach the wisp. Try again." A wisp before the Maestro
+firmware shows the role picker and "Update this wisp to use Maestro.", no
+switch.
+
+P21 — **Custom under the OSC source.** Same setup as P20, a wisp with the
+Custom firmware and a laptop sending OSC to the wisp's address, port 9000.
+The OSC SENDER switch reads Straylight | Maestro | Custom. On a wisp with no
+Custom address stored (its boot line `[wisp.cfg] loaded` shows `oscAddr=''`),
+tap Custom: it lights, a
+CUSTOM ADDRESS field says "Custom needs an address before the wisp can
+switch.", the send arrow is grey, and the wisp's serial prints no `setOsc`.
+Type `lamp`: the field reads "Start with /." and Send on the keyboard does
+nothing. Type `/lamp/palette` and send: the serial prints `setOsc
+mode=custom ... address='/lamp/palette'` once, "Waiting for OSC on
+/lamp/palette" shows until the laptop sends, and the help line names the
+address, the LISTENING ON address and port 9000. Tap Save as preset, close
+and reopen the app: the `/lamp/palette` chip is still there. Tap Straylight,
+then Custom: the wisp goes straight back to `/lamp/palette` with no typing.
+Power the wisp off, type `/other` and send: within 45 s the field goes back
+to `/lamp/palette` with "Couldn't reach the wisp. Try again." With the wisp
+still off, type `/held` and send, tap Maestro, and power the wisp on within
+45 s: its serial prints `setOsc mode=maestro ... address='/held'`. Tap
+Custom: the field reads `/held` with no typing and the serial prints `setOsc
+mode=custom ... address='/held'`. A wisp with Maestro but not Custom shows
+Custom greyed out and "Update this wisp to use Custom."; tapping it does
+nothing.
+
+P22 — **a lamp that hangs up for an update.** Needs two lamps, one older than
+the other, and the Pixel. Open the newer lamp in the app and leave it on its
+control screen. Start the older lamp so the newer one starts sending it an
+update: the open lamp's screen goes to "<Name> is swapping new tricks with a
+friend 🎓" with "Back in about a minute. I'll reconnect on my own." and the
+critter, without the rotating "Reaching out" lines and without "Couldn't reach
+your lamp". `adb logcat -s flutter | grep -E 'ble_drop|ble_timing'` shows one
+`[ble_drop] ... code=19` line (expected from NimBLE's default disconnect
+reason, REMOTE_USER_TERMINATED_CONNECTION; this pass confirms it) and no
+`ble_timing connect` line until the lamp's serial prints `resumed adv + scan
+after OTA`; within a few seconds of that the app reconnects on its own. Then
+pull the open lamp's power instead: the screen shows the rotating "Reaching
+out" lines and `ble_timing connect` attempts follow, as before. Last, start an
+update again and cut the open lamp's power once its screen shows the swap line,
+so it stays dark: about 3 minutes after the drop the screen goes to the
+rotating "Reaching out" lines and `ble_timing connect` attempts start.
+
+P23 — **Lamp Network signal readings.** Connect to a lamp on firmware that
+sends the mesh reading and open Lamp Network. Every Mesh row reads
+`<mac> · Wi-Fi <n> dBm`, BT-only rows read `<mac> · BT <n> dBm`, and no row
+reads -127. On a lamp whose firmware predates the reading, mesh rows show the
+BT reading where the lamp has one and "no reading" otherwise.
+
 ## Pass criteria
 
 - H1 completes: mfg-data scan finds the lamp, schema reads 4, section reads
@@ -240,6 +397,34 @@ with a pin set: the row still reads the pin afterwards. On a lamp running
 - P11: the data pin row shows only in advanced mode on firmware that reports
   pins, a picked pin drives the strip after the restart, another strip's pin
   is greyed out, and a pin that clashes with a button is reported by name.
+- P12: the first picker open after a connect scans before it lists, a reopen
+  lists at once, and home presence still follows the saved network.
+- P13: the wisp screen follows the wisp after a reconnect and a save then
+  confirms; a reopened lamp shows a palette changed or emptied elsewhere and
+  keeps an unsaved edit; the palette editor never sticks on reading.
+- P14: the editor shows an empty palette as empty, never shows an empty or
+  stale palette as the wisp's, and shows the loading line after a reconnect
+  until the wisp states its palette; a lamp that just booted shows the loading
+  line with no Save until the wisp's own status arrives.
+- P15: a save confirms only on its own echo, in any
+  source mode, and never shows "saved" for a palette the wisp does not hold.
+- P16: the editor stops at 16 colours, and 16 white-heavy colours save
+  whole.
+- P17: a settings change the wisp never applied goes back to the wisp's value
+  within about 5 s; one it applied stays.
+- P18: no `setManualPalette` leaves the app while the palette is unread, a
+  sheet left open greys its Save until the palette is read and then gives it
+  back without closing, and a reconnect shows the loading line with no tap.
+- P19: the pill reads OSC, the address shown is the wisp's own and copies,
+  and the no-address line shows only while the wisp has no network.
+- P20: the switch and slot show the wisp's own values, every pick reaches the
+  wisp's serial, lamps follow the picked slot, and a pick the wisp never
+  takes goes back with the error.
+- P22: a lamp that hangs up to send an update reads busy with no connect
+  attempt until it advertises again, then reconnects with no tap; a lamp still
+  not back 3 minutes after the drop goes to "Reaching out"; a power pull still
+  climbs the reconnect ladder.
+- P23: every row's reading names its radio, and none reads -127.
 
 ## Not covered here
 

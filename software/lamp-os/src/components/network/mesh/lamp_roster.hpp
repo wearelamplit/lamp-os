@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "components/network/mesh/direct_rssi.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "util/bd_addr.hpp"
 #include "util/color.hpp"
@@ -104,11 +105,10 @@ struct RosterEntry {
   // invariant for PersonalityEngine hysteresis). -127 = unknown, sorts to back.
   // snapshotNear() sorts descending; getMesh() does not.
   int8_t lastRssi = -127;
-  // RSSI (dBm) of the peer's own direct ESP-NOW HELLO, written only by
-  // addOrUpdateFromEspNow; a relayed copy never writes it. Distinct from
-  // lastRssi (BLE-scan RSSI): feeds the OTA distributor's signal-floor gate.
-  // -127 = unknown, not gated.
-  int8_t espnowRssi = -127;
+  // The peer's own direct ESP-NOW HELLOs, written only by
+  // addOrUpdateFromEspNow. Distinct from lastRssi (BLE-scan RSSI): feeds the
+  // OTA offer gate and the nearby list's `mrssi`.
+  DirectRssi directRssi;
 
   // Canonical uppercase colon-hex mac ("AA:BB:CC:DD:EE:FF"), the
   // disposition-store key format. Empty when hasMac is false.
@@ -156,7 +156,8 @@ struct MeshPeer {
   bool     hasFsDigest = false;
   bool     needsFs = false;
   bool     hasOtaSendingTo = false;
-  int8_t   espnowRssi = -127;
+  // DirectRssi::holdsOtaFloor when the snapshot was taken.
+  bool     otaLinkHeld = false;
   int8_t   lastRssi = -127;
 };
 static_assert(std::is_trivially_copyable<MeshPeer>::value,
@@ -174,6 +175,10 @@ struct ListedPeer {
   uint32_t lastSeenMeshMs = 0;
   uint32_t firmwareVersion = 0;
   int8_t   lastRssi = -127;
+  // DirectRssi::fresh when the snapshot was taken, and whole seconds it
+  // stays fresh after that, rounded down.
+  int8_t   espnowRssi = -127;
+  uint8_t  espnowRssiFreshS = 0;
   uint8_t  otaState = 0;
   bool     hasMac = false;
   bool     hasOtaSendingTo = false;
@@ -212,6 +217,8 @@ class LampRoster {
                           const std::string& bleAddr,
                           const Color& base, const Color& shade,
                           int8_t rssi = -127);
+  // `rssi` is a direct HELLO's frame RSSI, -127 for a relayed copy
+  // (helloRosterRssi).
   void addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
                              const Color& base, const Color& shade,
                              uint32_t firmwareVersion = 0,
@@ -232,8 +239,8 @@ class LampRoster {
   // is older than `maxAgeMs`.
   void prune(uint32_t maxAgeMs);
 
-  // Retires every entry's sighting stamps, so a stale one cannot read as
-  // recent again one millis() wrap later. Call at least once per
+  // Retires every entry's sighting stamps and direct-RSSI reading, so a stale
+  // one cannot read as recent again one millis() wrap later. Call at least once per
   // lampos::kRetiredAgeMs.
   void retireSightings(uint32_t nowMs);
 
@@ -286,12 +293,10 @@ class LampRoster {
   // invalidated by the next getMesh call. Callers may reorder it in place.
   std::vector<MeshPeer>& getMesh(uint32_t maxAgeMs);
 
-  // Every roster entry, for the app-facing nearby list. The buffer is reserved
-  // to kCapacity in one allocation on first use and held until releaseAll, so
-  // it is resident only while an app/webapp client is connected. On a heap too
-  // fragmented for that it reserves just the current count instead, and throws
-  // std::bad_alloc only if that fails too. Same task/reentrancy contract as
-  // getMesh.
+  // Every roster entry, for the app-facing nearby list. The buffer is sized to
+  // the roster's count, reallocated only when the count moved, and held until
+  // releaseAll. Throws std::bad_alloc when the heap cannot size it. Same
+  // task/reentrancy contract as getMesh.
   std::vector<ListedPeer>& getAll();
   void releaseAll();
 
@@ -405,10 +410,11 @@ class LampRoster {
   // lampos::kRetiredAgeMs.
   void retireStaleWisp(uint32_t nowMs);
 
-  // Build and return the merged wispStatus JSON (see mergeWispStatusJson).
+  // Builds the merged wispStatus JSON (see mergeWispStatusJson) into `out`.
   // `maxLen` 0 serves it whole for the `wispstatus` page section;
-  // CHAR_WISP_STATUS passes kWispStatusCharMaxLen.
-  std::string getWispStatusReadJson(size_t maxLen);
+  // CHAR_WISP_STATUS passes kWispStatusCharMaxLen. Any task; never throws.
+  // False, with `out` empty, when the heap cannot spare the build.
+  bool getWispStatusReadJson(std::string& out, size_t maxLen);
 
   // Copy the cached manual palette (interleaved R,G,B,W per color) into
   // `out`, returning bytes written. Served on the `wisppalette` page

@@ -62,6 +62,10 @@ class ConfiguratorBehavior : public AnimatedBehavior {
   // the frame being drawn. Only content installed this way rotates.
   void showScene(const RoleScene& scene, uint32_t fadeMs);
 
+  // Shows `stops` at once on the saved scene's rotation, whatever rotation
+  // the scene on show or RAM config carries.
+  void showOnSavedRotation(const std::vector<Color>& stops);
+
   bool rotating() const { return rotating_; }
 
   // The scene on show. showScene reinstalls it with the rotation position kept.

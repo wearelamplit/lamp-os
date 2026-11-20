@@ -87,8 +87,8 @@ class LampNearbyPeersNotifier extends _$LampNearbyPeersNotifier {
   }
 
   // Immediate tick before the periodic timer catches a roster change that
-  // happened while disconnected: subscribe replays the stale pre-disconnect
-  // frame, so _onStateNotify reseeds _lastRev without triggering a re-read.
+  // happened while disconnected. flutter_blue_plus clears its cached value on
+  // disconnect, so the subscribe replay after a reconnect seeds nothing.
   void _startPolling() {
     _pollTimer?.cancel();
     _poll();

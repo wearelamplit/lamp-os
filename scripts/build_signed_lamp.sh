@@ -47,7 +47,7 @@ echo "[build_signed] building $ENV on channel '$CHANNEL' (signed)..."
   cd "$LAMP_DIR"
   export LAMP_FIRMWARE_CHANNEL="$CHANNEL"
   [ -n "$EXTRA_FLAGS" ] && export PLATFORMIO_BUILD_FLAGS="$EXTRA_FLAGS"
-  pio run -e "$ENV"
+  "$ROOT/scripts/with_pio_lock.sh" pio run -e "$ENV"
 )
 
 [ -f "$SIGNED" ] || { echo "[build_signed] ERROR: signed image not produced at $SIGNED" >&2; exit 1; }

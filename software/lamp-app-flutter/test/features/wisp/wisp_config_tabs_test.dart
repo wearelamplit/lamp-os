@@ -26,7 +26,7 @@ class _FakePeers extends LampNearbyPeersNotifier {
 const _devId = 'lamp-tab-test';
 
 Future<ProviderContainer> _makeContainer({
-  String wispJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual"}',
+  String wispJson = '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":""}',
 }) async {
   SharedPreferences.setMockInitialValues({});
   final ble = InMemoryBleClient();
@@ -37,6 +37,19 @@ Future<ProviderContainer> _makeContainer({
     BleUuids.controlService,
     BleUuids.wispStatus,
     Uint8List.fromList(utf8.encode(wispJson)),
+  );
+  ble.seedSection(
+    _devId,
+    'wispstatus',
+    Uint8List.fromList(utf8.encode(wispJson)),
+  );
+  ble.seedSection(
+    _devId,
+    'wispconfig',
+    Uint8List.fromList(utf8.encode(
+        '{"char":"wispConfig","ledType":"GRB","px":30,"brightness":100,'
+        '"driftIntervalMs":120000,"driftFadePct":50,"shuffleSeed":0,'
+        '"opSeq":0}')),
   );
   final c = ProviderContainer(
     overrides: [
@@ -102,7 +115,8 @@ void main() {
       // SourcePicker pills visible without any tab tap.
       expect(find.text('Manual'), findsOneWidget);
       expect(find.text('Off'), findsOneWidget);
-      expect(find.text('Straylight'), findsOneWidget);
+      expect(find.text('OSC'), findsOneWidget);
+      expect(find.text('Straylight'), findsNothing);
     });
 
     testWidgets('Palette tab shows per-mode widget (manual palette editor)',
@@ -115,10 +129,10 @@ void main() {
       expect(find.text('MANUAL PALETTE'), findsOneWidget);
     });
 
-    testWidgets('Straylight source shows role picker and waiting notice',
+    testWidgets('OSC source shows the Straylight role picker and waiting notice',
         (tester) async {
       final c = await _makeContainer(
-        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
             '"oscRole":"fill"}',
       );
       addTearDown(c.dispose);
@@ -135,7 +149,7 @@ void main() {
     testWidgets('live Straylight stream hides the waiting notice',
         (tester) async {
       final c = await _makeContainer(
-        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"osc",'
+        wispJson: '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"osc",'
             '"sourceLive":true}',
       );
       addTearDown(c.dispose);
@@ -190,7 +204,7 @@ void main() {
       // Source picker pills should not appear on the Settings tab.
       expect(find.text('Manual'), findsNothing);
       expect(find.text('Off'), findsNothing);
-      expect(find.text('Straylight'), findsNothing);
+      expect(find.text('OSC'), findsNothing);
     });
 
     testWidgets('DriftControls does NOT appear on Palette or Lamps tabs',
@@ -243,7 +257,8 @@ void main() {
         (tester) async {
       final c = await _makeContainer(
         wispJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","hasPassword":true}',
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":"",'
+            '"hasPassword":true}',
       );
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);
@@ -275,7 +290,8 @@ void main() {
         (tester) async {
       final c = await _makeContainer(
         wispJson:
-            '{"wispMac":"AA:BB:CC:DD:EE:FF","source":"manual","hasPassword":true}',
+            '{"wispMac":"AA:BB:CC:DD:EE:FF","configSplit":true,"source":"manual","manualId":"",'
+            '"hasPassword":true}',
       );
       addTearDown(c.dispose);
       await _pumpScreen(tester, c);

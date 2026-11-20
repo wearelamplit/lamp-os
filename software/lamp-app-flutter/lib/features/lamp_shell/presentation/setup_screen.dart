@@ -10,7 +10,6 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/tap_counter.dart';
 import '../../../core/widgets/app_sheet.dart';
 import '../../../core/widgets/app_snackbar.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/lamp_name.dart';
 import '../../../core/lamp_password.dart';
 import '../../../core/widgets/password_prompt_dialog.dart';
@@ -20,6 +19,7 @@ import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/application/control_state.dart';
 import '../../control/application/dev_mode.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 /// Setup tab: mobile-style row list. Tapping a row drills into a
 /// sub-pane (HomeWifi, HomeMode, AdvancedLeds, Knockout). The Home Wi-Fi
@@ -39,14 +39,7 @@ class SetupScreen extends ConsumerWidget {
     final async = ref.watch(controlNotifierProvider(lampId));
     return async.when(
       loading: () => const SizedBox.expand(),
-      error: (e, _) => FriendlyError.page(
-        title: "Couldn't reach your lamp.",
-        subtitle:
-            "They may have wandered out of range. Bring your phone closer "
-            'and try again.',
-        rawError: e,
-        onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
-      ),
+      error: (e, _) => LampErrorPage(lampId: lampId, error: e),
       data: (state) => _SetupBody(lampId: lampId, state: state),
     );
   }

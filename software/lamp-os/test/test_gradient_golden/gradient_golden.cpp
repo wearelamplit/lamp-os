@@ -112,10 +112,30 @@ void test_golden_every_pixel_count() {
   expectHash(kGoldenAll, h, "all");
 }
 
+// The caller-buffer builder hashes to the same pinned bytes for every pixel
+// and stop count, and leaves the buffer past `px` untouched.
+void test_into_matches_golden_and_stays_in_bounds() {
+  const Color sentinel(0x5A, 0xA5, 0x3C, 0xC3);
+  uint64_t h = kFnvBasis;
+  for (size_t stops = 0; stops <= 23; ++stops) {
+    const std::vector<Color> fixture = stopFixture(stops);
+    for (int px = 0; px <= 255; ++px) {
+      std::vector<Color> buf(static_cast<size_t>(px) + 4, sentinel);
+      buildGradientWithStopsInto(static_cast<uint8_t>(px), fixture, buf.data());
+      for (size_t i = static_cast<size_t>(px); i < buf.size(); ++i)
+        TEST_ASSERT_TRUE(buf[i] == sentinel);
+      buf.resize(static_cast<size_t>(px));
+      h = hashGradient(h, buf);
+    }
+  }
+  expectHash(kGoldenAll, h, "into");
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_fixture_has_both_channel_directions);
   RUN_TEST(test_golden_per_stop_count);
   RUN_TEST(test_golden_every_pixel_count);
+  RUN_TEST(test_into_matches_golden_and_stays_in_bounds);
   return UNITY_END();
 }

@@ -133,6 +133,11 @@ VARIANT=snafu npm run lamp:build   # any other variant, still unsigned
 npm run wisp:build         # wisp firmware
 ```
 
+Firmware builds (`lamp:build`, `lamp:flash`, `lamp:buildfs`, `lamp:flashfs`, `wisp:build`, `wisp:flash`) take a
+machine-wide lock (`scripts/with_pio_lock.sh`, `~/.platformio/lamp-build.lock`): the lamp build rewrites the
+shared PlatformIO framework libs and a wisp build reinstalls them, so a second concurrent build waits and
+prints that it is waiting. Run raw `pio run` through the same script.
+
 One axis governs the build: **channel ∈ {dev, beta, stable}**
 (`LAMP_FIRMWARE_CHANNEL`). Everything derives — `signed ≡ channel != dev`,
 `LAMP_DEBUG ≡ channel == dev`, `key required ≡ channel != dev`. Local build and
@@ -146,7 +151,7 @@ lamp can't make signed peers loop re-offering it. Dev is an OTA island: the
 `dev` builds a signed `beta` release (`release-beta.yml`, keys from repo
 secrets), and `lamp:flash:release` flashes that signed image over USB. There is
 no local sign-and-flash npm task. To produce a signed binary locally, the
-key-holder runs `pio run` with `LAMP_FIRMWARE_CHANNEL=beta` (or `stable`), the
+key-holder runs `pio run` (through `scripts/with_pio_lock.sh`) with `LAMP_FIRMWARE_CHANNEL=beta` (or `stable`), the
 firmware key at `~/.lamp-os-firmware-key.bin`, and the command key
 (`LAMP_COMMAND_KEY_HEX` or `~/.lamp-os-command-key.hex`); `sign_firmware.py`
 appends the footer and `inject_command_key.py` bakes in the key. A beta/stable
@@ -163,11 +168,15 @@ just those two over USB, then erases otadata so the lamp boots app0. The
 bootloader, partition table and NVS are never written, so name and config
 persist. A blank board needs the web installer at update.lamplit.ca. No build,
 no key needed. Env params: `VARIANT` (default `standard`), `RELEASE_TAG`
-(default `beta`; stable releases are tagged by version, e.g. `v1.3.0`, there is
-no `stable` tag), `PORT`, `IMAGE` (flash a local image, skip the download),
-`CACHE_DIR` and `REFRESH`. Downloads are cached per variant and tag as
+(default `beta`; stable releases are tagged by version, e.g. `v1.3.0`, and each
+push to `main` also replaces the rolling `stable` release (`release-main.yml`)),
+`PORT`, `IMAGE` (flash a local image, skip the download),
+`CACHE_DIR` and `REFRESH`. Rolling tags (`beta`, `stable`) are downloaded on
+every run into a temporary file that is deleted on exit; they never reuse an old
+copy, so offline they fail. A `vX.Y.Z` image is cached per variant and tag as
 `$CACHE_DIR/release-<variant>-<tag>.bin` (default `~/.cache/lamp-os`);
-`REFRESH=1` re-downloads. Every push to `dev` auto-publishes
+`REFRESH=1` re-downloads it, and a failed refresh errors and keeps the cache.
+Every push to `dev` auto-publishes
 a fresh `beta` release (`release-beta.yml`), built at whatever version the
 root `VERSION` file carries.
 

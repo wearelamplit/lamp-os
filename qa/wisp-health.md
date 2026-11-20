@@ -7,7 +7,7 @@ app's wisp status goes stale.
 
 The wisp is **USB-flash-only** (`PLATFORMIO_UPLOAD_PORT=<wisp-port> npm run
 wisp:flash`) and its serial console is line-command based (`paint:on/off`,
-`src:off|manual|osc`, `osc:role <role>`, `wifi:show`, `wifi:set <ssid> <pass>`, `wifi:clear`,
+`src:off|manual|osc`, `osc:role <role>`, `osc:mode <straylight|maestro|custom>`, `osc:slot <1-10>`, `osc:addr </path>`, `paint:swatches on|off`, `wifi:show`, `wifi:set <ssid> <pass>`, `wifi:clear`,
 `stage:on/off`) — no JSON action grammar like the lamps.
 
 ## First: get eyes on it

@@ -39,6 +39,7 @@ import 'package:lamp_app/core/ble/uuids.dart';
 import 'package:lamp_app/core/widgets/critter_icon.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/control_state.dart';
+import 'package:lamp_app/features/control/application/lamp_busy_exception.dart';
 import 'package:lamp_app/features/control/domain/sections.dart';
 import 'package:lamp_app/features/inventory/application/inventory_notifier.dart';
 import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
@@ -114,6 +115,14 @@ class _FakeControl extends ControlNotifier {
   @override
   Future<ControlState> build(String deviceId) async =>
       _fakeState(_selfName, selfLampId: selfLampId);
+}
+
+class _GoesBusyControl extends ControlNotifier {
+  @override
+  Future<ControlState> build(String deviceId) async => _fakeState('floral');
+
+  void goBusy() =>
+      state = AsyncError(const LampBusyException(), StackTrace.current);
 }
 
 /// Stub for lampNearbyPeersNotifierProvider that returns a
@@ -506,6 +515,30 @@ void main() {
     expect(find.text('Jacko'), findsNothing);
     // Disposition (lampId-keyed) still resolves correctly.
     expect(find.text('fond'), findsOneWidget);
+  });
+
+  testWidgets('a lamp that goes low on memory says so on the Social tab',
+      (tester) async {
+    final control = _GoesBusyControl();
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        bleClientProvider.overrideWithValue(InMemoryBleClient()),
+        controlNotifierProvider('floral-id').overrideWith(() => control),
+        lampNearbyPeersNotifierProvider('floral-id')
+            .overrideWith(() => _FakeLampNearbyPeers(const [])),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(body: SocialScreen(lampId: 'floral-id')),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Your lamp is low on memory.'), findsNothing);
+
+    control.goBusy();
+    await tester.pump();
+    expect(find.text('Your lamp is low on memory.'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
   });
 }
 

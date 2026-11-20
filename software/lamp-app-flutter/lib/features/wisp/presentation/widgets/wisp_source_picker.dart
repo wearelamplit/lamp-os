@@ -38,7 +38,7 @@ class SourcePicker extends StatelessWidget {
             ),
             const SizedBox(width: AppSpace.sm),
             _SourcePill(
-              label: 'Straylight',
+              label: 'OSC',
               icon: Icons.graphic_eq,
               selected: current == WispSourceMode.osc,
               onTap: () => onSelect(WispSourceMode.osc),

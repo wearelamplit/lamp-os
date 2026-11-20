@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <array>
 #include <cstring>
 #include <new>
 #include <string>
@@ -30,6 +31,7 @@
 #include "core/moments.hpp"
 #include "core/override_aggregate.hpp"
 #include "core/pending_slot_aggregate.hpp"
+#include "util/alloc_boundary.hpp"
 #include "util/dropped_write_log.hpp"
 
 
@@ -583,12 +585,14 @@ void Lamp::drainCommand() {
       // Refused here too so a delayed cascade is never booked to fire after
       // home mode ends.
       if (expressionManager.ignoresPeers()) return;
+      // ponytail: heap pools per MSG_COMMAND, since ArduinoJson 7 always allocates
+      // to deserialize. A custom arena allocator on a static buffer removes them.
       JsonDocument doc;
       if (deserializeJson(doc, cmd.payload, cmd.payloadLen) != DeserializationError::Ok) return;
       lamp::ExpressionInvocation inv;
       if (!lamp::parseInvocation(doc.as<JsonObjectConst>(), inv)) return;
       if (inv.delayMs == 0) {
-        expressionManager.triggerInvocation(inv, cmd.sourceMac);
+        lamp::playReceivedCommand(expressionManager, sporeTint, inv, cmd.sourceMac);
       } else {
         lamp::enqueueDelayedInvocation(inv, cmd.sourceMac, inv.delayMs);
       }
@@ -596,58 +600,62 @@ void Lamp::drainCommand() {
   }
 }
 
+// Answers a queued query only while a colour-info resend slot is free, so no
+// reply's resends are cut short; the rest wait for a later tick.
 void Lamp::drainColorQuery() {
-  lamp::PendingColorQuery q;
-  if (!lamp::pendingSlots.colorQuery.drain(pendingMux, q)) return;
+  lamp::pendingSlots.colorQuery.drainWhile(
+      pendingMux, [] { return meshLink.colorInfoResendFree(); },
+      [](const lamp::PendingColorQuery& q) {
+        lamp::Config& config = ::config;
 
-  lamp::Config& config = ::config;
+        uint8_t baseStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
+        uint8_t shadeStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
 
-  uint8_t baseStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
-  uint8_t shadeStops[lamp_protocol::COLOR_INFO_MAX_STOPS * 4];
+        auto pack = [](const std::vector<Color>& colors, uint8_t* out) -> uint8_t {
+          uint8_t n = 0;
+          for (const Color& c : colors) {
+            if (n >= lamp_protocol::COLOR_INFO_MAX_STOPS) break;
+            out[n * 4 + 0] = c.r; out[n * 4 + 1] = c.g;
+            out[n * 4 + 2] = c.b; out[n * 4 + 3] = c.w;
+            ++n;
+          }
+          return n;
+        };
 
-  auto pack = [](const std::vector<Color>& colors, uint8_t* out) -> uint8_t {
-    uint8_t n = 0;
-    for (const Color& c : colors) {
-      if (n >= lamp_protocol::COLOR_INFO_MAX_STOPS) break;
-      out[n * 4 + 0] = c.r; out[n * 4 + 1] = c.g;
-      out[n * 4 + 2] = c.b; out[n * 4 + 3] = c.w;
-      ++n;
-    }
-    return n;
-  };
+        const uint8_t baseCount  = pack(config.base.broadcastColors(),  baseStops);
+        const uint8_t shadeCount = pack(config.shade.broadcastColors(), shadeStops);
 
-  const uint8_t baseCount  = pack(config.base.broadcastColors(),  baseStops);
-  const uint8_t shadeCount = pack(config.shade.broadcastColors(), shadeStops);
-
-  meshLink.sendColorInfo(q.sourceMac, baseStops, baseCount,
-                         shadeStops, shadeCount);
+        meshLink.sendColorInfo(q.sourceMac, baseStops, baseCount,
+                               shadeStops, shadeCount);
+      });
 }
 
 void Lamp::drainColorInfo() {
-  lamp::PendingColorInfo info;
-  if (!lamp::pendingSlots.colorInfo.drain(pendingMux, info)) return;
-  const std::vector<Color>& own = config.base.broadcastColors();
-  if (info.baseCount > 0 && !own.empty()) {
-    fondnessEngine.observeColour(
-        info.sourceMac,
-        Color(info.baseStops[0], info.baseStops[1], info.baseStops[2], info.baseStops[3]),
-        own.front(), lamp::uptimeMs());
-  }
-  std::vector<Color> baseStops;
-  baseStops.reserve(info.baseCount);
-  for (uint8_t i = 0; i < info.baseCount; ++i) {
-    baseStops.emplace_back(info.baseStops[i * 4 + 0], info.baseStops[i * 4 + 1],
-                           info.baseStops[i * 4 + 2], info.baseStops[i * 4 + 3]);
-  }
-  std::vector<Color> shadeStops;
-  shadeStops.reserve(info.shadeCount);
-  for (uint8_t i = 0; i < info.shadeCount; ++i) {
-    shadeStops.emplace_back(info.shadeStops[i * 4 + 0], info.shadeStops[i * 4 + 1],
-                            info.shadeStops[i * 4 + 2], info.shadeStops[i * 4 + 3]);
-  }
-  if (auto* g = compositor.behaviorContext().greeting) {
-    g->onColorInfo(info.sourceMac, baseStops, shadeStops);
-  }
+  lamp::pendingSlots.colorInfo.drainWhile(
+      pendingMux, [] { return true; }, [this](const lamp::PendingColorInfo& info) {
+        const std::vector<Color>& own = config.base.broadcastColors();
+        if (info.baseCount > 0 && !own.empty()) {
+          fondnessEngine.observeColour(
+              info.sourceMac,
+              Color(info.baseStops[0], info.baseStops[1], info.baseStops[2], info.baseStops[3]),
+              own.front(), lamp::uptimeMs());
+        }
+        lamp::catchBadAlloc("colorInfo", [&] {
+          std::array<Color, lamp_protocol::COLOR_INFO_MAX_STOPS> baseStops;
+          std::array<Color, lamp_protocol::COLOR_INFO_MAX_STOPS> shadeStops;
+          auto unpack = [](const uint8_t* in, uint8_t count, Color* out) {
+            for (uint8_t i = 0; i < count; ++i) {
+              out[i] = Color(in[i * 4 + 0], in[i * 4 + 1], in[i * 4 + 2], in[i * 4 + 3]);
+            }
+          };
+          unpack(info.baseStops, info.baseCount, baseStops.data());
+          unpack(info.shadeStops, info.shadeCount, shadeStops.data());
+          if (auto* g = compositor.behaviorContext().greeting) {
+            g->onColorInfo(info.sourceMac, {baseStops.data(), info.baseCount},
+                           {shadeStops.data(), info.shadeCount});
+          }
+        });
+      });
 }
 
 void Lamp::drainEvent() {

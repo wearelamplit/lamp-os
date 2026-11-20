@@ -7,6 +7,7 @@
 #include <portmacro.h>
 
 #include "components/network/ble/ble_control.hpp"  // for ble_control::isClientConnected()
+#include "components/network/transport/ssid_presence.hpp"
 #include "components/network/transport/wifi_psk.hpp"
 #include "util/uptime.hpp"
 
@@ -25,8 +26,13 @@ namespace wifi {
 
 static State s_state = IDLE;
 static std::string s_lastError;
-static std::vector<ScanResult> s_scanResults;          // drained by UI notify
-static std::vector<std::string> s_recentSsids;         // persistent presence cache
+static std::vector<ScanResult> s_scanResults;  // an app-requested scan's list
+static SsidPresence s_presence;                // the latest scan's SSIDs
+// Set while s_scanResults holds a list; Core 1 only, so tick() can drop the
+// list once the app leaves without taking the mux every pass.
+static bool s_resultsHeld = false;
+// The scan in flight was requested by the app, so its list is published.
+static bool s_scanForApp = false;
 // On lamp::uptimeMs(): either can sit for weeks (home mode off, a client
 // connected), and a 32-bit stamp would then read as recent one wrap later.
 static uint64_t s_lastScanCompleteMs = 0;
@@ -36,15 +42,15 @@ static HomeModeEnabledGetter s_homeModeEnabledGetter = nullptr;
 static OtaInProgressGetter   s_otaInProgressGetter   = nullptr;
 static WebappActiveGetter    s_webappActiveGetter    = nullptr;
 
-// Guards s_scanResults + s_recentSsids + s_lastScanCompleteMs + s_lastError
+// Guards s_scanResults + s_presence + s_lastScanCompleteMs + s_lastError
 // against concurrent access. Writers run on Core 1 (wifi::tick scan-complete
 // drain + startScan clear, s_lastError set in tick/startSoftAp). Readers on
 // Core 0 (BLE WifiStateCallback::onRead → peekScanResults() + lastError()).
 // Without this guard, a concurrent push_back / string reassign on Core 1
 // while Core 0 copies the vector or string dereferences freed memory.
 // homeSsidVisible() also runs on Core 1 (same as tick). Critical sections
-// are kept short: only O(1) swaps or a short-string (SSO, no-alloc) copy, no
-// network calls, no logging.
+// are kept short: O(1) swaps, a fixed-size copy, or a short-string (SSO,
+// no-alloc) copy, no network calls, no logging.
 static portMUX_TYPE s_scanMux = portMUX_INITIALIZER_UNLOCKED;
 
 // How recent a scan must be for homeSsidVisible() to trust the cache.
@@ -114,28 +120,27 @@ std::string lastError() {
   return out;
 }
 
-void startScan() {
-#ifdef LAMP_DEBUG
-  // Logged so we can rule scans in/out of any "slow during BT" reports
-  // — scans only fire when BT is disconnected, but a scan started just
-  // before a reconnect can spill ~5s into the BT session.
-  Serial.println("[wifi] scan started");
-  // Trace which gate fired this scan (added 2026-06-04 for scan-storm
-  // diagnosis). lastBgMs is updated by the periodic gate immediately
-  // before this call, so if it's "now-ish" the caller is the periodic
-  // path; if much older, the caller was external (e.g. BLE op:scan).
-  Serial.printf("[wifi.sched] startScan() entry: lastBgMs=%u now=%u\n",
-                (unsigned)s_lastBackgroundScanMs, (unsigned)millis());
-#endif
-  // Steal the existing results buffer, free OUTSIDE the critical section.
+// Frees the published list outside the critical section.
+static void dropScanResults() {
   std::vector<ScanResult> drop;
   portENTER_CRITICAL(&s_scanMux);
   drop.swap(s_scanResults);
   portEXIT_CRITICAL(&s_scanMux);
+  s_resultsHeld = false;
+}
+
+static void beginScan(bool forApp) {
+#ifdef LAMP_DEBUG
+  Serial.printf("[wifi] scan started forApp=%d\n", (int)forApp);
+#endif
+  dropScanResults();
+  s_scanForApp = forApp;
   WiFi.scanDelete();
   WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false);
   setState(SCANNING);
 }
+
+void startScan() { beginScan(/*forApp=*/true); }
 
 std::vector<ScanResult> peekScanResults() {
   // Non-destructive: both the BLE read and the state-change notify call this,
@@ -144,7 +149,7 @@ std::vector<ScanResult> peekScanResults() {
   // portMUX discipline forbids inside a critical section), then restore it
   // unless a fresh scan already published in the gap. The stolen buffer (or a
   // clobbered stale one) frees on return, outside the mux. Results otherwise
-  // live until startScan() clears them.
+  // live until the next scan starts or tick() sees the app gone.
   std::vector<ScanResult> stolen;
   portENTER_CRITICAL(&s_scanMux);
   stolen.swap(s_scanResults);
@@ -174,18 +179,13 @@ bool homeSsidVisible(const std::string& ssid) {
   if (ssid.empty()) return false;
   // Called from Core 1 (reapplyHomeModeState → currentHomeModeState).
   // The writer is also Core 1 (wifi::tick), so this is single-core, but
-  // the wrap stays because s_recentSsids is shared state and the cost is
-  // negligible (string == is a no-alloc compare). The string compares run
-  // inside the critical section; the loop is bounded (~30 SSIDs max).
+  // the wrap stays because s_presence is shared state and the lookup is a
+  // bounded, no-alloc scan of SsidPresence::kCapacity hashes.
   bool seen = false;
   uint64_t lastMs = 0;
   portENTER_CRITICAL(&s_scanMux);
   lastMs = s_lastScanCompleteMs;
-  if (lastMs != 0) {
-    for (const auto& s : s_recentSsids) {
-      if (s == ssid) { seen = true; break; }
-    }
-  }
+  if (lastMs != 0) seen = s_presence.contains(ssid);
   portEXIT_CRITICAL(&s_scanMux);
   if (!seen) return false;
   // Staleness check is OUTSIDE the critical section; the clock read is fast
@@ -257,35 +257,38 @@ void tick() {
   if (s_state == SCANNING) {
     int16_t n = WiFi.scanComplete();
     if (n >= 0) {
-      // Build into LOCAL vectors first; no allocations or string ops
-      // inside the portMUX. The atomic swap at the end is O(1).
+      // Build LOCALLY first; no allocations or string ops inside the
+      // portMUX. Records arrive strongest first, the order SsidPresence
+      // keeps under its cap. Only an app-requested scan builds the list.
+      SsidPresence presence;
       std::vector<ScanResult> newResults;
-      std::vector<std::string> newSsids;
-      newResults.reserve(n);
-      newSsids.reserve(n);
+      if (s_scanForApp) newResults.reserve(n);
       for (int16_t i = 0; i < n; i++) {
         auto ssid = WiFi.SSID(i);
         if (ssid.length() == 0) continue;
-        std::string ssidStr(ssid.c_str());
+        presence.add(ssid.c_str());
+        if (!s_scanForApp) continue;
         newResults.push_back({
-          ssidStr,
+          std::string(ssid.c_str()),
           (int8_t)WiFi.RSSI(i),
           WiFi.encryptionType(i) != WIFI_AUTH_OPEN,
         });
-        newSsids.push_back(ssidStr);
       }
       const uint64_t completeMs = lamp::uptimeMs();
-      // Atomic publish: swap in the new buffers, free the old ones
-      // OUTSIDE the critical section.
+      // Publish: swap in the new list and free the old one OUTSIDE the
+      // critical section.
       std::vector<ScanResult> dropResults;
-      std::vector<std::string> dropSsids;
       portENTER_CRITICAL(&s_scanMux);
       dropResults.swap(s_scanResults);
-      dropSsids.swap(s_recentSsids);
       s_scanResults.swap(newResults);
-      s_recentSsids.swap(newSsids);
+      s_presence = presence;
       s_lastScanCompleteMs = completeMs;
       portEXIT_CRITICAL(&s_scanMux);
+      s_resultsHeld = s_scanForApp;
+#ifdef LAMP_DEBUG
+      Serial.printf("[wifi] scan done: records=%d distinct=%u overflow=%d\n", (int)n,
+                    (unsigned)presence.size(), (int)presence.overflowed());
+#endif
       WiFi.scanDelete();
       // Re-pin to grid channel post-scan (scanNetworks may have left the
       // radio on whichever channel it finished on).
@@ -337,7 +340,10 @@ void tick() {
   // stalls the softAP's HTTP server for the scan's duration.
   const bool webappActive =
       s_webappActiveGetter && s_webappActiveGetter();
-  if (s_state == IDLE && !ble_control::isClientConnected() &&
+  const bool clientConnected = ble_control::isClientConnected();
+  // The list serves only the app; drop it once the app has gone.
+  if (s_resultsHeld && !clientConnected) dropScanResults();
+  if (s_state == IDLE && !clientConnected &&
       homeModeEnabled && !otaInProgress && !webappActive) {
     const uint64_t now = lamp::uptimeMs();
     const uint64_t elapsed = now - s_lastBackgroundScanMs;
@@ -348,7 +354,7 @@ void tick() {
                     (unsigned)s_lastBackgroundScanMs, (unsigned)now);
 #endif
       s_lastBackgroundScanMs = now;
-      startScan();
+      beginScan(/*forApp=*/false);
     }
   }
 }

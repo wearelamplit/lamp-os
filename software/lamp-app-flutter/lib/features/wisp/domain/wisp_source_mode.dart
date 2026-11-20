@@ -64,3 +64,62 @@ OscRole parseOscRole(String? raw) {
 
 /// Wire-format string for an [OscRole].
 String oscRoleWire(OscRole r) => r.name;
+
+/// Which OSC sender the wisp listens to in [WispSourceMode.osc]. Wire format
+/// on `wispConfig.oscMode` and the `setOsc` wispOp is the lowercase enum
+/// name. [custom] follows one address the owner sets ([oscCustomAddressValid]).
+/// [unknown] is a value this app cannot name, from a newer wisp; it is never
+/// sent.
+enum OscMode {
+  straylight,
+  maestro,
+  custom,
+  unknown,
+}
+
+/// Decode a wire-format `oscMode`: null when absent (a wisp that predates
+/// it), [OscMode.unknown] for a value this app does not know.
+OscMode? parseOscMode(Object? raw) {
+  if (raw == null) return null;
+  for (final m in OscMode.values) {
+    if (m != OscMode.unknown && m.name == raw) return m;
+  }
+  return OscMode.unknown;
+}
+
+/// The Maestro palette slots the wisp accepts in `setOsc`.
+const int kMaestroSlotMin = 1;
+const int kMaestroSlotMax = 10;
+
+/// Decode a wire-format `oscSlot`: null when absent or outside
+/// [kMaestroSlotMin]..[kMaestroSlotMax].
+int? parseMaestroSlot(Object? raw) =>
+    raw is int && raw >= kMaestroSlotMin && raw <= kMaestroSlotMax ? raw : null;
+
+/// The longest Custom OSC address the wisp stores, in bytes.
+const int kOscCustomAddressMaxLen = 15;
+
+/// Why a Custom OSC address breaks the wisp's rule.
+enum OscAddressProblem { empty, noLeadingSlash, tooLong, badCharacter }
+
+const String _kOscAddressForbidden = '"\\#*,?[]{}';
+
+/// What is wrong with [address] as a Custom OSC address, or null when the
+/// wisp takes it. The rule is the wisp's `setOsc` address rule in
+/// `docs/dev/networking.md`.
+OscAddressProblem? oscCustomAddressProblem(String address) {
+  if (address.isEmpty) return OscAddressProblem.empty;
+  if (!address.startsWith('/')) return OscAddressProblem.noLeadingSlash;
+  for (final c in address.codeUnits) {
+    if (c < 0x21 || c > 0x7E || _kOscAddressForbidden.codeUnits.contains(c)) {
+      return OscAddressProblem.badCharacter;
+    }
+  }
+  if (address.length > kOscCustomAddressMaxLen) {
+    return OscAddressProblem.tooLong;
+  }
+  return null;
+}
+
+bool oscCustomAddressValid(String address) =>
+    oscCustomAddressProblem(address) == null;

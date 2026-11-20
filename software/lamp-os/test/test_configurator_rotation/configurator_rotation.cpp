@@ -23,16 +23,15 @@
 #include "../../src/util/gradient.cpp"
 #include "../../src/util/levels.cpp"
 #include "core/home_mode_gate.hpp"
+#include "../replaced_new/replaced_new.hpp"
 
 static size_t g_allocs = 0;
 
-void* operator new(size_t n) {
+void* testAllocate(size_t n) {
   ++g_allocs;
-  if (void* p = std::malloc(n ? n : 1)) return p;
-  throw std::bad_alloc();
+  return std::malloc(n);
 }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, size_t) noexcept { std::free(p); }
+void testRelease(void* p) noexcept { std::free(p); }
 
 using namespace lamp;
 
@@ -245,6 +244,25 @@ void test_rotating_draw_allocates_nothing() {
   }
 }
 
+// A write retargets the surface inside its own buffers: once it has drawn,
+// neither a write that cuts a crossfade short nor a fresh one allocates.
+void test_writes_allocate_nothing() {
+  Rig r(Surface::Base);
+  const RoleScene a = rotatingScene(stopsA(), 5, RotationDir::Up);
+  const RoleScene b = buildRoleScene(kPx, stopsB(), ColorRotation{});
+  r.write(a, kDefaultFadeMs);
+  r.step();
+  g_allocs = 0;
+  for (int k = 0; k < 20; ++k) {
+    r.write((k & 1) ? b : a, kDefaultFadeMs);
+    r.step();
+  }
+  r.step(kDefaultFadeMs + 1);
+  r.write(a, kDefaultFadeMs);
+  r.step();
+  TEST_ASSERT_EQUAL_size_t(0, g_allocs);
+}
+
 // Every change crossfades over kDefaultFadeMs from the frame on show.
 void test_changes_crossfade_from_the_drawn_frame() {
   const RoleScene open = buildRoleScene(kPx, stopsA(), ColorRotation{});
@@ -443,6 +461,61 @@ void test_zone_release_without_a_marker_changes_nothing() {
   TEST_ASSERT_TRUE(r.cfg.rotating());
   TEST_ASSERT_EQUAL(kPx, r.cfg.colors.size());
   r.rotate(scene, 100);
+}
+
+// The web config page's restore (test_expression_complete with colours)
+// while the scene on show runs on an abandoned edit's rotation: colours other
+// than the saved ones run on the saved scene's rotation, or stand still on a
+// static saved scene, for as long as the restore holds.
+void test_restore_runs_on_the_saved_rotation() {
+  const RoleScene edit = rotatingScene(stopsB(), 5, RotationDir::Down);
+  for (bool savedRotates : {true, false}) {
+    Rig r(Surface::Shade);
+    const RoleScene saved = savedRotates ? rotatingScene(stopsA(), 40, RotationDir::Up)
+                                         : buildRoleScene(kPx, stopsA(), ColorRotation{});
+    r.saveScene(saved);
+    r.cfg.colors = saved.colors;
+    r.tick(5000);
+    if (savedRotates) r.expect(saved, r.now);
+    r.write(edit, 0);
+    r.rotate(edit, 20);
+
+    set_mock_millis(r.now);
+    r.cfg.showOnSavedRotation(rgb());
+    r.cfg.lastWebSocketUpdateTimeMs = r.now;
+    const RoleScene want = buildRoleScene(kPx, rgb(), saved.rotation);
+    TEST_ASSERT_EQUAL(savedRotates, r.cfg.rotating());
+    for (int k = 0; k < 200; ++k) {
+      r.step();
+      assertFrame(savedRotates ? r.expect(want, r.now) : want.colors, r.fb.buffer);
+    }
+  }
+}
+
+// Restoring the saved colours puts the saved scene back as it runs, so the
+// edit window ending changes nothing on the strip.
+void test_restore_of_the_saved_colours_runs_on_past_the_edit_window() {
+  const RoleScene edit = rotatingScene(stopsB(), 5, RotationDir::Down);
+  for (bool savedRotates : {true, false}) {
+    Rig r(Surface::Base);
+    const RoleScene saved = savedRotates ? rotatingScene(stopsA(), 40, RotationDir::Up)
+                                         : buildRoleScene(kPx, stopsA(), ColorRotation{});
+    r.saveScene(saved);
+    r.cfg.colors = saved.colors;
+    r.tick(5000);
+    if (savedRotates) r.expect(saved, r.now);
+    r.write(edit, 0);
+    r.rotate(edit, 20);
+
+    set_mock_millis(r.now);
+    r.cfg.showOnSavedRotation(stopsA());
+    r.cfg.lastWebSocketUpdateTimeMs = r.now;
+    const uint32_t restored = r.now;
+    while (r.now <= restored + CONFIGURATOR_WEBSOCKET_TIMEOUT_MS + 2000) {
+      r.step();
+      assertFrame(savedRotates ? r.expect(saved, r.now) : saved.colors, r.fb.buffer);
+    }
+  }
 }
 
 // A rotating saved scene rotates from boot, from the frame the fade-in
@@ -669,6 +742,21 @@ void test_knocked_out_pixels_stay_put() {
   assertFrame(undimmed, r.fb.buffer);
 }
 
+// A knockout map shorter than the strip (a stored base px under the
+// variant's strip count) dims the pixels it covers and leaves the rest lit.
+void test_short_knockout_map_leaves_the_rest_of_the_strip_lit() {
+  Rig r(Surface::Base);
+  KnockoutBehavior knockout(&r.fb, 0, true);
+  knockout.knockoutPixels = std::vector<uint8_t>(kPx / 2, 40);
+  knockout.knockoutPixels.shrink_to_fit();
+  for (size_t i = 0; i < kPx; ++i) r.fb.buffer[i] = Color(200, 100, 50, 10 + i);
+  const std::vector<Color> before = r.fb.buffer;
+  knockout.draw();
+  for (size_t i = 0; i < kPx; ++i) {
+    assertColor(i < kPx / 2 ? setColorBrightness(before[i], 40) : before[i], r.fb.buffer[i], i);
+  }
+}
+
 static constexpr uint32_t kPerMs5 = static_cast<uint32_t>((uint64_t{1} << 32) / 5000);
 
 // Quiet entry's reset puts the next frame at the settled position,
@@ -780,6 +868,7 @@ int main(int, char**) {
   RUN_TEST(test_one_stop_scene_is_solid_and_still);
   RUN_TEST(test_speed_and_direction_change_keep_the_position);
   RUN_TEST(test_rotating_draw_allocates_nothing);
+  RUN_TEST(test_writes_allocate_nothing);
   RUN_TEST(test_changes_crossfade_from_the_drawn_frame);
   RUN_TEST(test_change_mid_crossfade_starts_from_the_drawn_frame);
   RUN_TEST(test_raw_writes_never_rotate);
@@ -787,6 +876,8 @@ int main(int, char**) {
   RUN_TEST(test_zone_release_restores_the_scene_shown_after_an_abandoned_edit);
   RUN_TEST(test_zone_release_restores_the_edit_when_the_marker_goes_up_mid_edit);
   RUN_TEST(test_zone_release_without_a_marker_changes_nothing);
+  RUN_TEST(test_restore_runs_on_the_saved_rotation);
+  RUN_TEST(test_restore_of_the_saved_colours_runs_on_past_the_edit_window);
   RUN_TEST(test_saved_rotating_scene_rotates_from_boot);
   RUN_TEST(test_abandoned_preview_returns_to_the_rotating_saved_scene);
   RUN_TEST(test_abandoned_rotating_preview_settles_on_the_static_saved_scene);
@@ -794,6 +885,7 @@ int main(int, char**) {
   RUN_TEST(test_rotation_off_while_playing_takes_the_static_path);
   RUN_TEST(test_scene_for_another_strip_never_rotates);
   RUN_TEST(test_knocked_out_pixels_stay_put);
+  RUN_TEST(test_short_knockout_map_leaves_the_rest_of_the_strip_lit);
   RUN_TEST(test_reset_resumes_from_the_settled_frame);
   RUN_TEST(test_home_mode_keeps_rotation_running);
   return UNITY_END();

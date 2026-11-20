@@ -13,6 +13,7 @@
 #include "config_types.hpp"
 #include "disposition_store.hpp"
 #include "save_gate.hpp"
+#include "section_cache.hpp"
 
 namespace lamp {
 
@@ -22,14 +23,15 @@ class Config {
   ConfigStore* store_ = nullptr;
 
  public:
-  // First-boot defaults a Lamp subclass injects before NVS load. Fields left
-  // empty/default are not applied; the existing NVS value (or the Config
-  // class-default) wins. colorsEditable is emitted in asBaseJson/asShadeJson
-  // (the app hides the color picker when false).
+  // First-boot defaults a Lamp subclass injects, applied after the NVS load.
+  // Fields left empty/default are not applied; the existing NVS value (or the
+  // Config class-default) wins. Colours seed only a lamp whose load found no
+  // config (applyRoleDefaults). colorsEditable is emitted in
+  // asBaseJson/asShadeJson (the app hides the color picker when false).
   // Per-segment first-boot seed for a multi-segment role. Names the segment,
   // its pixel count, and a hex color list ("#RRGGBBWW,#…"). A variant supplies
   // one per physical strip; applyDefaults seeds the whole role's segment list
-  // when NVS is still factory.
+  // when the load found no config.
   struct SegmentDefault {
     std::string name;
     uint8_t px;
@@ -47,8 +49,7 @@ class Config {
     bool rotationSupported = false;
     // Per-surface pixel count for a first-boot lamp. 0 = no override
     // (leave whatever the loader / class default produced). When non-zero,
-    // applyDefaults only overwrites NVS-loaded values that still match a
-    // known factory baseline (same guard pattern as the color fields).
+    // it fills a role's first segment whose loaded px is 0 (unset).
     uint8_t basePx  = 0;
     uint8_t shadePx = 0;
     // Force the lamp adopted at boot, skipping onboarding and the first-boot
@@ -72,8 +73,10 @@ class Config {
   /**
    * create a config, loading the persisted blob from the store
    * @param [in] inStore persistence backend for NVS-backed values
+   * @param [in] winding the variant's strip winding, which a store the C
+   *             firmware wrote migrates onto
    */
-  Config(ConfigStore* inStore);
+  Config(ConfigStore* inStore, StripWinding winding);
 
   // Attach a store to a default-constructed Config without running the
   // load constructor. Used by main.cpp to enable loadLampType() /
@@ -84,9 +87,9 @@ class Config {
     dispositions_.attachStore(s);
   }
 
-  // Apply first-boot defaults AFTER the NVS blob has been loaded. Only
-  // fields that NVS left at their factory value are overwritten;
-  // user-saved values are authoritative.
+  // Apply first-boot defaults AFTER the NVS blob has been loaded. A stored
+  // value is authoritative; the variant's defaults fill what the store left
+  // unset, and its colours only a lamp whose load found no config.
   void applyDefaults(const Defaults& d);
 
   // True when NVS held a non-empty config, or a blob holding part of it, that
@@ -194,16 +197,17 @@ class Config {
   JsonDocument asShadeJson();
   JsonDocument asHomeModeJson();
 
-  // Per-section JSON cache. Each section caches its serialised JSON plus a
-  // dirty flag; the accessor rebuilds if dirty and copies the JSON into out,
-  // both under a mutex in config.cpp, so it is safe from any task on either
-  // core (never an ISR, the mutex blocks). Mutation paths must call
-  // invalidateXSection() after touching any field that feeds asXJson().
-  void lampSectionJsonCached(std::string& out);
-  void baseSectionJsonCached(std::string& out);
-  void shadeSectionJsonCached(std::string& out);
-  void expressionsSectionJsonCached(std::string& out);
-  void homeSectionJsonCached(std::string& out);
+  // Per-section JSON cache. Each accessor rebuilds the section if dirty and
+  // copies it into out, both under a mutex in config.cpp, so it is safe from
+  // any task on either core (never an ISR, the mutex blocks). False, with out
+  // empty, when the heap could not build or copy out the section. Mutation
+  // paths must call invalidateXSection() after touching any field that feeds
+  // asXJson().
+  [[nodiscard]] bool lampSectionJsonCached(std::string& out);
+  [[nodiscard]] bool baseSectionJsonCached(std::string& out);
+  [[nodiscard]] bool shadeSectionJsonCached(std::string& out);
+  [[nodiscard]] bool expressionsSectionJsonCached(std::string& out);
+  [[nodiscard]] bool homeSectionJsonCached(std::string& out);
 
   // Frees every section cache (they rebuild on the next read). For when no
   // client can read them: a cache otherwise holds its heap, up to about 4 KB
@@ -284,14 +288,11 @@ class Config {
   DispositionStore dispositions_{kDispositionFlushIdleMs};
   SaveGate saveGate_{kPersistRetryBaseMs, kPersistRetryMaxMs};
 
-  // All dirty=true initially so the first cached() call computes and
-  // populates the string. After that, mutations on Core 1 must call
-  // invalidateXSection() before reading the cached value again.
-  std::string lampSectionJson_;
-  std::string baseSectionJson_;
-  std::string shadeSectionJson_;
-  std::string expressionsSectionJson_;
-  std::string homeSectionJson_;
+  SectionCache lampSection_;
+  SectionCache baseSection_;
+  SectionCache shadeSection_;
+  SectionCache expressionsSection_;
+  SectionCache homeSection_;
   std::string lampId_;
   lamp_protocol::LampVariant lampVariant_ = lamp_protocol::LampVariant::Unknown;
   uint16_t drawIdleMa_ = 0;
@@ -302,13 +303,14 @@ class Config {
   bool loadFailedWithData_ = false;
   bool namedKeyPresent_ = false;
   config_codec::StoreForm storeForm_ = config_codec::StoreForm::Empty;
-  bool lampSectionDirty_ = true;
-  bool baseSectionDirty_ = true;
-  bool shadeSectionDirty_ = true;
-  bool expressionsSectionDirty_ = true;
-  bool homeSectionDirty_ = true;
-
-  // Caller holds the cache mutex.
-  void expressionsSectionRebuildLocked();
 };
+
+// The role step of Config::applyDefaults. The variant's colours (scalar or
+// segment list) replace a role's only when the load found no config (`form`
+// Empty: nothing stored, or nothing that read as one), so a stored colour, the
+// class default included, is kept. Then each
+// role's first-segment px fills from the variant when unset, the knockout map
+// takes the base's pixel count, and the firmware-owned role flags are set.
+void applyRoleDefaults(const Config::Defaults& d, config_codec::StoreForm form,
+                       BaseSettings& base, ShadeSettings& shade);
 }  // namespace lamp

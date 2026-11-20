@@ -1,27 +1,77 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
 import 'ble_client.dart';
+import 'ble_timing.dart';
+import 'discovery_cache.dart';
 import 'scan_pause.dart';
+
+/// HCI REMOTE_USER_TERMINATED_CONNECTION, the status Android reports when the
+/// lamp ends the link itself.
+const _hciRemoteUserTerminated = 0x13;
+
+/// The [LinkDropCause] for a platform's disconnect reason [code].
+LinkDropCause linkDropCauseOf(fbp.ErrorPlatform platform, int? code) =>
+    platform == fbp.ErrorPlatform.android && code == _hciRemoteUserTerminated
+        ? LinkDropCause.lampHungUp
+        : LinkDropCause.other;
 
 /// Production [BleClient] backed by flutter_blue_plus. Each public method
 /// resolves the device + service + characteristic from the plugin's live
 /// registry, errors out with a friendly exception type when it can't.
 class FbpBleClient extends BleClient {
-  /// Cache of discovered GATT services per device id. Populated lazily on the
-  /// first `read`/`write`/`subscribe` after a successful connect. Without this
-  /// every BLE write would re-run a full service discovery on the radio,
-  /// which is what tipped the lamp into LINK_SUPERVISION_TIMEOUT during rapid
-  /// slider drags. Cleared on disconnect so a reconnect gets a fresh discovery.
-  final Map<String, List<fbp.BluetoothService>> _serviceCache = {};
+  FbpBleClient({@visibleForTesting this.errorPlatform});
+
+  /// Stands in for the platform flutter_blue_plus reads a drop's reason from,
+  /// which host tests cannot change.
+  final fbp.ErrorPlatform? errorPlatform;
+
+  /// Devices with a connect begun since their last disconnected event. fbp
+  /// keeps the previous drop's reason through a connect Android refuses
+  /// without an event (Bluetooth off, a missing permission).
+  final _connectSinceDrop = <String>{};
+
+  /// Cache of discovered GATT services per device id, filled by the first
+  /// `read`/`write`/`subscribe` on a link. Without this every BLE write would
+  /// re-run a full service discovery on the radio, which is what tipped the
+  /// lamp into LINK_SUPERVISION_TIMEOUT during rapid slider drags. Cleared
+  /// when a connect starts and when a link goes down.
+  final _serviceCache = DiscoveryCache<List<fbp.BluetoothService>>();
+
+  // Also clears the cache when a link drops on its own, so services
+  // discovered on a link that drops before the next one comes up are not
+  // reused on it. Lives as long as the client.
+  // ignore: cancel_subscriptions
+  StreamSubscription<fbp.OnConnectionStateChangedEvent>? _dropWatch;
 
   @override
   Future<void> connect(String deviceId) async {
+    _dropWatch ??= fbp.FlutterBluePlus.events.onConnectionStateChanged
+        .listen((e) {
+      if (e.connectionState == fbp.BluetoothConnectionState.disconnected) {
+        _serviceCache.remove(e.device.remoteId.str);
+        _connectSinceDrop.remove(e.device.remoteId.str);
+        // fbp records the reason in its own listener on the same stream,
+        // which may run after this one; a microtask runs after every
+        // listener has seen the event.
+        scheduleMicrotask(() {
+          final r = e.device.disconnectReason;
+          debugPrint('[ble_drop] id=${e.device.remoteId.str} '
+              'code=${r?.code} reason=${r?.description}');
+        });
+      }
+    });
     final device = fbp.BluetoothDevice(
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
+    // Handles may have changed since the last link (firmware re-registered
+    // the GATT database). Cleared before the link comes up, so a caller woken
+    // by the connected edge and the caller after connect share one discovery.
+    _serviceCache.remove(deviceId);
+    _connectSinceDrop.add(deviceId);
     await scanPause.during(() async {
       if (fbp.FlutterBluePlus.isScanningNow) {
         await fbp.FlutterBluePlus.stopScan();
@@ -47,10 +97,6 @@ class FbpBleClient extends BleClient {
     } catch (_) {
       // best-effort: not all platforms honor this
     }
-    // Drop the Dart-side service cache. Handles may have changed since
-    // last connect (e.g. firmware re-registered the GATT database), so
-    // the next _resolve() does a fresh discoverServices().
-    _serviceCache.remove(deviceId);
   }
 
   @override
@@ -59,6 +105,7 @@ class FbpBleClient extends BleClient {
       remoteId: fbp.DeviceIdentifier(deviceId),
     );
     _serviceCache.remove(deviceId);
+    bleTimings.linkDown(deviceId);
     await device.disconnect();
   }
 
@@ -67,6 +114,18 @@ class FbpBleClient extends BleClient {
     return fbp.FlutterBluePlus.connectedDevices.any(
       (d) => d.remoteId.str == deviceId,
     );
+  }
+
+  @override
+  LinkDropCause lastDropCause(String deviceId) {
+    final device = fbp.BluetoothDevice(
+      remoteId: fbp.DeviceIdentifier(deviceId),
+    );
+    final reason = device.disconnectReason;
+    if (_connectSinceDrop.contains(deviceId) || reason == null) {
+      return LinkDropCause.other;
+    }
+    return linkDropCauseOf(errorPlatform ?? reason.platform, reason.code);
   }
 
   @override
@@ -91,8 +150,8 @@ class FbpBleClient extends BleClient {
     // Reuse the cached service list when present. discoverServices() is a
     // multi-round-trip GATT exchange and re-running it per write floods the
     // link. Only call it on a cold cache (first I/O after connect).
-    final services = _serviceCache[deviceId] ??=
-        await device.discoverServices();
+    final services =
+        await _serviceCache.resolve(deviceId, device.discoverServices);
 
     final service = services.firstWhere(
       (s) => s.uuid.str128.toLowerCase() == serviceUuid.toLowerCase(),
@@ -162,8 +221,8 @@ class FbpBleClient extends BleClient {
   Stream<Uint8List> subscribe(String d, String s, String c) async* {
     final ch = await _resolve(d, s, c);
     await ch.setNotifyValue(true);
-    // lastValueStream replays fbp's cached value on listen (the cache
-    // persists across disconnects) and echoes this app's own writes.
+    // lastValueStream replays fbp's cached value on listen (a disconnect
+    // clears the cache) and echoes this app's own writes.
     yield* capNotifyBytes(ch.lastValueStream);
   }
 
@@ -195,6 +254,7 @@ class FbpBleClient extends BleClient {
     // Force-release any handles fbp holds on this device. Clears the
     // service cache too; re-discovers on the next connect.
     _serviceCache.remove(deviceId);
+    bleTimings.linkDown(deviceId);
     try {
       await device.disconnect();
     } catch (_) {

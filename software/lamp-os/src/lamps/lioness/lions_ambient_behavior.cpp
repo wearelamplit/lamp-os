@@ -43,6 +43,28 @@ const std::vector<Color>* LionsAmbientBehavior::stopsFor(const Mac& m) const {
   return nullptr;
 }
 
+bool LionsAmbientBehavior::shown(const Mac& m) const {
+  for (const Mac& c : director_.current) if (c == m) return true;
+  return false;
+}
+
+void LionsAmbientBehavior::requestStops(const Mac& m, uint32_t nowMs) {
+  static_assert(kQuerySlots <= lamp::MeshLink::kColorQueryResendSlots,
+                "every query one control() sends must keep its resends");
+  if (!meshLink_) return;
+  PendingQuery* slot = nullptr;
+  for (PendingQuery& q : pending_) {
+    const bool busy = !(q.mac == kIdle) && nowMs - q.sentMs < kColorQueryRetryMs;
+    if (busy && q.mac == m) return;
+    if (!busy && !slot) slot = &q;
+  }
+  // An answer frees its slot inside the resend window, so a lion moving on
+  // can send faster than MeshLink drains resends; it waits for a free one.
+  if (!slot || !meshLink_->colorQueryResendFree()) return;
+  meshLink_->sendColorQuery(m.data());  // fill via onColorInfo
+  *slot = {m, nowMs};
+}
+
 Color LionsAmbientBehavior::sampleMainColor() const {
   if (!fb || mainSegIndex_ < 0) return kBaseDefaultColor;
   const StripSegment& mg = fb->segments[mainSegIndex_];
@@ -51,14 +73,20 @@ Color LionsAmbientBehavior::sampleMainColor() const {
 }
 
 void LionsAmbientBehavior::onColorInfo(const uint8_t srcMac[6],
-                                       const std::vector<Color>& baseStops,
-                                       const std::vector<Color>& /*shadeStops*/) {
+                                       std::span<const Color> baseStops,
+                                       std::span<const Color> /*shadeStops*/) {
   Mac m{}; std::memcpy(m.data(), srcMac, 6);
-  for (Cached& c : stopCache_) {
-    if (c.mac == m) { c.baseStops = baseStops; return; }
+  Cached* slot = nullptr;
+  for (Cached& c : stopCache_) if (c.mac == m) slot = &c;
+  for (Cached& c : stopCache_) if (!slot && c.mac == kIdle) slot = &c;
+  for (Cached& c : stopCache_) if (!slot && !shown(c.mac)) slot = &c;
+  if (slot) {
+    // A refused copy throws here and leaves the query busy, so a lamp out of
+    // memory does not re-ask every frame.
+    slot->baseStops.assign(baseStops.begin(), baseStops.end());
+    slot->mac = m;
   }
-  if (stopCache_.size() >= 4) stopCache_.erase(stopCache_.begin());
-  stopCache_.push_back({m, baseStops});
+  for (PendingQuery& q : pending_) if (q.mac == m) q = {};
 }
 
 void LionsAmbientBehavior::triggerGreeting(const lamp::PeerView& peer) {
@@ -79,20 +107,21 @@ void LionsAmbientBehavior::control() {
     return false;
   });
 
-  const uint8_t changed = director_.tick(millis(), nearby_);
+  const uint32_t now = millis();
+  const uint8_t changed = director_.tick(now, nearby_);
   for (int i = 0; i < 3; ++i) {
-    const Mac& m = director_.current[i];
-    std::vector<Color> want;
-    if (!(m == kIdle)) {
-      const std::vector<Color>* cached = stopsFor(m);
-      if (cached) want = *cached;
-      else if (meshLink_) meshLink_->sendColorQuery(m.data());  // fill via onColorInfo
-    }
     if (changed & (1u << i)) {
-      prevStops_[i] = curStops_[i];
+      prevStops_[i].swap(curStops_[i]);
       switchFrame_[i] = 0;
     }
-    curStops_[i] = want;
+    const Mac& m = director_.current[i];
+    const std::vector<Color>* cached = (m == kIdle) ? nullptr : stopsFor(m);
+    if (cached) {
+      curStops_[i].assign(cached->begin(), cached->end());
+    } else {
+      curStops_[i].clear();
+      if (!(m == kIdle)) requestStops(m, now);
+    }
   }
 }
 

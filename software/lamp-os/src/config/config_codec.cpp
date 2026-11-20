@@ -11,6 +11,7 @@
 
 #include "core/hw_config.hpp"
 #include "util/color.hpp"
+#include "util/gamma.hpp"
 #include "util/heap_guard.hpp"
 #include "util/json_writer.hpp"
 #include "util/str.hpp"
@@ -1049,6 +1050,67 @@ static bool blobLampCarriesNamed(ConfigStore& store) {
          doc["lamp"]["named"].is<bool>();
 }
 
+// Every writer of the C firmware stores lamp.homeMode as a boolean, and no
+// later writer stores it.
+static bool isOldCStore(JsonObject root) { return root["lamp"]["homeMode"].is<bool>(); }
+
+static Color inverseGamma(const Color& c) {
+  return Color(inverseGamma8(c.r), inverseGamma8(c.g), inverseGamma8(c.b), inverseGamma8(c.w));
+}
+
+// The C firmware showed colours raw and pixel i from colour index i.
+static void migrateOldCRole(JsonObject node, std::vector<Color>& colors, bool reversed) {
+  if (node["colors"].as<JsonArray>().size() == 0) return;
+  for (Color& c : colors) c = inverseGamma(c);
+  if (reversed) std::reverse(colors.begin(), colors.end());
+}
+
+// The knockout level whose gamma-corrected scale best matches the C firmware's
+// raw b%.
+static uint8_t knockoutLevel(int b) {
+  const int target = (255 * std::clamp(b, 0, 100) + 50) / 100;
+  int best = 0;
+  int bestErr = 256;
+  for (int k = 0; k <= 100; ++k) {
+    const int err =
+        std::abs(int(Adafruit_NeoPixel::gamma8(uint8_t((255 * k + 50) / 100))) - target);
+    if (err < bestErr) {
+      best = k;
+      bestErr = err;
+    }
+  }
+  return uint8_t(best);
+}
+
+// Adjusts what fromJson loaded from a store the C firmware wrote
+// (docs/dev/embedded-heap.md, "A store the C firmware wrote").
+static void migrateOldC(JsonObject root, StripWinding winding, BaseSettings& base,
+                        ShadeSettings& shade, ExpressionSettings& expressions,
+                        HomeModeSettings& homeMode) {
+  migrateOldCRole(root["base"], base.broadcastColors(), winding.base);
+  migrateOldCRole(root["shade"], shade.broadcastColors(), winding.shade);
+  shade.segments.front().px = 0;
+  for (ExpressionConfig& e : expressions.expressions) {
+    for (Color& c : e.colors) c = inverseGamma(c);
+  }
+
+  const size_t n = base.knockoutPixels.size();
+  std::fill(base.knockoutPixels.begin(), base.knockoutPixels.end(), 100);
+  for (JsonObject pair : root["base"]["knockout"].as<JsonArray>()) {
+    if (!pair["p"].is<unsigned>()) continue;
+    const size_t p = pair["p"].as<unsigned>();
+    if (p >= n) continue;
+    base.knockoutPixels[winding.base ? n - 1 - p : p] = knockoutLevel(pair["b"] | 100);
+  }
+
+  JsonObject lampNode = root["lamp"];
+  homeMode.enabled = lampNode["homeMode"];
+  homeMode.ssid = std::string(lampNode["homeModeSSID"] | "");
+  truncateUtf8(homeMode.ssid, kMaxSsidLen);
+  homeMode.networkBound = !homeMode.ssid.empty();
+  homeMode.brightness = lampNode["homeModeBrightness"] | 80;
+}
+
 const char* storeFormName(StoreForm form) {
   switch (form) {
     case StoreForm::Binary: return "binary";
@@ -1060,7 +1122,8 @@ const char* storeFormName(StoreForm form) {
 
 LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
                         ShadeSettings& shade, ExpressionSettings& expressions,
-                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen) {
+                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen,
+                        StripWinding winding) {
   LoadedConfig loaded;
   const LiveSettings live =
       liveSettings(store, buffer, std::min(bufferLen, kMaxSettingsBlobLen));
@@ -1078,6 +1141,16 @@ LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& ba
   JsonDocument doc;
   if (deserializeJson(doc, json)) {
     loaded.parseFailed = configBlobHasData(json);
+    loaded.records.unreadable = settingsUnreadable;
+    return loaded;
+  }
+  if (isOldCStore(doc.as<JsonObject>())) {
+    // "cfg" stays the authority until a save of the migrated model reads
+    // back, so a save cut short re-runs this from the same string.
+    loaded.form = StoreForm::Whole;
+    loaded.withinCaps =
+        fromJson(doc.as<JsonObject>(), lamp, base, shade, expressions, homeMode);
+    migrateOldC(doc.as<JsonObject>(), winding, base, shade, expressions, homeMode);
     loaded.records.unreadable = settingsUnreadable;
     return loaded;
   }
@@ -1193,7 +1266,7 @@ size_t RawJsonShape::heapBytes() const {
 }
 
 size_t RawJsonShape::largestBlock() const {
-  return std::max(kRawPoolBytes, 2 * longest + kRawStringSlack);
+  return std::max({kRawPoolBytes, kRawExpressionListBytes, 2 * longest + kRawStringSlack});
 }
 
 SaveResult saveRawJson(ConfigStore& store, const char* json, uint8_t* buffer, size_t bufferLen,

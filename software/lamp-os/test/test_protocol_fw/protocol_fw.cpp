@@ -554,11 +554,11 @@ void test_fw_chunk_from_session_source_is_written() {
   const auto c = sessionChunk(kWispMac, 1, kSessionChunk);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Write),
-      static_cast<uint8_t>(lp::checkFwChunk(c, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
   const auto last = sessionChunk(kWispMac, 3, 100);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Write),
-      static_cast<uint8_t>(lp::checkFwChunk(last, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(last, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
 }
 
 // A well-formed chunk from a source one byte off the accepted sender's.
@@ -569,7 +569,7 @@ void test_fw_chunk_from_other_source_is_dropped() {
   const auto c = sessionChunk(other, 1, kSessionChunk);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::ForeignSource),
-      static_cast<uint8_t>(lp::checkFwChunk(c, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
 }
 
 // A chunk from the session's sender that arrived over the other transport
@@ -578,7 +578,30 @@ void test_fw_chunk_over_other_transport_is_dropped() {
   const auto c = sessionChunk(kWispMac, 1, kSessionChunk);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::ForeignSource),
-      static_cast<uint8_t>(lp::checkFwChunk(c, false, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(c, false, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
+}
+
+// Over BLE every app claims the same sourceMac, so a chunk must also come over
+// the connection whose OFFER opened the session.
+void test_fw_chunk_over_ble_from_other_connection_is_dropped() {
+  const auto c = sessionChunk(kWispMac, 1, kSessionChunk);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(lp::FwChunkVerdict::ForeignSource),
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, true, kWispMac, 8, 7, kSessionLen,
+                                            kSessionChunk)));
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(lp::FwChunkVerdict::Write),
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, true, kWispMac, 7, 7, kSessionLen,
+                                            kSessionChunk)));
+}
+
+// The connection does not name a mesh sender; its mac does.
+void test_fw_chunk_over_mesh_ignores_connection_handles() {
+  const auto c = sessionChunk(kWispMac, 1, kSessionChunk);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(lp::FwChunkVerdict::Write),
+      static_cast<uint8_t>(lp::checkFwChunk(c, true, false, kWispMac, 8, 7, kSessionLen,
+                                            kSessionChunk)));
 }
 
 // --- fromFwSessionSender: OFFER/DONE from the accepted sender ---
@@ -609,21 +632,52 @@ void test_fw_chunk_shape_checks_for_session_source() {
   auto past = sessionChunk(kWispMac, 3, 101);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::OutOfBounds),
-      static_cast<uint8_t>(lp::checkFwChunk(past, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(past, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
   auto wrap = sessionChunk(kWispMac, 1, 2);
   wrap.offset = 0xFFFFFFFFu;
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::OutOfBounds),
-      static_cast<uint8_t>(lp::checkFwChunk(wrap, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(wrap, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
   const auto big = sessionChunk(kWispMac, 0, kSessionChunk + 1);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Oversize),
-      static_cast<uint8_t>(lp::checkFwChunk(big, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(big, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
   auto skew = sessionChunk(kWispMac, 2, kSessionChunk);
   skew.offset -= 4;
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(lp::FwChunkVerdict::Misaligned),
-      static_cast<uint8_t>(lp::checkFwChunk(skew, true, kWispMac, kSessionLen, kSessionChunk)));
+      static_cast<uint8_t>(lp::checkFwChunk(skew, true, false, kWispMac, 0, 0, kSessionLen, kSessionChunk)));
+}
+
+// --- checkFwOfferPrecheck: the receiver's first decline-busy gates ---
+
+// An image not yet marked valid declines every offer, at every legal chunk
+// size, since an accepted one would overwrite the slot a rollback returns to.
+void test_fw_offer_precheck_declines_while_image_unverified() {
+  for (const uint16_t size : {uint16_t{1}, uint16_t{700}, lp::FW_CHUNK_SIZE_MAX}) {
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::ImageUnverified),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(size, /*imageUnverified=*/true)));
+  }
+}
+
+void test_fw_offer_precheck_declines_chunk_size_out_of_range() {
+  for (const bool unverified : {false, true}) {
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::BadChunkSize),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(0, unverified)));
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::BadChunkSize),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(lp::FW_CHUNK_SIZE_MAX + 1, unverified)));
+  }
+}
+
+void test_fw_offer_precheck_passes_a_verified_image() {
+  for (const uint16_t size : {uint16_t{1}, uint16_t{700}, lp::FW_CHUNK_SIZE_MAX}) {
+    TEST_ASSERT_EQUAL_UINT8(
+        static_cast<uint8_t>(lp::FwOfferPrecheck::Proceed),
+        static_cast<uint8_t>(lp::checkFwOfferPrecheck(size, /*imageUnverified=*/false)));
+  }
 }
 
 int main(int argc, char** argv) {
@@ -642,6 +696,9 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fw_accept_roundtrip);
   RUN_TEST(test_fw_accept_status_codes);
   RUN_TEST(test_fw_accept_too_short_rejected);
+  RUN_TEST(test_fw_offer_precheck_declines_while_image_unverified);
+  RUN_TEST(test_fw_offer_precheck_declines_chunk_size_out_of_range);
+  RUN_TEST(test_fw_offer_precheck_passes_a_verified_image);
 
   RUN_TEST(test_fw_chunk_roundtrip_min_payload);
   RUN_TEST(test_fw_chunk_roundtrip_baseline_payload);
@@ -654,6 +711,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fw_chunk_from_other_source_is_dropped);
   RUN_TEST(test_fw_chunk_shape_checks_for_session_source);
   RUN_TEST(test_fw_chunk_over_other_transport_is_dropped);
+  RUN_TEST(test_fw_chunk_over_ble_from_other_connection_is_dropped);
+  RUN_TEST(test_fw_chunk_over_mesh_ignores_connection_handles);
   RUN_TEST(test_fw_session_sender_over_mesh_is_matched_by_mac);
   RUN_TEST(test_fw_session_sender_over_ble_is_matched_by_connection);
   RUN_TEST(test_fw_session_sender_over_other_transport_is_rejected);

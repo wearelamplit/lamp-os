@@ -2,13 +2,17 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../../control/domain/lamp_color.dart';
+import 'tuple_sampler.dart';
 import 'wisp_config.dart';
 import 'wisp_source_mode.dart';
 
 /// Default Off-mode color. Matches the wisp firmware's NVS-default for
-/// `offColor` (warm candle-amber); also the fallback when the wispStatus
-/// payload pre-dates the offColor field.
+/// `offColor` (warm candle-amber); also the fallback when the status omits
+/// it.
 const LampColor _defaultOffColor = LampColor(r: 255, g: 150, b: 50, w: 0);
+
+// Marks a nullable `_copy` argument left out, so null can replace a value.
+const Object _keep = Object();
 
 /// Parsed `CHAR_WISP_STATUS` payload. The lamp serves a merged JSON
 /// combining the last `wispStatus` MSG_CONTROL_OP broadcast (from the
@@ -50,9 +54,17 @@ class WispStatus {
     this.opSeq = 0,
     this.brightness = 100,
     this.configKnown = false,
-    this.carriesConfig = false,
     this.configSplit = false,
     this.configLastSeenMs,
+    this.manualId,
+    this.manualSeq = 0,
+    this.swatchesSeq = 0,
+    this.ip,
+    this.paletteStyle,
+    this.oscMode,
+    this.oscSlot,
+    this.oscAddr,
+    this.heldConfigSeenMs,
   });
 
   /// Sentinel for "no wisp has been heard on this lamp yet" (lamp
@@ -133,7 +145,7 @@ class WispStatus {
 
   /// Current shuffle seed. Mixed into the TupleSampler hash salts so the
   /// app preview stays in lock-step with the wisp's color assignments.
-  /// Defaults to 0 (matches the firmware default and pre-feature wisps).
+  /// Defaults to 0 matching the firmware default.
   final int shuffleSeed;
 
   /// How often the wisp advances the drift color, in milliseconds.
@@ -152,35 +164,29 @@ class WispStatus {
   final bool hasPassword;
 
   /// LED strip byte order reported by the wisp (`'GRBW'`, `'GRB'`, `'BGR'`).
-  /// Absent on legacy wisps; defaults to `'GRB'` matching the firmware default.
+  /// Defaults to `'GRB'` matching the firmware default.
   final String ledType;
 
-  /// Number of pixels in the wisp's LED ring. Absent on legacy wisps;
-  /// defaults to 30 matching the firmware default.
+  /// Number of pixels in the wisp's LED ring. Defaults to 30 matching the
+  /// firmware default.
   final int pixelCount;
 
   /// Monotonic counter the wisp bumps each time it accepts and applies a
   /// sealed wispOp. Sealed ops have no direct ACK; the app confirms one
-  /// landed by watching this advance. Omitted at 0 (firmware default and
-  /// legacy wisps); resets on wisp reboot.
+  /// landed by watching this advance. 0 at the firmware default; resets on
+  /// wisp reboot.
   final int opSeq;
 
   /// Space-brightness factor (0..100) the wisp asserts on its claimed
-  /// lamps: 100 = untouched, lower dims the whole space together. Absent on
-  /// legacy wisps and omitted at the default; defaults to 100.
+  /// lamps: 100 = untouched, lower dims the whole space together. Defaults
+  /// to 100.
   final int brightness;
 
   /// True when [ledType], [pixelCount], [brightness], the drift fields,
-  /// [shuffleSeed] and [opSeq] hold the wisp's real settings: either the
-  /// status [carriesConfig] or a `wispConfig` was merged in ([withConfig]).
-  /// False means those fields are placeholders a settings form must not show
-  /// or write back.
+  /// [shuffleSeed] and [opSeq] hold the wisp's real settings, which come
+  /// only from a merged `wispConfig` ([withConfig]). False means those fields
+  /// are placeholders a settings form must not show or write back.
   final bool configKnown;
-
-  /// True when this status's own payload carried the wisp's settings (the
-  /// wisp sent it and it is not [configSplit]). Such a status is
-  /// authoritative for them; a merged `wispConfig` never overrides it.
-  final bool carriesConfig;
 
   /// The wisp marked this status as carrying no settings; they come only
   /// from its `wispConfig`.
@@ -190,6 +196,87 @@ class WispStatus {
   /// `wispConfig`. Absent on lamps that predate it, or until one arrives; a
   /// change means the `wispconfig` section holds something new.
   final int? configLastSeenMs;
+
+  /// The wisp's stored Manual palette, as `WispRepository.statusManualId`
+  /// computes it: `""` when the palette is empty, else its id, in every
+  /// source mode. Null when the status does not carry it: a wisp that
+  /// predates it, or the lamp's hello-only merge.
+  final String? manualId;
+
+  /// The `seq` of the palette save that stored the wisp's Manual palette,
+  /// echoed until the next save; 0 when that save carried none, the wisp
+  /// rebooted since, or the status does not carry it. Equality only.
+  final int manualSeq;
+
+  /// The `seq` of the last `setSwatches` the wisp applied, echoed until the
+  /// next one; 0 when that op carried none, the wisp rebooted since, or the
+  /// status does not carry it. Equality only.
+  final int swatchesSeq;
+
+  /// The wisp's OSC send-to address from its `wispConfig`: `""` while it has
+  /// none, null until a config carrying it is merged (a wisp that predates
+  /// it never sends one).
+  final String? ip;
+
+  /// How lamps take colours from the palette, from the wisp's `wispConfig`.
+  /// Null until a config carrying it is merged: a wisp that predates it
+  /// paints only gradients.
+  final PaletteStyle? paletteStyle;
+
+  /// Which OSC sender the wisp listens to, from its `wispConfig`. Null until
+  /// a config carrying it is merged. A wisp that predates it follows only
+  /// Straylight.
+  final OscMode? oscMode;
+
+  /// The Maestro palette slot the wisp reads, from its `wispConfig`. Null
+  /// until a config carrying it is merged.
+  final int? oscSlot;
+
+  /// The Custom OSC address the wisp stores, from its `wispConfig`, and `""`
+  /// while it has none. Null until a config carrying it is merged; a wisp that
+  /// predates Custom never sends one.
+  final String? oscAddr;
+
+  /// The lamp's `configLastSeenMs` stamp the merged config was read under,
+  /// so the config's age can be told against [statusLastSeenMs]. Null until a
+  /// config is merged, or when that read carried no stamp.
+  final int? heldConfigSeenMs;
+
+  /// The address an OSC sender should target, from the wisp's own reports:
+  /// [ethIp] while the wisp is on Ethernet, since the wisp always picks it
+  /// first, unless the merged config reached the lamp after this status;
+  /// else [ip]. Empty when neither has one.
+  String get oscSendTo =>
+      ethIp.isNotEmpty && (ip == null || _statusAfterConfig)
+          ? ethIp
+          : (ip ?? '');
+
+  // Whether the lamp cached this status no earlier than the merged config, on
+  // the lamp's wrapping 32-bit millis. True when either stamp is absent.
+  bool get _statusAfterConfig {
+    final s = statusLastSeenMs;
+    final c = heldConfigSeenMs;
+    if (s == null || c == null) return true;
+    return ((s - c) & 0xFFFFFFFF) < 0x80000000;
+  }
+
+  /// True when the wisp sent this status and its link state contradicts the
+  /// held [ip]: on Ethernet with another address, a link up with no address,
+  /// or an address with no link. A config frame lost after a link edge leaves
+  /// them apart until the next config read. A status older than the merged
+  /// config never disagrees: the config is the fresher report.
+  bool get ipDisagreesWithLink {
+    final held = ip;
+    if (!fromWisp || !configKnown || held == null) return false;
+    if (!_statusAfterConfig) return false;
+    if (ethIp.isNotEmpty) return held != ethIp;
+    final linked = wifiConnected;
+    return linked == held.isEmpty;
+  }
+
+  /// True when the wisp sent this status. False for the lamp's hello-only
+  /// merge, which it serves while it holds no status from the wisp.
+  bool get fromWisp => configSplit;
 
   /// Convenience: is either surface currently wisp-painted?
   bool get controlling => controllingBase || controllingShade;
@@ -206,8 +293,8 @@ class WispStatus {
   /// Color the wisp renders on its own 30-pixel ring when sourceMode is
   /// Off. Does NOT propagate to the lamp grid. Off mode broadcasts
   /// RESTORE so the lamps drop any prior override. Defaults to a warm
-  /// candle-amber matching the firmware fallback so pre-feature wisps
-  /// (or `{}` payloads) land on a sensible value.
+  /// candle-amber matching the firmware fallback, since the status carries
+  /// it only in Off mode.
   final LampColor offColor;
 
   /// True iff the lamp has observed any wisp on the mesh. A wisp is
@@ -258,15 +345,6 @@ class WispStatus {
           return _defaultOffColor;
         }
       }
-      if (v is List && v.length >= 3) {
-        final r = asInt(v[0]);
-        final g = asInt(v[1]);
-        final b = asInt(v[2]);
-        final w = v.length >= 4 ? (asInt(v[3]) ?? 0) : 0;
-        if (r != null && g != null && b != null) {
-          return LampColor(r: r & 0xFF, g: g & 0xFF, b: b & 0xFF, w: w & 0xFF);
-        }
-      }
       return _defaultOffColor;
     }
 
@@ -281,8 +359,6 @@ class WispStatus {
 
     final sourceRaw = json['source'];
     final oscRoleRaw = json['oscRole'];
-    final configSplit = json['configSplit'] == true;
-    final carriesConfig = json.containsKey('source') && !configSplit;
     return WispStatus(
       wifiConnected: asBool(json['wifiConnected']),
       wifiChannelMismatch: asBool(json['wifiChannelMismatch']),
@@ -309,25 +385,19 @@ class WispStatus {
       controllingShade: asBool(json['controllingShade']),
       baseWispColor: parseWispHexColor(json['baseWispColor']),
       shadeWispColor: parseWispHexColor(json['shadeWispColor']),
-      shuffleSeed: asInt(json['shuffleSeed']) ?? 0,
-      driftIntervalMs: asInt(json['driftIntervalMs']) ?? 120000,
-      driftFadePct: asInt(json['driftFadePct']) ?? 50,
       name: asString(json['name']),
       hasPassword: asBool(json['hasPassword']),
-      ledType: json['ledType'] is String ? json['ledType'] as String : 'GRB',
-      pixelCount: asInt(json['px']) ?? 30,
-      opSeq: asInt(json['opSeq']) ?? 0,
-      brightness: asInt(json['brightness']) ?? 100,
-      configKnown: carriesConfig,
-      carriesConfig: carriesConfig,
-      configSplit: configSplit,
+      configSplit: json['configSplit'] == true,
       configLastSeenMs: asInt(json['configLastSeenMs']),
+      manualId: json['manualId'] is String ? json['manualId'] as String : null,
+      manualSeq: asInt(json['manualSeq']) ?? 0,
+      swatchesSeq: asInt(json['swatchesSeq']) ?? 0,
     );
   }
 
-  /// This status with [config]'s settings in place of whatever the status
-  /// carried, marked [configKnown].
-  WispStatus withConfig(WispConfig config) {
+  /// This status with [config]'s settings, marked [configKnown]. [seenMs] is
+  /// the lamp stamp the config was read under ([heldConfigSeenMs]).
+  WispStatus withConfig(WispConfig config, {int? seenMs}) {
     return _copy(
       ledType: config.ledType,
       pixelCount: config.pixelCount,
@@ -337,6 +407,12 @@ class WispStatus {
       shuffleSeed: config.shuffleSeed,
       opSeq: config.opSeq,
       configKnown: true,
+      ip: config.ip,
+      paletteStyle: config.paletteStyle,
+      oscMode: config.oscMode,
+      oscSlot: config.oscSlot,
+      oscAddr: config.oscAddr,
+      heldConfigSeenMs: seenMs,
     );
   }
 
@@ -351,6 +427,10 @@ class WispStatus {
     String? ledType,
     int? pixelCount,
     int? brightness,
+    PaletteStyle? paletteStyle,
+    OscMode? oscMode,
+    int? oscSlot,
+    String? oscAddr,
   }) {
     return _copy(
       source: source,
@@ -363,6 +443,10 @@ class WispStatus {
       ledType: ledType,
       pixelCount: pixelCount,
       brightness: brightness,
+      paletteStyle: paletteStyle ?? _keep,
+      oscMode: oscMode ?? _keep,
+      oscSlot: oscSlot ?? _keep,
+      oscAddr: oscAddr ?? _keep,
     );
   }
 
@@ -380,6 +464,12 @@ class WispStatus {
     int? shuffleSeed,
     int? opSeq,
     bool? configKnown,
+    Object? ip = _keep,
+    Object? paletteStyle = _keep,
+    Object? oscMode = _keep,
+    Object? oscSlot = _keep,
+    Object? oscAddr = _keep,
+    Object? heldConfigSeenMs = _keep,
   }) {
     return WispStatus(
       wifiConnected: wifiConnected,
@@ -412,9 +502,21 @@ class WispStatus {
       opSeq: opSeq ?? this.opSeq,
       brightness: brightness ?? this.brightness,
       configKnown: configKnown ?? this.configKnown,
-      carriesConfig: carriesConfig,
       configSplit: configSplit,
       configLastSeenMs: configLastSeenMs,
+      manualId: manualId,
+      manualSeq: manualSeq,
+      swatchesSeq: swatchesSeq,
+      ip: identical(ip, _keep) ? this.ip : ip as String?,
+      paletteStyle: identical(paletteStyle, _keep)
+          ? this.paletteStyle
+          : paletteStyle as PaletteStyle?,
+      oscMode: identical(oscMode, _keep) ? this.oscMode : oscMode as OscMode?,
+      oscSlot: identical(oscSlot, _keep) ? this.oscSlot : oscSlot as int?,
+      oscAddr: identical(oscAddr, _keep) ? this.oscAddr : oscAddr as String?,
+      heldConfigSeenMs: identical(heldConfigSeenMs, _keep)
+          ? this.heldConfigSeenMs
+          : heldConfigSeenMs as int?,
     );
   }
 
@@ -452,9 +554,17 @@ class WispStatus {
           opSeq == other.opSeq &&
           brightness == other.brightness &&
           configKnown == other.configKnown &&
-          carriesConfig == other.carriesConfig &&
           configSplit == other.configSplit &&
-          configLastSeenMs == other.configLastSeenMs;
+          configLastSeenMs == other.configLastSeenMs &&
+          manualId == other.manualId &&
+          manualSeq == other.manualSeq &&
+          swatchesSeq == other.swatchesSeq &&
+          ip == other.ip &&
+          paletteStyle == other.paletteStyle &&
+          oscMode == other.oscMode &&
+          oscSlot == other.oscSlot &&
+          oscAddr == other.oscAddr &&
+          heldConfigSeenMs == other.heldConfigSeenMs;
 
   @override
   int get hashCode => Object.hash(
@@ -482,7 +592,9 @@ class WispStatus {
           opSeq,
           brightness,
           configKnown,
-          Object.hash(carriesConfig, configSplit, configLastSeenMs),
+          Object.hash(configSplit, configLastSeenMs, manualId, manualSeq,
+              swatchesSeq, ip, paletteStyle, oscMode, oscSlot, oscAddr,
+              heldConfigSeenMs),
         ),
       );
 }

@@ -120,8 +120,8 @@ struct FsReceiverHooks {
                                           uint32_t expectedVersion,
                                           const uint8_t* offerDigest);
   // Post-verify apply for FS, in place of the firmware path's esp_restart():
-  // the FS image is read-only at runtime, so remount SPIFFS + recompute the
-  // local digest instead of rebooting. nullptr -> fall back to reboot.
+  // the FS image is read-only at runtime, so recompute the local digest
+  // instead of rebooting. nullptr -> fall back to reboot.
   void (*finalize)();
   uint8_t acceptType;
   uint8_t reqType;
@@ -174,10 +174,11 @@ class FirmwareReceiver {
 
   // Called DIRECTLY from the chunk's transport task (WiFi recv on Core 0, or the
   // BLE host). Writes the chunk to flash and marks its bitmap bit when it came
-  // over `via` from the session's sender. Bounded IO + bitmap set, no
+  // over `via` from the session's sender. `bleConnHandle` is a BLE chunk's
+  // connection; mesh and FS chunks pass 0. Bounded IO + bitmap set, no
   // heap/JSON/blocking.
   void handleChunkOnRecvTask(const lamp_protocol::ParsedFwChunk& p,
-                             FirmwareTransportKind via);
+                             FirmwareTransportKind via, uint16_t bleConnHandle);
 
   State state() const { return state_; }
 
@@ -245,7 +246,7 @@ class FirmwareReceiver {
   // Verify + apply, on DONE with a full bitmap: read the partition back, parse
   // the LSIG footer, verify the signature, and set the boot partition.
   // Returns Success or the first failure encountered; the caller reboots on
-  // Success (firmware path) or remounts SPIFFS (FS path).
+  // Success (firmware path) or runs the finalize hook (FS path).
   lamp_protocol::FwResultStatus verifyAndApply();
 
   // Transport for a kind, or nullptr if it wasn't wired at begin().

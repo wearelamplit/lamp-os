@@ -20,14 +20,14 @@ namespace wisp {
 SerialConsole::SerialConsole(PaintDistributor& paint, WispConfig& config,
                              StageBeacon& stage, WifiLink& wifi,
                              StatusEmitter& status, LampInventory& inventory,
-                             SourceTransitionFn onSourceTransition)
+                             ApplyFn apply)
     : paint_(paint),
       config_(config),
       stage_(stage),
       wifi_(wifi),
       status_(status),
       inventory_(inventory),
-      onSourceTransition_(std::move(onSourceTransition)) {}
+      apply_(std::move(apply)) {}
 
 void SerialConsole::pump() {
   slip_.retire(millis());
@@ -83,6 +83,18 @@ void SerialConsole::dumpInventory() {
 #endif
 }
 
+bool SerialConsole::applyOsc(OscMode mode, uint8_t slot, const char* address) {
+  const DispatchResult res = applyOscSettings(config_, mode, slot, address);
+  if (res == DispatchResult::Malformed) {
+    Serial.printf("[wisp.cmd] refused: custom needs osc:addr </path>, up to "
+                  "%u printable bytes, none of \"\\#*,?[]{}\n",
+                  (unsigned)kOscCustomAddressMaxLen);
+    return false;
+  }
+  apply_(res);
+  return true;
+}
+
 void SerialConsole::handleCommand(const String& cmd) {
   if (cmd.length() == 0) return;
   if (cmd == "paint:on") {
@@ -97,8 +109,7 @@ void SerialConsole::handleCommand(const String& cmd) {
       : cmd.endsWith("manual") ? WispSourceMode::Manual
                                : WispSourceMode::Osc;
     config_.setSourceMode(m);
-    onSourceTransition_(m);
-    status_.triggerOnChange();
+    apply_(DispatchResult::AppliedSourceChange);
     Serial.printf("[wisp.cmd] source mode = %s\n", cmd.c_str() + 4);
   } else if (cmd.startsWith("osc:role ")) {
     OscRole role = OscRole::Primary;
@@ -108,9 +119,37 @@ void SerialConsole::handleCommand(const String& cmd) {
       return;
     }
     config_.setOscRole(role);
-    status_.triggerOnChange();
+    apply_(DispatchResult::AppliedOscRole);
     Serial.printf("[wisp.cmd] osc role = %s (%s)\n", oscRoleName(role),
                   oscPaletteAddress(role));
+  } else if (cmd.startsWith("osc:mode ")) {
+    OscMode mode = OscMode::Straylight;
+    if (!oscModeFromName(cmd.c_str() + 9, mode)) {
+      Serial.println(
+          "[wisp.cmd] usage: osc:mode <straylight|maestro|custom>");
+      return;
+    }
+    if (!applyOsc(mode, config_.oscSlot(), config_.oscAddress())) return;
+    Serial.printf("[wisp.cmd] osc mode = %s\n", oscModeName(mode));
+  } else if (cmd.startsWith("osc:slot ")) {
+    uint8_t slot = 0;
+    if (!maestroSlotFromText(cmd.c_str() + 9, slot)) {
+      Serial.println("[wisp.cmd] usage: osc:slot <1-10>");
+      return;
+    }
+    if (!applyOsc(config_.oscMode(), slot, config_.oscAddress())) return;
+    Serial.printf("[wisp.cmd] maestro slot = %u\n", (unsigned)slot);
+  } else if (cmd.startsWith("osc:addr ")) {
+    const char* address = cmd.c_str() + 9;
+    if (!applyOsc(config_.oscMode(), config_.oscSlot(), address)) return;
+    Serial.printf("[wisp.cmd] custom address = %s\n", address);
+  } else if (cmd == "paint:swatches on" || cmd == "paint:swatches off") {
+    const bool on = cmd.endsWith("on");
+    config_.setPaletteStyle(on ? PaletteStyle::Swatches
+                               : PaletteStyle::Gradient);
+    apply_(DispatchResult::AppliedSwatches);
+    Serial.printf("[wisp.cmd] palette style = %s\n",
+                  on ? "swatches" : "gradient");
   } else if (cmd == "stage:on") {
     stage_.refreshAdvert();
   } else if (cmd == "stage:off") {

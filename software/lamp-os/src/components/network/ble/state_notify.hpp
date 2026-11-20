@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <new>
 #include <string>
 
 #include "behaviors/greetable.hpp"
+#include "util/heap_guard.hpp"
 
 namespace ble_control {
 
@@ -19,16 +22,63 @@ struct StateNotifyFields {
 // live-control write gate tests.
 void buildStateNotifyJson(const StateNotifyFields& f, std::string& out);
 
-// When tick() sends CHAR_STATE_NOTIFY on its own: on a new client connection,
-// when the client subscribes, and on every quiet-mode change while a client is
-// connected, so the app learns when its writes land again.
+// A greeting peer id and kind at their longest, with the fixed fields.
+inline constexpr size_t kStateNotifyBuildBytes = 256;
+
+// Builds the payload from the fields `fill(fields, greeting)` sets, `fill`
+// inside the guard since the greeting it reads allocates. False, with `out`
+// empty, when the heap cannot spare the build or an allocation fails.
+template <class Fill>
+bool buildStateNotifyGuarded(Fill&& fill, std::string& out) {
+  out.clear();
+  if (!lamp::heapCanSpare(kStateNotifyBuildBytes)) return false;
+  try {
+    StateNotifyFields fields;
+    lamp::GreetingState greeting;
+    fill(fields, greeting);
+    buildStateNotifyJson(fields, out);
+    return true;
+  } catch (const std::bad_alloc&) {
+    std::string().swap(out);
+    return false;
+  }
+}
+
+enum class StateNotifySend : uint8_t { Sent, NotSubscribed, NoHeap, SendFailed };
+
+// Builds the payload and hands it to `send(data, len, connHandle)`, NimBLE's
+// notify to that one connection. That send skips NimBLE's subscription check,
+// so `subscribed` (the client turned notifications on) gates it. Sent only
+// when `send` reports the bytes went out.
+template <class Fill, class Send>
+StateNotifySend sendStateNotify(bool subscribed, uint16_t connHandle, Fill&& fill, Send&& send) {
+  if (!subscribed) return StateNotifySend::NotSubscribed;
+  std::string payload;
+  if (!buildStateNotifyGuarded(fill, payload)) return StateNotifySend::NoHeap;
+  return send(reinterpret_cast<const uint8_t*>(payload.data()), payload.size(), connHandle)
+             ? StateNotifySend::Sent
+             : StateNotifySend::SendFailed;
+}
+
+// When tick() sends CHAR_STATE_NOTIFY on its own: when a client becomes
+// reachable, when it subscribes, and on every quiet-mode change while it is
+// reachable, so the app learns when its writes land again. A due notify that did
+// not go out is reported with failed() and is due again kRetryMs later while the
+// client stays reachable, until one goes out.
 class StateNotifyTrigger {
  public:
-  bool step(bool clientConnected, bool subscribed);
+  // Spaces the retries so a send that keeps failing does not build a payload
+  // every loop pass.
+  static constexpr uint32_t kRetryMs = 100;
+
+  bool step(bool clientReachable, bool subscribed, uint32_t nowMs);
+  void failed(uint32_t nowMs);
 
  private:
-  bool wasConnected_ = false;
-  bool wasQuiet_     = false;
+  bool     wasConnected_ = false;
+  bool     wasQuiet_     = false;
+  bool     owed_         = false;
+  uint32_t retryAtMs_    = 0;
 };
 
 }  // namespace ble_control

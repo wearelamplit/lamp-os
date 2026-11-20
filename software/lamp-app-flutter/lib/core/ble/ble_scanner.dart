@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 
+import 'ble_timing.dart';
 import 'scan_pause.dart';
 
 /// BLE Manufacturer ID the firmware advertises (0xA455). The 6 bytes after
@@ -159,6 +160,7 @@ class FbpBleScanner implements BleScanner {
   Stream<BleAdvertisement> results() => _ctrl.stream;
 
   Future<void> _startNativeScan() async {
+    bleTimings.scanStarted();
     await fbp.FlutterBluePlus.startScan(
       timeout: const Duration(minutes: 5),
       continuousUpdates: true,
@@ -177,7 +179,9 @@ class FbpBleScanner implements BleScanner {
         remoteId: r.device.remoteId.str,
         rssi: r.rssi,
       );
-      if (ad != null) _ctrl.add(ad);
+      if (ad == null) continue;
+      bleTimings.sighting(id);
+      _ctrl.add(ad);
     }
   }
 

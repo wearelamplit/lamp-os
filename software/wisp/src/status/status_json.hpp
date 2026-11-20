@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "osc/osc_target.hpp"
+
 namespace wisp {
 
 // Live state: what the wisp is doing right now. Rides wispStatus.
@@ -19,6 +21,9 @@ struct WispStatusFields {
   bool         wifiChannelMismatch = false;
   int          wifiApChannel = 0;
   const char*  ethIp = nullptr;  // omitted when Ethernet is not up
+  const char*  manualId = "";    // statusManualId of the stored Manual palette
+  uint16_t     manualSeq = 0;    // seq of the save that stored it; 0 = none
+  uint16_t     swatchesSeq = 0;  // seq of the setSwatches that set the style
 };
 
 // Settings the app edits, plus opSeq, which confirms a sealed op landed.
@@ -31,17 +36,27 @@ struct WispConfigFields {
   uint8_t      driftFadePct = 50;
   uint8_t      shuffleSeed = 0;
   uint32_t     opSeq = 0;
+  char         ip[16] = "";  // where an OSC sender reaches the wisp; "" for none
+  bool         swatches = false;
+  OscMode      oscMode = OscMode::Straylight;
+  uint8_t      oscSlot = 1;
+  const char*  oscAddr = "";  // the Custom address, "" for none
 };
 
+// The OSC send-to address into `out`: `ethIp` when set, else `staIp` while
+// `staConnected`, else "". The caller never passes the softAP address, which
+// is the pre-mesh lamps' network.
+void pickOscSendToIp(const char* ethIp, bool staConnected, const char* staIp,
+                     char* out, size_t outCap);
+
 // Serialize a wispStatus JSON into `out` (capacity `outCap`). A guaranteed
-// core always fits under `cap`; every other field is added only if the
-// document still fits (fields matching the app parser's defaults are
-// omitted). `configCopy`, when given, adds the config fields at the lowest
-// priority for lamps that predate wispConfig. lastSeenMs is the wisp's
+// core, `"configSplit":true` among it, is always written, whatever `cap`;
+// every other field is added only if the document still fits under `cap`
+// (fields matching the app parser's defaults are omitted). The settings
+// never ride it; they go only in wispConfig. lastSeenMs is the wisp's
 // uptime at the call (wisp::uptimeMs()). Never returns 0 when
 // outCap > cap. See docs/dev/networking.md for the field priority order.
-size_t buildWispStatusJson(const WispStatusFields& f,
-                           const WispConfigFields* configCopy, char* out,
+size_t buildWispStatusJson(const WispStatusFields& f, char* out,
                            size_t outCap, size_t cap);
 
 // Serialize a wispConfig JSON into `out`. Every field is always present, so

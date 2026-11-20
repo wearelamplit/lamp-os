@@ -29,6 +29,7 @@
 #include "../../src/util/color.cpp"
 #include "../../src/util/fade.cpp"
 #include "../../src/util/gradient.cpp"
+#include "../replaced_new/heap_tally.hpp"
 
 namespace lamp {
 // dots_behavior.cpp reads the wisp-active flag off the compositor; the native
@@ -255,6 +256,66 @@ void test_borrow_periodic_rescatter_changes_arrangement() {
   TEST_ASSERT_FALSE(beforeRescatter == fb.buffer);
 }
 
+// Allocations the gradient builds for cfg's segments make, the only ones a
+// scene rebuild may make: the scatter and the scenes reuse their buffers.
+static size_t gradientAllocs(const ShadeSettings& cfg, const FrameBuffer& fb) {
+  const size_t before = heap_tally::g_allocs;
+  for (size_t k = 0; k < fb.segments.size(); ++k) {
+    buildGradientWithStops(static_cast<uint8_t>(fb.segments[k].pixelCount),
+                           cfg.segments[k].colors);
+  }
+  return heap_tally::g_allocs - before;
+}
+
+void test_ambient_rescatter_reuses_its_buffers() {
+  ShadeSettings cfg = twoSegmentConfig();
+  FrameBuffer fb = makeFb();
+  DotsBehavior dots(&fb, cfg, /*inFrames=*/2);
+  dots.draw();
+  for (int cycle = 0; cycle < 3; ++cycle) {
+    const size_t before = heap_tally::g_allocs;
+    for (uint32_t i = 0; i <= DotsBehavior::kAmbientHoldFrames; ++i) dots.control();
+    const size_t used = heap_tally::g_allocs - before;
+    const size_t gradients = gradientAllocs(cfg, fb);
+    TEST_ASSERT_GREATER_THAN_size_t(0, gradients);
+    if (cycle > 0) TEST_ASSERT_EQUAL_size_t(gradients, used);
+    for (int i = 0; i < 4; ++i) dots.draw();  // settle the crossfade
+  }
+}
+
+// A palette edit recolours every frame it lands on; each rebuild reuses the
+// scene buffers.
+void test_palette_edit_rebuilds_in_place() {
+  ShadeSettings cfg = twoSegmentConfig();
+  FrameBuffer fb = makeFb();
+  DotsBehavior dots(&fb, cfg, /*inFrames=*/2);
+  dots.draw();
+  dots.control();
+  for (uint8_t k = 1; k <= 5; ++k) {
+    cfg.segments[0].colors[1] = Color(static_cast<uint8_t>(0xF0 - 0x11 * k), 0, 0, 0);
+    const size_t before = heap_tally::g_allocs;
+    dots.control();
+    const size_t used = heap_tally::g_allocs - before;
+    TEST_ASSERT_EQUAL_size_t(gradientAllocs(cfg, fb), used);
+  }
+}
+
+// A borrow that runs out holds nothing afterwards: no peer stops, no melt
+// target.
+void test_finished_borrow_holds_nothing() {
+  ShadeSettings cfg = twoSegmentConfig();
+  FrameBuffer fb = makeFb();
+  DotsBehavior dots(&fb, cfg, /*inFrames=*/2);
+  dots.draw();
+  dots.control();
+  const std::vector<Color> peerBase  = {Color(0, 0, 0, 0x20), Color(0, 0, 0, 0xE0)};
+  const std::vector<Color> peerShade = {Color(0, 0x20, 0, 0), Color(0, 0xE0, 0, 0)};
+  const size_t before = heap_tally::g_liveBytes;
+  dots.borrowColors(peerBase, peerShade, /*durationFrames=*/10);
+  for (int i = 0; i < 10; ++i) { dots.control(); dots.draw(); }
+  TEST_ASSERT_EQUAL_size_t(before, heap_tally::g_liveBytes);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_no_cross_segment_bleed);
@@ -265,5 +326,8 @@ int main(int, char**) {
   RUN_TEST(test_borrow_melts_toward_own_after_halfway);
   RUN_TEST(test_borrow_solid_color_gets_jittered);
   RUN_TEST(test_borrow_periodic_rescatter_changes_arrangement);
+  RUN_TEST(test_ambient_rescatter_reuses_its_buffers);
+  RUN_TEST(test_palette_edit_rebuilds_in_place);
+  RUN_TEST(test_finished_borrow_holds_nothing);
   return UNITY_END();
 }

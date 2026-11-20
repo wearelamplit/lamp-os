@@ -13,6 +13,7 @@ import 'package:lamp_app/core/ble/ble_client_provider.dart';
 import 'package:lamp_app/core/ble/ble_scanner.dart';
 import 'package:lamp_app/features/control/application/control_notifier.dart';
 import 'package:lamp_app/features/control/application/control_state.dart';
+import 'package:lamp_app/features/control/application/lamp_busy_exception.dart';
 import 'package:lamp_app/features/control/presentation/control_screen.dart';
 import 'package:lamp_app/features/control/presentation/widgets/base_card.dart';
 import 'package:lamp_app/features/control/presentation/widgets/brightness_card.dart';
@@ -99,6 +100,12 @@ class _Unreachable extends ControlNotifier {
   @override
   Future<ControlState> build(String deviceId) async =>
       throw BleNotConnected(deviceId);
+}
+
+class _Busy extends ControlNotifier {
+  @override
+  Future<ControlState> build(String deviceId) async =>
+      throw const LampBusyException();
 }
 
 Future<void> _pumpUntil(WidgetTester tester, Finder finder,
@@ -326,6 +333,35 @@ void main() {
   });
 
   testWidgets(
+      'a lamp too low on memory shows that with a retry, not the password '
+      'prompt', (tester) async {
+    final (c, ble) = await _withAuthGatedLamp();
+    addTearDown(c.dispose);
+    ble.seedSection(_devId, 'lamp', Uint8List.fromList('!'.codeUnits));
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    await _pumpUntil(tester, find.text('Your lamp is low on memory.'),
+        frames: 300);
+    expect(find.text('Your lamp is low on memory.'), findsOneWidget);
+    expect(find.text('Enter password'), findsNothing);
+
+    ble.seedSection(
+      _devId,
+      'lamp',
+      Uint8List.fromList(utf8.encode(
+        '{"name":"jacko","brightness":50,"advancedEnabled":false}',
+      )),
+    );
+    await tester.tap(find.text('Try again'));
+    await _pumpUntil(tester, find.byType(BrightnessCard), frames: 300);
+    expect(find.byType(BrightnessCard), findsOneWidget);
+  });
+
+  testWidgets(
       'Connect with wrong password shows inline error and keeps dialog open',
       (tester) async {
     final (c, _) = await _withAuthGatedLamp();
@@ -378,5 +414,32 @@ void main() {
           "It's hard to reach while teaching. Give it a minute, then try again."),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a lamp both teaching and low on memory says low on memory',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final c = ProviderContainer(
+      overrides: [
+        bleClientProvider.overrideWithValue(InMemoryBleClient()),
+        bleScannerProvider.overrideWithValue(FakeBleScanner()),
+        controlNotifierProvider.overrideWith2((_) => _Busy()),
+      ],
+    );
+    addTearDown(c.dispose);
+    await c.read(inventoryNotifierProvider.future);
+    await c.read(inventoryNotifierProvider.notifier).add(const InventoryLamp(
+          id: _devId, name: 'jacko', controlPassword: 'secret'));
+    c.read(otaBusySeenProvider.notifier).observe(_devId, distributing: true);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: c,
+      child: const MaterialApp(
+        home: Scaffold(body: ControlScreen(lampId: _devId)),
+      ),
+    ));
+    await _pumpUntil(tester, find.text('Your lamp is low on memory.'));
+    expect(find.text('Your lamp is low on memory.'), findsOneWidget);
+    expect(find.text('Jacko is busy teaching a lamp new tricks 🎓'),
+        findsNothing);
   });
 }

@@ -16,17 +16,17 @@ namespace lamp {
 
 // Class-default colors for an unconfigured lamp (empty or corrupt NVS). Both
 // are low-power: a purple base stem, and a warm white driven by the shade's
-// dedicated W channel rather than full RGB. applyDefaults() overwrites a
-// single-entry vector still holding one of these with the variant's injected
-// color, so a configured lamp never matches.
+// dedicated W channel rather than full RGB. A lamp whose load found no config
+// takes the variant's injected color in their place (applyRoleDefaults); a
+// stored color equal to one of these is the user's and is kept.
 constexpr Color kBaseDefaultColor(0x30, 0x07, 0x83, 0x00);
 constexpr Color kShadeDefaultColor(0x00, 0x00, 0x00, 0xFF);
 
-// True when both roles still hold exactly what applyDefaults() installed: the
-// variant's injected hex where it supplies one, the class default where it
-// omits the field. A variant that omits a color never equals its own empty hex
-// string, so the fallback has to mirror applyDefaults or the role reads as
-// user-configured on a factory lamp.
+// True when both roles hold exactly what applyDefaults() installs on a lamp
+// whose load found no config, which is the variant's injected hex where it
+// supplies one and the class default where it omits the field. A variant that omits a
+// color never equals its own empty hex string, so the fallback has to mirror
+// applyDefaults or the role reads as user-configured on a factory lamp.
 inline bool colorsAreFactoryDefault(const std::vector<Color>& baseColors,
                                     const std::vector<Color>& shadeColors,
                                     const std::string& variantBaseHex,
@@ -40,6 +40,14 @@ inline bool colorsAreFactoryDefault(const std::vector<Color>& baseColors,
   return baseColors.size() == 1 && baseColors[0] == baseDefault &&
          shadeColors.size() == 1 && shadeColors[0] == shadeDefault;
 }
+
+// Whether each role's first strip is wound back to front (StripSpec::reversed).
+// A store the C firmware wrote, which drove pixel i from colour index i, is
+// mirrored onto a reversed strip.
+struct StripWinding {
+  bool base = false;
+  bool shade = false;
+};
 
 // Name a fresh lamp loads from empty NVS, and the sentinel a variant replaces
 // with its own default in applyDefaults(). A stored name equal to this or the

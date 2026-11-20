@@ -7,14 +7,15 @@ import '../../../core/app_channel.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/empty_state_pane.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/gradient_nav_bar.dart';
 import '../../../core/widgets/rename_dialog.dart';
 import '../../../core/widgets/section_header.dart';
 import '../../../core/widgets/settings_row.dart';
 import '../../control/application/control_notifier.dart';
 import '../application/manual_palette_draft.dart';
+import '../application/osc_address_presets.dart';
 import '../application/wisp_notifier.dart';
+import '../domain/tuple_sampler.dart';
 import '../domain/wisp_source_mode.dart';
 import '../domain/wisp_status.dart';
 import 'palette_gradient_bar.dart';
@@ -24,11 +25,14 @@ import 'widgets/wisp_manual_palette.dart';
 import 'widgets/wisp_off_color.dart';
 import 'widgets/wisp_osc_source.dart';
 import 'widgets/wisp_painted_lamps.dart';
+import 'widgets/wisp_palette_style.dart';
 import 'widgets/wisp_password_field.dart';
+import 'widgets/wisp_settings_pending.dart';
 import 'widgets/space_brightness_slider.dart';
 import 'widgets/wisp_source_picker.dart';
 import 'widgets/wisp_wifi_config.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 /// Wisp config screen. Controls how the wisp drives the lamp grid's paint.
 ///
@@ -67,14 +71,7 @@ class WispConfigScreen extends ConsumerWidget {
         lampId: lampId,
         child: controlAsync.when(
           loading: () => const SizedBox.expand(),
-          error: (e, _) => FriendlyError.page(
-            title: "Couldn't reach your lamp.",
-            subtitle:
-                "They may have wandered out of range. Bring your phone closer "
-                'and try again.',
-            rawError: e,
-            onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
-          ),
+          error: (e, _) => LampErrorPage(lampId: lampId, error: e),
           data: (state) => _WispBody(lampId: lampId),
         ),
       ),
@@ -128,7 +125,8 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   Widget _buildBody(BuildContext context, WispStatus status) {
     final notifier = ref.read(wispNotifierProvider(widget.lampId).notifier);
     final source = status.source;
-    final draft = ref.watch(manualPaletteDraftProvider(widget.lampId));
+    final draft = ref.watch(manualPaletteDraftProvider(widget.lampId)
+        .select((d) => d.colors));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -138,6 +136,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
           sourceMode: source,
           manualPalette: draft,
           offColor: status.offColor,
+          style: status.paletteStyle ?? PaletteStyle.gradient,
         ),
         Expanded(
           child: IndexedStack(
@@ -171,7 +170,7 @@ class _WispBodyState extends ConsumerState<_WispBody> {
   }
 }
 
-class _SourcesTab extends StatefulWidget {
+class _SourcesTab extends ConsumerStatefulWidget {
   const _SourcesTab({
     required this.lampId,
     required this.status,
@@ -185,10 +184,46 @@ class _SourcesTab extends StatefulWidget {
   final WispSourceMode source;
 
   @override
-  State<_SourcesTab> createState() => _SourcesTabState();
+  ConsumerState<_SourcesTab> createState() => _SourcesTabState();
 }
 
-class _SourcesTabState extends State<_SourcesTab> {
+class _SourcesTabState extends ConsumerState<_SourcesTab> {
+  // Custom is picked for a wisp with no address to send, so it shows and
+  // nothing is sent.
+  bool _customDraft = false;
+
+  @override
+  void didUpdateWidget(_SourcesTab old) {
+    super.didUpdateWidget(old);
+    final status = widget.status;
+    if (widget.source != WispSourceMode.osc ||
+        status.wispMac != old.status.wispMac ||
+        status.oscMode == OscMode.custom) {
+      _customDraft = false;
+    }
+  }
+
+  void _selectOscMode(OscMode picked, OscMode wispMode) {
+    if (picked == OscMode.custom &&
+        !oscCustomAddressValid(widget.status.oscAddr ?? '')) {
+      setState(() => _customDraft = true);
+      return;
+    }
+    setState(() => _customDraft = false);
+    if (picked == wispMode) return;
+    _runWispOp(() => widget.notifier.setOscMode(picked));
+  }
+
+  Future<void> _runPresetOp(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (e) {
+      debugPrint('[wisp_config] preset change failed: $e');
+      if (!mounted) return;
+      AppSnackbar.error(context, "Couldn't save presets. Try again.");
+    }
+  }
+
   Future<void> _runWispOp(Future<void> Function() op) async {
     try {
       await op();
@@ -196,6 +231,80 @@ class _SourcesTabState extends State<_SourcesTab> {
       if (!mounted) return;
       AppSnackbar.error(context, "Couldn't reach the wisp. Try again.");
     }
+  }
+
+  // The OSC sender and its settings. The sender comes from the wisp's config,
+  // so nothing shows until it is held; a wisp that predates the sender
+  // setting follows only Straylight.
+  List<Widget> _oscSender(WispStatus status, WispNotifier notifier) {
+    if (!status.configKnown) {
+      return [
+        const SectionHeader('OSC sender'),
+        const SizedBox(height: AppSpace.sm),
+        WispSettingsPending(lampId: widget.lampId),
+      ];
+    }
+    final wispMode = status.oscMode ?? OscMode.straylight;
+    final mode = _customDraft ? OscMode.custom : wispMode;
+    final customAddress = status.oscAddr ?? '';
+    final sender = switch (mode) {
+      OscMode.straylight => 'Straylight',
+      OscMode.maestro => 'the Maestro',
+      OscMode.custom => _customDraft ? null : 'OSC on $customAddress',
+      OscMode.unknown => null,
+    };
+    final presets = ref.read(oscAddressPresetsProvider.notifier);
+    return [
+      if (!status.sourceLive && sender != null) ...[
+        Semantics(
+          liveRegion: true,
+          label: 'Waiting for $sender',
+          child: WaitingForOscNotice(sender: sender),
+        ),
+        const SizedBox(height: AppSpace.lg),
+      ],
+      if (status.oscMode != null) ...[
+        OscModeSwitch(
+          current: mode,
+          customAvailable: status.oscAddr != null,
+          onSelect: (m) => _selectOscMode(m, wispMode),
+        ),
+        const SizedBox(height: AppSpace.xl),
+      ],
+      if (mode == OscMode.straylight)
+        OscRolePicker(
+          current: status.oscRole,
+          onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
+        ),
+      if (status.oscMode == null) ...[
+        const SizedBox(height: AppSpace.sm),
+        Text(
+          'Update this wisp to use Maestro.',
+          key: const Key('wisp-osc-update-wisp'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+      if (mode == OscMode.maestro)
+        MaestroSlotPicker(
+          current: status.oscSlot,
+          address: status.oscSendTo,
+          onSelect: (n) => _runWispOp(() => notifier.setMaestroSlot(n)),
+        ),
+      if (mode == OscMode.custom)
+        CustomOscAddress(
+          address: _customDraft ? '' : customAddress,
+          active: !_customDraft,
+          sendTo: status.oscSendTo,
+          presets:
+              ref.watch(oscAddressPresetsProvider).value ?? const <String>[],
+          onSend: (a) {
+            setState(() => _customDraft = false);
+            _runWispOp(() => notifier.setCustomOscAddress(a));
+          },
+          onSavePreset: (a) => _runPresetOp(() => presets.add(a)),
+          onDeletePreset: (a) => _runPresetOp(() => presets.remove(a)),
+        ),
+    ];
   }
 
   @override
@@ -224,17 +333,19 @@ class _SourcesTabState extends State<_SourcesTab> {
         ],
         if (source == WispSourceMode.osc) ...[
           const SizedBox(height: AppSpace.xl),
-          if (!status.sourceLive) ...[
-            Semantics(
-              liveRegion: true,
-              label: 'Waiting for Straylight',
-              child: const WaitingForStraylightNotice(),
-            ),
-            const SizedBox(height: AppSpace.lg),
-          ],
-          OscRolePicker(
-            current: status.oscRole,
-            onSelect: (r) => _runWispOp(() => notifier.setOscRole(r)),
+          ..._oscSender(status, notifier),
+          const SizedBox(height: AppSpace.xl),
+          OscSendTo(
+            lampId: lampId,
+            status: status,
+            onLinkDisagrees: () => unawaited(notifier.pollConfig()),
+          ),
+        ],
+        if (source != WispSourceMode.off && status.paletteStyle != null) ...[
+          const SizedBox(height: AppSpace.xl),
+          PaletteStyleSwitch(
+            current: status.paletteStyle!,
+            onSelect: (s) => _runWispOp(() => notifier.setPaletteStyle(s)),
           ),
         ],
       ],

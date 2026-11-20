@@ -12,7 +12,9 @@
 #include <lampos/led_types.hpp>
 
 #include "config/manual_palette_color.hpp"
+#include "paint/palette_style.hpp"
 #include "osc/osc_role.hpp"
+#include "osc/osc_target.hpp"
 
 namespace wisp {
 
@@ -24,8 +26,16 @@ enum class WispSourceMode : uint8_t {
   Osc    = 3,
 };
 
-// Must not exceed lamp_protocol::kMaxWispPaletteColors; setManualPalette enforces this.
-inline constexpr size_t kManualPaletteMaxColors = 50;
+// The most a Straylight palette carries. Must not exceed
+// lamp_protocol::kMaxWispPaletteColors; setManualPalette and the NVS load
+// keep a longer palette's first colours.
+inline constexpr size_t kManualPaletteMaxColors = 16;
+
+// The stored Manual palette as wispStatus reports it.
+struct ManualPaletteStatus {
+  char id[9];  // statusManualId: "" when empty, else 8 hex chars
+  uint16_t seq;  // the seq of the save that stored it, 0 for none
+};
 
 class WispConfig {
  public:
@@ -51,17 +61,35 @@ class WispConfig {
   OscRole oscRole() const { return oscRole_; }
   void setOscRole(OscRole role);
 
+  // The OSC sub-mode, Maestro slot and Custom address. `slot` must pass
+  // maestroSlotValid; `address` must be "" or pass oscCustomAddressValid.
+  // setOsc is true when the source is Osc and the listened address moved
+  // (oscTargetResets), so the caller holds lamps at Off until its first
+  // palette.
+  OscMode oscMode() const { return oscMode_; }
+  uint8_t oscSlot() const { return oscSlot_; }
+  const char* oscAddress() const { return oscAddress_; }
+  bool setOsc(OscMode mode, uint8_t slot, const char* address);
+  OscTarget oscTarget() const;
+
   // Replace-only; empty is valid (lamps revert to their own behavior).
   const std::vector<ManualPaletteColor>& manualPalette() const {
     return manualPalette_;
   }
-  void setManualPalette(const std::vector<ManualPaletteColor>& colors);
+  // [seq] is the app's save seq (1..65535) echoed in the status until the
+  // next save; 0 for none. RAM-only.
+  void setManualPalette(const std::vector<ManualPaletteColor>& colors,
+                        uint16_t seq = 0);
 
   // Fill `outRgb` (maxColors * 3) and `outW` (maxColors) planes; matches
   // the MSG_WISP_PALETTE wire layout. Lock-guarded: safe to call from the
   // StatusEmitter timer-service task.
   size_t copyManualPalette(uint8_t* outRgb, uint8_t* outW,
                            size_t maxColors) const;
+
+  // The stored Manual palette's status fields, whatever the source mode.
+  // Lock-guarded like copyManualPalette.
+  ManualPaletteStatus manualPaletteStatus() const;
 
   // Ring color in Off mode (PaintDistributor stays idle). Persisted as 4 NVS bytes.
   ManualPaletteColor offColor() const { return offColor_; }
@@ -70,6 +98,13 @@ class WispConfig {
   // Bumping re-rolls per-lamp color assignments fleet-wide.
   uint8_t shuffleSeed() const { return shuffleSeed_; }
   void bumpShuffleSeed();
+
+  // How lamps take colours from the palette, in every source mode. [seq] is
+  // the app's setSwatches seq (1..65535) echoed in the status until the next
+  // style pick, the held style included; 0 for none. RAM-only.
+  PaletteStyle paletteStyle() const { return paletteStyle_; }
+  uint16_t swatchesSeq() const { return swatchesSeq_; }
+  void setPaletteStyle(PaletteStyle style, uint16_t seq = 0);
 
   // Color drift interval (ms), and the Fade setting (0..100) that sets each
   // drift step's fade length (see driftFadeMs).
@@ -112,9 +147,15 @@ class WispConfig {
   String wifiPw_;
   WispSourceMode sourceMode_ = WispSourceMode::Off;
   OscRole oscRole_ = OscRole::Primary;
+  OscMode oscMode_ = OscMode::Straylight;
+  uint8_t oscSlot_ = kMaestroSlotMin;
+  char oscAddress_[kOscCustomAddressMaxLen + 1] = "";
   std::vector<ManualPaletteColor> manualPalette_;
+  uint16_t manualSeq_ = 0;
   ManualPaletteColor offColor_ = {255, 150, 50, 0};
   uint8_t shuffleSeed_ = 0;
+  PaletteStyle paletteStyle_ = PaletteStyle::Gradient;
+  uint16_t swatchesSeq_ = 0;
   uint32_t driftIntervalMs_ = 120000;
   uint8_t driftFadePct_ = 50;
   String name_;

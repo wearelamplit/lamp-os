@@ -5,7 +5,9 @@
 #include "components/firmware/firmware_distributor.hpp"
 #include "components/firmware/firmware_receiver.hpp"
 #include "components/firmware/fs_ota.hpp"
+#include "components/firmware/ota_mark_valid.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
+#include "components/webapp/webapp.hpp"
 #include "version.hpp"
 
 // Defined at file scope in lamp.cpp; the receiver header exposes no extern.
@@ -23,10 +25,16 @@ OtaOfferThrottle s_throttle;
 // Only ESP-NOW peers are walked, since firmwareVersion arrives on the ESP-NOW
 // HELLO and a BLE-only sighting carries none.
 void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
+#if LAMP_WEBAPP_ENABLED
+  const bool webClient = webapp::hasClient();
+#else
+  const bool webClient = false;
+#endif
   const OtaOfferBusy busy =
       offerBusy(startupComplete, firmwareDistributor.isInProgress(),
                 ::firmwareReceiver.isInProgress(), fs_ota::fsPathBusy(),
-                ota_quiet_mode::holders(), firmwareDistributor.holdingIdleQuiet());
+                ota_quiet_mode::holders(), firmwareDistributor.holdingIdleQuiet(),
+                otaMarkValid.pending(), webClient);
   if (!s_throttle.due(busy, nowMs)) return;
 
   const std::vector<MeshPeer>& peers = lampRoster.getMesh(LAMP_PRUNE_TIME_MS);
@@ -49,7 +57,7 @@ void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
       }
     }
     firmwareDistributor.considerPeerForOta(p.mac, p.firmwareVersion, p.protocolVersion, nowMs,
-                                           p.fwChannel, p.maxChunk, p.espnowRssi,
+                                           p.fwChannel, p.maxChunk, p.otaLinkHeld,
                                            peerBeingServed);
   }
   if (!busy.fsWalkAllowed()) return;
@@ -57,7 +65,7 @@ void tickOtaOffers(uint32_t nowMs, bool startupComplete) {
   for (const auto& p : peers) {
     if (!p.hasMac) continue;
     fs_ota::considerPeer(p.mac, p.firmwareVersion, p.protocolVersion, nowMs, p.fwChannel,
-                         p.fsDigest, p.hasFsDigest, p.needsFs, p.espnowRssi);
+                         p.fsDigest, p.hasFsDigest, p.needsFs, p.otaLinkHeld);
   }
 }
 

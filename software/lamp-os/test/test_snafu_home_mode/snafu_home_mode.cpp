@@ -20,6 +20,7 @@
 #include "../../src/util/heap_guard.cpp"
 #include "../../src/components/network/mesh/lamp_roster.cpp"
 #include "../../src/core/peer_view.cpp"
+#include "../replaced_new/heap_tally.hpp"
 
 static bool g_ignore = false;
 static float g_wisp = 0.0f;
@@ -253,7 +254,7 @@ static bool greetingBorrowsAfterColourInfo(bool ignoreDuringInfo) {
   greeting.triggerGreeting(peer);
 
   g_ignore = ignoreDuringInfo;
-  greeting.onColorInfo(kPeerMac, {kPeer}, {kPeer});
+  greeting.onColorInfo(kPeerMac, std::vector<Color>{kPeer}, std::vector<Color>{kPeer});
   g_ignore = false;
 
   greeting.animationState = STOPPED;  // the greeting's pass ends
@@ -406,6 +407,53 @@ void test_palette_edit_mid_drift_ends_the_drift() {
   TEST_ASSERT_TRUE(isOwnSceneUnderWisp(fb.buffer, 0.0f, Color(), cfg.segments[0].colors));
 }
 
+// Once the drift-back lands the dots hold no peer stops and no melt target,
+// whether or not a melt was under way when home mode started.
+void test_landed_drift_holds_nothing() {
+  for (int passes : {100, 1900}) {
+    ShadeSettings cfg = ownConfig();
+    FrameBuffer fb = makeFb();
+    BehaviorContext ctx;
+    DotsBehavior dots(&fb, cfg);
+    dots.setBehaviorContext(&ctx);
+    dots.control();
+    dots.draw();
+    const size_t before = heap_tally::g_liveBytes;
+    dots.borrowColors({kPeer, Color(0, 0, 0, 0x80)}, {kPeer, Color(0, 0, 0, 0x80)}, 2000);
+    for (int i = 0; i < passes; ++i) { dots.control(); dots.draw(); }
+    g_ignore = true;
+    for (uint32_t i = 0; i < DotsBehavior::kBorrowSceneFrames + 5; ++i) {
+      dots.control();
+      dots.draw();
+    }
+    g_ignore = false;
+    TEST_ASSERT_EQUAL_size_t(before, heap_tally::g_liveBytes);
+  }
+}
+
+// A finished greeting frees the frames it drew from and the peer's palette.
+void test_finished_greeting_holds_nothing() {
+  FrameBuffer shadeFb = makeFb();
+  LampRoster roster;
+  BehaviorContext ctx;
+  ctx.lampRoster = &roster;
+  Greeting greeting(&shadeFb);
+  greeting.setBehaviorContext(&ctx);
+  PeerView p;
+  p.mac = kPeerMac;
+  p.hasMac = true;
+  p.baseColor = kPeer;
+  greeting.control();
+  const size_t before = heap_tally::g_liveBytes;
+  greeting.triggerGreeting(p);
+  greeting.onColorInfo(kPeerMac, std::vector<Color>{kPeer, Color(0, 0, 0, 0x80)},
+                       std::vector<Color>{kPeer, Color(0, 0, 0, 0x80)});
+  for (int i = 0; i < 10; ++i) greeting.draw();
+  greeting.animationState = STOPPED;
+  greeting.control();
+  TEST_ASSERT_EQUAL_size_t(before, heap_tally::g_liveBytes);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_borrow_shows_peer_palette_outside_home_mode);
@@ -418,6 +466,8 @@ int main(int, char**) {
   RUN_TEST(test_borrow_mid_drift_keeps_its_crossfade_length);
   RUN_TEST(test_drift_after_palette_edit_mid_borrow_is_continuous);
   RUN_TEST(test_palette_edit_mid_drift_ends_the_drift);
+  RUN_TEST(test_landed_drift_holds_nothing);
+  RUN_TEST(test_finished_greeting_holds_nothing);
   RUN_TEST(test_greeting_takes_colour_info_outside_home_mode);
   RUN_TEST(test_greeting_takes_no_colour_info_while_ignoring_peers);
   return UNITY_END();

@@ -8,7 +8,6 @@ import '../../../core/widgets/app_sheet.dart';
 import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/back_button_leading.dart';
 import '../../../core/widgets/form_section.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../../core/widgets/info_panel.dart';
 import '../../../core/widgets/nav_row.dart';
 import '../../../core/widgets/number_input_dialog.dart';
@@ -18,6 +17,7 @@ import '../../control/application/control_state.dart';
 import '../../control/domain/sections.dart';
 import '../../control/application/settings_blob_too_large_exception.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 /// Advanced LED settings: pixel count per segment, data pin per segment, and
 /// strip-type (LED byte order). Data pin and strip type show only in advanced
@@ -116,15 +116,7 @@ class _AdvancedLedsScreenState extends ConsumerState<AdvancedLedsScreen> {
         lampId: widget.lampId,
         child: async.when(
           loading: () => const SizedBox.expand(),
-          error: (e, _) => FriendlyError.page(
-            title: "Couldn't reach your lamp.",
-            subtitle:
-                "They may have wandered out of range. Bring your phone closer "
-                'and try again.',
-            rawError: e,
-            onRetry: () =>
-                ref.invalidate(controlNotifierProvider(widget.lampId)),
-          ),
+          error: (e, _) => LampErrorPage(lampId: widget.lampId, error: e),
           data: (state) {
             // Capture on first paint, never overwrite. The user's mid-
             // edit values come through `state` later; Cancel needs to

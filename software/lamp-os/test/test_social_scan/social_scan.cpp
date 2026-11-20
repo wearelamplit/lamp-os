@@ -7,8 +7,8 @@
 //     flag-clear/disconnect (active=false) and on the safety timeout.
 //  2. The sighting pipeline the gate re-enables: a simulated BLE-only advert
 //     via LampRoster::addOrUpdateFromBle lands in the roster with the
-//     BLE-near fields buildNearbyJson emits (viaBle path). The nearby-JSON
-//     serialize itself is covered by test_nearby_rev / test_ble_nearby_lampid.
+//     BLE-near fields NearbyList::render emits (viaBle path). The nearby-JSON
+//     serialize itself is covered by test_nearby_list.
 
 #include <unity.h>
 
@@ -146,7 +146,7 @@ void test_ble_only_sighting_enters_roster() {
   TEST_ASSERT_EQUAL_UINT32(1, all.size());
   const auto& e = all[0];
   TEST_ASSERT_EQUAL_STRING("legacy-lamp", e.name);
-  TEST_ASSERT_NOT_EQUAL(0, e.lastSeenNearMs);  // viaBle flag in buildNearbyJson
+  TEST_ASSERT_NOT_EQUAL(0, e.lastSeenNearMs);  // viaBle flag in NearbyList::render
   TEST_ASSERT_EQUAL_INT8(-70, e.lastRssi);
 }
 

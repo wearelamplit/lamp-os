@@ -13,10 +13,11 @@ namespace lamp { namespace lioness {
 
 // Arrival greeting for the Lions strip. Starts STOPPED (inAutoPlay=false), so
 // the compositor skips its draw() while idle and the ambient base scene shows
-// through. On a new near arrival (latest-wins) it snaps all three lions to the
-// newcomer's peer.baseColor and breathes kPulses times (pulseEnvelope), eases back into the
+// through. On a new near arrival it snaps all three lions to the newcomer's
+// peer.baseColor and breathes kPulses times (pulseEnvelope), eases back into the
 // ambient pixels drawn beneath it this frame, and fires a GlitchyExpression on
-// the shade. Registered via b.add only.
+// the shade. A greeting plays through before the next arrival is greeted.
+// Registered via b.add only.
 class LionsGreetingBehavior : public AnimatedBehavior {
  public:
   explicit LionsGreetingBehavior(FrameBuffer* baseFb);

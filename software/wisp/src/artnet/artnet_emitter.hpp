@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+#include "paint/palette_style.hpp"
+
 namespace wisp {
 
 class CurrentPalette;
@@ -33,6 +35,9 @@ class ArtnetEmitter {
   // lamps get the equivalent release via isWispActive=0.
   void setActive(bool active);
 
+  // Style the next frame samples with; takes effect on the next emit.
+  void setPaletteStyle(PaletteStyle style) { style_ = style; }
+
  private:
   void emitNow();
 
@@ -47,6 +52,7 @@ class ArtnetEmitter {
   AsyncUDP udp_;
   bool udpReady_ = false;
   bool active_ = true;
+  PaletteStyle style_ = PaletteStyle::Gradient;
   uint8_t seq_ = 0;
   uint32_t lastEmitMs_ = 0;
 #ifdef LAMP_DEBUG

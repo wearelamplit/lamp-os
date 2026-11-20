@@ -73,7 +73,7 @@ NearbyCopy toNearbyCopy(const RosterEntry& e) {
   return c;
 }
 
-MeshPeer toMeshPeer(const RosterEntry& e) {
+MeshPeer toMeshPeer(const RosterEntry& e, uint32_t nowMs) {
   MeshPeer m;
   m.firmwareVersion = e.firmwareVersion;
   m.maxChunk = e.maxChunk;
@@ -87,12 +87,12 @@ MeshPeer toMeshPeer(const RosterEntry& e) {
   m.hasFsDigest = e.hasFsDigest;
   m.needsFs = e.needsFs;
   m.hasOtaSendingTo = e.hasOtaSendingTo;
-  m.espnowRssi = e.espnowRssi;
+  m.otaLinkHeld = e.directRssi.holdsOtaFloor(nowMs);
   m.lastRssi = e.lastRssi;
   return m;
 }
 
-ListedPeer toListedPeer(const RosterEntry& e) {
+ListedPeer toListedPeer(const RosterEntry& e, uint32_t nowMs) {
   ListedPeer l;
   std::memcpy(l.name, e.name, sizeof(l.name));
   std::memcpy(l.fwChannel, e.fwChannel, sizeof(l.fwChannel));
@@ -104,6 +104,8 @@ ListedPeer toListedPeer(const RosterEntry& e) {
   l.lastSeenMeshMs = e.lastSeenMeshMs;
   l.firmwareVersion = e.firmwareVersion;
   l.lastRssi = e.lastRssi;
+  l.espnowRssi = e.directRssi.fresh(nowMs);
+  l.espnowRssiFreshS = static_cast<uint8_t>(e.directRssi.freshForMs(nowMs) / 1000);
   l.otaState = e.otaState;
   l.hasMac = e.hasMac;
   l.hasOtaSendingTo = e.hasOtaSendingTo;
@@ -248,7 +250,7 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
       std::memcpy(e.otaSendingTo, otaSendingTo, 6);
     }
     e.variant = variant;
-    e.espnowRssi = rssi;
+    e.directRssi.record(rssi, now);
     store_[count_++] = e;
   } else {
     // A HELLO whose nameLen was 0 arrives with an empty name; keep the last
@@ -295,9 +297,7 @@ void LampRoster::addOrUpdateFromEspNow(const char* name, const uint8_t mac[6],
     if (variant != lamp_protocol::LampVariant::Unknown) {
       store_[idx].variant = variant;
     }
-    // -127 (unavailable, or a relayed copy) leaves the last known reading
-    // intact.
-    if (rssi != -127) store_[idx].espnowRssi = rssi;
+    store_[idx].directRssi.record(rssi, now);
   }
   generation_++;
   xSemaphoreGive(mutex_);
@@ -326,6 +326,7 @@ void LampRoster::retireSightings(uint32_t nowMs) {
     for (uint32_t* stamp : {&e.lastSeenNearMs, &e.lastSeenMeshMs, &e.lastSeenBleMs}) {
       if (*stamp != 0) *stamp = lampos::retireStamp(nowMs, *stamp);
     }
+    e.directRssi.retire(nowMs);
   }
   xSemaphoreGive(mutex_);
 }
@@ -378,7 +379,7 @@ std::vector<MeshPeer>& LampRoster::getMesh(uint32_t maxAgeMs) {
   for (size_t i = 0; i < count_; i++) {
     const RosterEntry& e = store_[i];
     if (e.lastSeenMeshMs != 0 && (now - e.lastSeenMeshMs) <= maxAgeMs) {
-      meshBuf_.push_back(toMeshPeer(e));
+      meshBuf_.push_back(toMeshPeer(e, now));
     }
   }
   xSemaphoreGive(mutex_);
@@ -389,21 +390,24 @@ std::vector<MeshPeer>& LampRoster::getMesh(uint32_t maxAgeMs) {
 }
 
 std::vector<ListedPeer>& LampRoster::getAll() {
-  try {
-    allBuf_.reserve(kCapacity);
-  } catch (const std::bad_alloc&) {
-    allBuf_.reserve(size());
+  const size_t n = size();
+  if (allBuf_.capacity() != n) {
+    // Free first: the contents are refilled below, so the old block need not
+    // outlive the new one.
+    std::vector<ListedPeer>().swap(allBuf_);
+    allBuf_.reserve(n);
   }
 #ifdef LAMP_DEBUG
   debugGetterEnter();
 #endif
   allBuf_.clear();
+  const uint32_t now = millis();
   xSemaphoreTake(mutex_, portMAX_DELAY);
   // Capped at capacity so push_back never reallocates (and throws) under the
-  // mutex; a peer added since the fallback reserve bumps generation and shows
-  // on the next rebuild.
+  // mutex; a peer added since the reserve bumps generation and shows on the
+  // next rebuild.
   for (size_t i = 0; i < count_ && allBuf_.size() < allBuf_.capacity(); i++) {
-    allBuf_.push_back(toListedPeer(store_[i]));
+    allBuf_.push_back(toListedPeer(store_[i], now));
   }
   xSemaphoreGive(mutex_);
 #ifdef LAMP_DEBUG

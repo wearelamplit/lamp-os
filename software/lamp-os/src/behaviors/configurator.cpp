@@ -40,6 +40,10 @@ void ConfiguratorBehavior::showScene(const RoleScene& scene, uint32_t fadeMs) {
   install(scene.colors, fadeMs, scene.rotation, millis());
 }
 
+void ConfiguratorBehavior::showOnSavedRotation(const std::vector<Color>& stops) {
+  showScene(buildRoleScene(fb->pixelCount, stops, fb->defaultRotation), 0);
+}
+
 void ConfiguratorBehavior::install(const std::vector<Color>& targetColors,
                                    uint32_t fadeDurationMs,
                                    const ColorRotation& rotation, uint32_t now) {
@@ -60,33 +64,28 @@ void ConfiguratorBehavior::install(const std::vector<Color>& targetColors,
   // the interpolation has landed, just from the lerp math, not from
   // the post-overlay buffer.
   const size_t n = fb ? static_cast<size_t>(fb->pixelCount) : 0;
-  const bool wasFading = fadeActive(now);
-  // Stash the pre-mutation source so the mid-fade branch can read it
-  // without aliasing the destination assignment below.
-  std::vector<Color> prevFromColors = fadeFromColors_;
-  fadeFromColors_.assign(n, Color());
   const uint32_t offset = rotating_ ? loopOffset(clock_.phase(), n) : 0;
-  if (n > 0) {
-    if (wasFading && !prevFromColors.empty() && !colors.empty()) {
-      // Mid-fade interrupt: compute where the lerp would have landed
-      // at `now`, using the previous endpoints. This preserves visual
-      // continuity (the new fade starts wherever the old fade was
-      // headed) without going through fb->buffer.
-      const uint32_t elapsed = now - fadeStartMs_;
-      for (size_t i = 0; i < n; ++i) {
-        fadeFromColors_[i] = fade(
-            prevFromColors[i % prevFromColors.size()],
-            target(i, offset),
-            fadeDurationMs_, elapsed);
-      }
-    } else if (!colors.empty()) {
+  if (n > 0 && fadeActive(now) && fadeFromColors_.size() == n && !colors.empty()) {
+    // Mid-fade interrupt: compute where the lerp would have landed
+    // at `now`, using the previous endpoints. This preserves visual
+    // continuity (the new fade starts wherever the old fade was
+    // headed) without going through fb->buffer. Each pixel reads only
+    // its own from-colour, so the update runs in place.
+    const uint32_t elapsed = now - fadeStartMs_;
+    for (size_t i = 0; i < n; ++i) {
+      fadeFromColors_[i] = fade(fadeFromColors_[i], target(i, offset),
+                                fadeDurationMs_, elapsed);
+    }
+  } else {
+    fadeFromColors_.assign(n, Color());
+    if (n > 0 && !colors.empty()) {
       // Fresh fade with a known prior target: start from whatever
       // the configurator was painting before this call. Expand if
       // colors.size() differs from pixelCount (the per-stop case).
       for (size_t i = 0; i < n; ++i) {
         fadeFromColors_[i] = target(i, offset);
       }
-    } else if (fb) {
+    } else if (n > 0 && fb) {
       // Cold-start: no prior `colors` (first beginFade ever). Fall
       // back to fb->buffer because there's no other source. Knockout
       // dimming here doesn't cause flicker because there's nothing

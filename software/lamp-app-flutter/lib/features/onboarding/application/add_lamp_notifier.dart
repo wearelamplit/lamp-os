@@ -7,6 +7,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/lamp_crypto.dart';
+import '../../../core/ble/section_busy.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/lamp_name.dart';
 import '../../control/application/auth_client.dart';
@@ -252,6 +253,7 @@ class AddLampNotifier extends _$AddLampNotifier {
         // auth-gate returns empty bytes when the password is wrong; non-empty
         // bytes mean auth succeeded, so a decode failure or missing name there
         // is a transient read glitch that routes to retry, not a bad password.
+        // A busy section passed the gate too.
         await AuthClient(ble: ble)
             .authenticate(deviceId: state.deviceId, password: state.password)
             .timeout(verifyOpTimeout);
@@ -259,11 +261,15 @@ class AddLampNotifier extends _$AddLampNotifier {
             .readSection(state.deviceId, 'lamp')
             .timeout(verifyOpTimeout);
         if (bytes.isEmpty) throw const FormatException('auth-rejected');
-        try {
-          final j = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-          if (j['name'] == null) throw const FormatException('name-missing');
-        } on FormatException {
-          throw StateError('verify-read-glitch');
+        if (!isSectionBusy(bytes)) {
+          try {
+            final j = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+            if (j['name'] == null) {
+              throw const FormatException('name-missing');
+            }
+          } on FormatException {
+            throw StateError('verify-read-glitch');
+          }
         }
       }
     } on FormatException catch (_) {

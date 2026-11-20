@@ -15,6 +15,17 @@ import 'package:lamp_app/features/lamp_shell/application/wifi_notifier.dart';
 
 const _devId = 'lamp-x';
 
+/// Emits an empty first frame once a subscription is live, as
+/// flutter_blue_plus replays an empty cache.
+class _ReplayingBle extends InMemoryBleClient {
+  @override
+  Stream<Uint8List> subscribe(String d, String s, String c) async* {
+    final src = super.subscribe(d, s, c);
+    yield Uint8List(0);
+    yield* src;
+  }
+}
+
 /// Creates a [ProviderContainer] with an in-memory BLE client pre-seeded with
 /// [stateJson] for wifiState, and adds an [InventoryLamp] with
 /// [controlPassword] so that [WifiNotifier._writeOp] can find the lamp.
@@ -22,7 +33,7 @@ Future<ProviderContainer> _seeded(
   String stateJson, {
   String controlPassword = 'secret',
 }) async {
-  final ble = InMemoryBleClient();
+  final ble = _ReplayingBle();
   await ble.connect(_devId);
   await ble.write(
     _devId,

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import '../utils/serial_by_key.dart';
+import 'ble_timing.dart';
 import 'uuids.dart';
 
 
@@ -133,6 +134,7 @@ Future<Uint8List> readSectionVia(
   String deviceId,
   String name,
 ) {
+  final readStart = bleTimings.now();
   Future<Uint8List> run() => client
       .write(deviceId, BleUuids.controlService, BleUuids.pageCtrl,
           Uint8List.fromList(utf8.encode(name)))
@@ -141,7 +143,22 @@ Future<Uint8List> readSectionVia(
             () => client.read(deviceId, BleUuids.controlService, BleUuids.pageData),
           ));
 
-  return _pageSessions.run(deviceId, run);
+  final result = _pageSessions.run(deviceId, run);
+  result.then(
+    (_) => bleTimings.sectionRead(deviceId, name, readStart),
+    onError: (Object e) =>
+        bleTimings.sectionRead(deviceId, name, readStart, error: e),
+  );
+  return result;
+}
+
+enum LinkDropCause {
+  /// The lamp ended a working link itself.
+  lampHungUp,
+
+  /// Any other drop: out of range, a reboot, the phone's own disconnect, or a
+  /// reason the transport does not report.
+  other,
 }
 
 abstract class BleClient {
@@ -169,6 +186,11 @@ abstract class BleClient {
   /// transport doesn't expose one). Callers must treat 0 as "fall back
   /// to the safe baseline chunk size", never as a literal MTU.
   int mtu(String deviceId) => 0;
+
+  /// Why [deviceId]'s link went down, valid from a `false` edge of
+  /// [watchConnected] until the next connect. [LinkDropCause.other] whenever
+  /// the transport cannot tell.
+  LinkDropCause lastDropCause(String deviceId) => LinkDropCause.other;
 
   Future<Uint8List> read(String deviceId, String serviceUuid, String charUuid);
   /// Writes [value] to the characteristic.

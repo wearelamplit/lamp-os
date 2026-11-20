@@ -216,9 +216,29 @@ void test_lerp_ring_blends_from_to(void) {
   TEST_ASSERT_UINT8_WITHIN(2, 100, out[3]);  // 200→0 midpoint
 }
 
+// Blocks: each pixel shows one stop exactly, in order, stop k on pixels whose
+// (i * n) / px is k; four stops over 30 pixels give blocks of 8, 7, 8, 7.
+void test_blocks_show_stops_without_blending(void) {
+  const uint8_t stops[12] = {255, 0, 0, 0, 255, 0, 0, 0, 255, 9, 9, 9};
+  uint8_t out[kBufBytes] = {0};
+  TEST_ASSERT_TRUE(wisp::computeRingBlocks(stops, 4, out, kPixels));
+  size_t perStop[4] = {0, 0, 0, 0};
+  for (size_t i = 0; i < kPixels; ++i) {
+    const size_t k = (i * 4) / kPixels;
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(stops + k * 3, out + i * 3, 3);
+    ++perStop[k];
+  }
+  TEST_ASSERT_EQUAL_size_t(8, perStop[0]);
+  TEST_ASSERT_EQUAL_size_t(7, perStop[1]);
+  TEST_ASSERT_EQUAL_size_t(8, perStop[2]);
+  TEST_ASSERT_EQUAL_size_t(7, perStop[3]);
+  TEST_ASSERT_FALSE(wisp::computeRingBlocks(stops, 0, out, kPixels));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_empty_palette_returns_false);
+  RUN_TEST(test_blocks_show_stops_without_blending);
   RUN_TEST(test_single_stop_fills_uniform);
   RUN_TEST(test_two_stops_endpoints_and_midpoint);
   RUN_TEST(test_two_stops_pure_red_to_blue);

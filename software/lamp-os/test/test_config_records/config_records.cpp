@@ -44,7 +44,7 @@ SaveResult save(ConfigStore& store, const Model& m) {
 // The load Config's constructor runs.
 config_codec::LoadedConfig load(ConfigStore& store, Model& m) {
   return config_codec::loadConfig(store, m.lamp, m.base, m.shade, m.expressions, m.homeMode,
-                                  s_buf, sizeof(s_buf));
+                                  s_buf, sizeof(s_buf), {});
 }
 
 // The save a release up to 1.3.3 ran.

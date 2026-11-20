@@ -203,10 +203,13 @@ struct LoadedConfig {
 // present (a save cut short) loads "st0". A settings blob that is present
 // but does not read or decode is reported unreadable, and the legacy load
 // runs for whatever is left. The blob is read into `buffer`, which holds
-// kMaxSettingsBlobLen bytes.
+// kMaxSettingsBlobLen bytes. A "cfg" string the C firmware wrote loads alone
+// and migrates onto the strips `winding` describes (docs/dev/embedded-heap.md,
+// "A store the C firmware wrote").
 LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& base,
                         ShadeSettings& shade, ExpressionSettings& expressions,
-                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen);
+                        HomeModeSettings& homeMode, uint8_t* buffer, size_t bufferLen,
+                        StripWinding winding);
 
 // Heap a raw save takes beside its document, bounded from the host
 // measurements in test_config_persist_validate (64-bit, so its slots and
@@ -218,13 +221,15 @@ LoadedConfig loadConfig(ConfigStore& store, LampSettings& lamp, BaseSettings& ba
 // string (grown by doubling while it is parsed, so up to twice it, then kept
 // and copied into the model) and
 // kRawModelBytes for the model at the caps, which carries some slack. The
-// largest single block is a pool of slots, at most kRawPoolBytes, or the
-// longest string's growth, at most twice it plus kRawStringSlack.
+// largest single block is a pool of slots (at most kRawPoolBytes), the
+// model's expression list at its cap (kRawExpressionListBytes) or the longest
+// string's growth (at most twice it plus kRawStringSlack).
 constexpr size_t kRawSlotBytes = 15;
 constexpr size_t kRawStringBytes = 24;
 constexpr size_t kRawLongestPerByte = 4;
 constexpr size_t kRawModelBytes = 4096;
 constexpr size_t kRawPoolBytes = 4096;
+constexpr size_t kRawExpressionListBytes = kMaxExpressions * sizeof(ExpressionConfig);
 constexpr size_t kRawStringSlack = 128;
 
 // What a raw save's heap gate reads off a document without parsing it.

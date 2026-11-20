@@ -4,12 +4,14 @@ import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderSubscription;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/ble/ble_client.dart';
 import '../../../core/ble/ble_client_provider.dart';
 import '../../../core/ble/connect_with_retry.dart';
 import '../../../core/ble/lamp_crypto.dart';
+import '../../../core/ble/section_busy.dart';
 import '../../../core/ble/uuids.dart';
 import '../../../core/ble/write_coalescer.dart';
 import '../../../core/lamp_name.dart';
@@ -19,6 +21,8 @@ import '../../firmware/application/firmware_notifier.dart';
 import '../../firmware/application/quiet_after_push.dart';
 import '../../firmware/domain/firmware_state.dart';
 import '../../inventory/application/inventory_notifier.dart';
+import '../../nearby/application/nearby_lamps_notifier.dart';
+import '../../nearby/domain/nearby_lamp.dart';
 import '../data/catalog_store.dart';
 import 'advanced_session.dart';
 import '../../lamp_shell/domain/expression_catalog.dart';
@@ -29,6 +33,7 @@ import '../../social/domain/social_mode.dart';
 import 'auth_client.dart';
 import 'control_state.dart';
 import 'lamp_auth_required_exception.dart';
+import 'lamp_busy_exception.dart';
 import 'lamp_save_status.dart';
 import 'settings_blob_too_large_exception.dart';
 
@@ -108,6 +113,18 @@ class ControlNotifier extends _$ControlNotifier {
   /// reads on top of each other.
   bool _reconnectInFlight = false;
 
+  /// Watches the scan for the lamp's next broadcast while
+  /// [ControlState.lampHungUp] holds; keeps the scan running. Null otherwise.
+  ProviderSubscription<List<NearbyLamp>>? _lampBackWatch;
+
+  /// Ends a [_lampBackWatch] the lamp never answers.
+  Timer? _lampBackCap;
+
+  /// How long the app waits for a lamp that hung up before it falls back to
+  /// the reconnect ladder.
+  @visibleForTesting
+  static const lampBackWait = Duration(minutes: 3);
+
   /// Set while a save that reboots the lamp owns reconnecting to it, from
   /// the save until its reload restores the link or gives up. The reconnect
   /// ladder starts no try meanwhile, so the restored link is never
@@ -117,6 +134,10 @@ class ControlNotifier extends _$ControlNotifier {
   /// Reboot-save reloads started. A ladder try that sees this change while
   /// it runs leaves the link to the reload for good.
   int _rebootReloadsStarted = 0;
+
+  /// Builds started. A ladder try or a reboot-save reload that sees this
+  /// change while it runs leaves the link to the build.
+  int _buildsStarted = 0;
   static const _reconnectDelays = [500, 1000, 2000, 4000, 8000]; // ms, capped
   /// Max consecutive reconnect attempts before giving up and surfacing an
   /// error state instead of polling forever.
@@ -195,21 +216,32 @@ class ControlNotifier extends _$ControlNotifier {
   /// heard listening.
   bool _flagsPending = false;
 
-  /// A push ended without a reboot; the lamp's sections are re-read when it
-  /// is next heard listening.
+  /// The lamp reported quiet with no quiet freeze running, so writes it
+  /// dropped may have gone out; its sections are re-read when it is next heard
+  /// listening.
   bool _rereadPending = false;
 
   /// Survives a rebuild, which keeps this instance; after a dispose it
   /// fires into a no-op.
   Timer? _quietBound;
 
-  /// How long editing stays frozen after a push while the lamp has not said
-  /// it is listening: its receiver's no-progress abort (`kNoProgressAbortMs`,
-  /// 60 s) plus its inter-session quiet hold
-  /// (`InterSessionQuietHold::kHoldMs`, 10 s), plus 5 s for its
-  /// loop tick and the notify.
+  /// How long editing stays frozen, from a push ending or the lamp's latest
+  /// quiet report, while the lamp has not said it is listening. A push that
+  /// stops leaves the lamp quiet for at most its receiver's no-progress abort
+  /// (`kNoProgressAbortMs`, 60 s) plus its inter-session quiet hold
+  /// (`InterSessionQuietHold::kHoldMs`, 10 s); 5 s more covers its loop tick
+  /// and the notify.
   @visibleForTesting
   static const quietAfterPushBound = Duration(seconds: 75);
+
+  /// Reads of a section after the first that came back busy, and the wait
+  /// before each, before a connect gives up with [LampBusyException]. The lamp
+  /// retries a failed build on its next loop tick, so a short dip clears well
+  /// inside the window.
+  @visibleForTesting
+  static const sectionBusyRetries = 3;
+  @visibleForTesting
+  static const sectionBusyRetryGap = Duration(milliseconds: 500);
 
   late InventoryNotifier _inv;
   late DateTime Function() _now;
@@ -230,7 +262,8 @@ class ControlNotifier extends _$ControlNotifier {
   /// Each attempt: `ble.connect` → `authenticate(password)` →
   /// `_readSections`. Transient disconnect-like errors retry. Non-
   /// transient errors and final-attempt failures surface as `AsyncError`.
-  /// The reconnect ladder stays out of it from the call until it returns.
+  /// The reconnect ladder stays out of it from the call until it returns. A
+  /// build that starts meanwhile takes the link over.
   Future<void> _awaitReconnectAndReload({
     required BleClient ble,
     required String password,
@@ -244,6 +277,8 @@ class ControlNotifier extends _$ControlNotifier {
     final saveStatus = ref.read(lampSaveStatusProvider(_deviceId).notifier);
     _rebootReloadOwnsLink = true;
     _rebootReloadsStarted++;
+    final builds = _buildsStarted;
+    bool standDown() => !ref.mounted || _buildsStarted != builds;
     try {
       // Initial grace: give the lamp a head start on the reboot so the
       // first attempt isn't guaranteed to race the disconnect. ~2s lets
@@ -254,12 +289,12 @@ class ControlNotifier extends _$ControlNotifier {
       Object? lastError;
       StackTrace? lastStack;
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
-        if (!ref.mounted) return;
+        if (standDown()) return;
         try {
           if (!await connectWithRetry(ble, _deviceId,
               attempts: 1,
               owner: _linkOwner,
-              shouldAbort: () => !ref.mounted)) {
+              shouldAbort: standDown)) {
             return;
           }
           await AuthClient(ble: ble).authenticate(
@@ -283,7 +318,7 @@ class ControlNotifier extends _$ControlNotifier {
         }
       }
 
-      if (!ref.mounted) return;
+      if (standDown()) return;
       if (fresh == null) {
         state = AsyncError(
             lastError ?? Exception('lamp did not reconnect after save'),
@@ -293,17 +328,16 @@ class ControlNotifier extends _$ControlNotifier {
 
       _endRebootReload();
       state = AsyncData(fresh);
-      _lampQuiet = null;
-      _flagsPending = true;
-      _subscribeStateNotify(ble);
+      _beginLinkSession(ble);
       try {
         await postReload(fresh);
       } catch (e, st) {
         // postReload is best-effort housekeeping.
-        if (ref.mounted) state = AsyncError(e, st);
+        if (!standDown()) state = AsyncError(e, st);
       }
     } finally {
       _endRebootReload();
+      if (_buildsStarted != builds) _resumeLadderAfterStandDown();
       saveStatus.stop();
     }
   }
@@ -361,9 +395,12 @@ class ControlNotifier extends _$ControlNotifier {
   @override
   Future<ControlState> build(String deviceId) async {
     _deviceId = deviceId;
+    _buildsStarted++;
+    _lampBackWatch = null;
     // A rebuild keeps this instance and its held flags; the lamp clears them
-    // on the new connection.
-    _lampQuiet = null;
+    // on the new connection. A quiet report carries over so the new link
+    // holds them back until the lamp listens.
+    if (_lampQuiet == false) _lampQuiet = null;
     _flagsPending = true;
     _rereadPending = false;
     ref.listen(quietAfterPushProvider(deviceId), (_, _) {});
@@ -538,9 +575,9 @@ class ControlNotifier extends _$ControlNotifier {
       _connSub?.cancel();
       _reconnectTimer?.cancel();
       _probeTimer?.cancel();
+      _lampBackCap?.cancel();
     });
 
-    _subscribeStateNotify(ble);
     ref.onDispose(() => _stateNotifySub?.cancel());
 
     // Probe the BLE link whenever the app comes back to the foreground.
@@ -581,6 +618,8 @@ class ControlNotifier extends _$ControlNotifier {
     // when the configurators are already enabled.
     await _completeExpressionTest(ble);
 
+    if (!ref.mounted) return fresh;
+    _beginLinkSession(ble);
     return fresh;
   }
 
@@ -610,25 +649,35 @@ class ControlNotifier extends _$ControlNotifier {
   /// ControlState. Assumes the BLE link is connected and authenticated.
   /// Throws [LampAuthRequiredException] when the `lamp` section reads back
   /// empty. The lamp withholds that section, password included, from a link
-  /// that has not authenticated.
+  /// that has not authenticated. Throws [LampBusyException] when a section
+  /// stays busy through [sectionBusyRetries] more reads.
   Future<ControlState> _readSections(BleClient ble) async {
+    Future<Uint8List> readSection(String name) async {
+      for (var retry = 0;; retry++) {
+        final bytes = await ble.readSection(_deviceId, name);
+        if (!isSectionBusy(bytes)) return bytes;
+        if (retry == sectionBusyRetries) throw const LampBusyException();
+        await Future<void>.delayed(sectionBusyRetryGap);
+      }
+    }
+
     // A section a legacy lamp doesn't serve comes back as empty bytes;
     // jsonDecode('') throws. Default missing sections to an empty object /
     // array so each fromJson falls through to its field defaults, same
     // tolerance as the optional exprcat catalog read.
     Future<Map<String, dynamic>> readJsonSection(String name) async {
-      final bytes = await ble.readSection(_deviceId, name);
+      final bytes = await readSection(name);
       if (bytes.isEmpty) return const {};
       return jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     }
 
     Future<List<dynamic>> readJsonListSection(String name) async {
-      final bytes = await ble.readSection(_deviceId, name);
+      final bytes = await readSection(name);
       if (bytes.isEmpty) return const [];
       return jsonDecode(utf8.decode(bytes)) as List<dynamic>;
     }
 
-    final lampBytes = await ble.readSection(_deviceId, 'lamp');
+    final lampBytes = await readSection('lamp');
     if (lampBytes.isEmpty) throw const LampAuthRequiredException();
     final lampJson =
         jsonDecode(utf8.decode(lampBytes)) as Map<String, dynamic>;
@@ -708,31 +757,44 @@ class ControlNotifier extends _$ControlNotifier {
   Uint8List _homeModeFocusByte() =>
       Uint8List.fromList([_homeModeFocus ? 1 : 0]);
 
-  /// A push that ends without a reboot leaves the lamp missing every write
-  /// sent while it was quiet. Once it reports it is listening the app sends
-  /// its session flags again and takes the lamp's word for everything else.
-  /// A lamp that never reports `quiet` gets the re-read at once instead.
+  /// The lamp drops every write while it reports quiet. Editing stays frozen
+  /// until it reports it is listening, then the app sends its session flags
+  /// again and, if the screen could have sent edits it dropped, takes the
+  /// lamp's word for everything else. A lamp that never reports `quiet` gets
+  /// the re-read when a push that reached it ends instead.
   void _onFirmwareState(FirmwareState? previous, FirmwareState next) {
-    if (!(previous?.isPushing ?? false) || next.isBusy) return;
-    if (next is FirmwareSucceeded) return;
-    final quiet = _lampQuiet;
-    if (quiet == null) {
-      _reassertHomeModeFocus = true;
-      unawaited(_rereadSections());
-      return;
+    if (!(previous?.isBusy ?? false) || next.isBusy) return;
+    if (next is FirmwareSucceeded && !next.alreadyCurrent) return;
+    switch (_lampQuiet) {
+      case null:
+        if (!previous!.isPushing ||
+            next is FirmwareSucceeded ||
+            next is FirmwareFailed && next.failure.declined) {
+          return;
+        }
+        _reassertHomeModeFocus = true;
+        unawaited(_rereadSections());
+      case true:
+        _freezeUntilListening();
+      case false:
+        _onLampListening();
     }
+  }
+
+  void _onLampQuiet() {
     _flagsPending = true;
-    _rereadPending = true;
-    if (quiet) {
-      _quietBound?.cancel();
-      _quietBound = Timer(quietAfterPushBound, () {
-        _quietBound = null;
-        _setQuietAfterPush(false);
-      });
-      _setQuietAfterPush(true);
-    } else {
-      unawaited(_resyncWithLamp());
-    }
+    if (_quietBound == null) _rereadPending = true;
+    if (ref.read(firmwareNotifierProvider(_deviceId)).isBusy) return;
+    _freezeUntilListening();
+  }
+
+  void _freezeUntilListening() {
+    _quietBound?.cancel();
+    _quietBound = Timer(quietAfterPushBound, () {
+      _quietBound = null;
+      _setQuietAfterPush(false);
+    });
+    _setQuietAfterPush(true);
   }
 
   void _onLampListening() {
@@ -750,21 +812,22 @@ class ControlNotifier extends _$ControlNotifier {
     _quietBound?.cancel();
     _quietBound = null;
     try {
-      for (final MapEntry(key: (charUuid, _), :value)
-          in _heldFlags.entries.toList()) {
+      // Each flag is read as it goes out, so one the user changed while an
+      // earlier write was awaited never goes out stale after the change.
+      for (final key in _heldFlags.keys.toList()) {
         await _ble
             .write(
               _deviceId,
               BleUuids.controlService,
-              charUuid,
-              value,
+              key.$1,
+              _heldFlags[key]!,
               withoutResponse: true,
             )
             .catchError((_) {});
       }
       if (reread) await _rereadSections();
     } finally {
-      _setQuietAfterPush(false);
+      if (_quietBound == null) _setQuietAfterPush(false);
     }
   }
 
@@ -792,6 +855,36 @@ class ControlNotifier extends _$ControlNotifier {
   void _setQuietAfterPush(bool quiet) {
     if (!ref.mounted) return;
     ref.read(quietAfterPushProvider(_deviceId).notifier).set(quiet);
+  }
+
+  /// The last step of bringing a link up; the lamp's first report arrives
+  /// after the connected state. The lamp holds none of [_heldFlags]. Each
+  /// held open goes at once unless the lamp was last heard quiet; see
+  /// docs/dev/networking.md (`CHAR_STATE_NOTIFY`).
+  void _beginLinkSession(BleClient ble) {
+    final quiet = _quietBound != null || _lampQuiet == true;
+    _lampQuiet = null;
+    _rereadPending = false;
+    _flagsPending = quiet;
+    for (final MapEntry(key: (charUuid, selector), :value)
+        in _heldFlags.entries.toList()) {
+      final open = value.last != 0;
+      final social = charUuid == BleUuids.editSession &&
+          selector == _editSurfaceSocialView;
+      if (!open || (quiet && !social)) continue;
+      unawaited(
+        ble
+            .write(
+              _deviceId,
+              BleUuids.controlService,
+              charUuid,
+              value,
+              withoutResponse: true,
+            )
+            .catchError((_) {}),
+      );
+    }
+    _subscribeStateNotify(ble);
   }
 
   /// CHAR_STATE_NOTIFY: previewActive drives the expression editor's Test
@@ -1971,6 +2064,7 @@ class ControlNotifier extends _$ControlNotifier {
         cur.copyWith(previewActive: previewActive, greeting: greeting),
       );
     }
+    if (quiet == true) _onLampQuiet();
     if (quiet == false) _onLampListening();
   }
 
@@ -1978,6 +2072,8 @@ class ControlNotifier extends _$ControlNotifier {
     final cur = state.value;
     if (cur == null) return;
     if (isConnected && !cur.connected) {
+      // A build is bringing this link up and begins its session itself.
+      if (state.isLoading) return;
       // fbp's connectionState emitted `true` mid-reconnect, but the
       // GATT services aren't necessarily discovered yet (observed on
       // hardware: a 4-second window where writes failed with
@@ -1996,8 +2092,61 @@ class ControlNotifier extends _$ControlNotifier {
       _recordSeenNow();
       state = AsyncData(cur.copyWith(connected: false));
       ref.read(advancedSessionProvider(_deviceId).notifier).disable();
-      _scheduleReconnect();
+      if (_lampEndedLink()) {
+        _awaitLampBack();
+      } else {
+        _scheduleReconnect();
+      }
     }
+  }
+
+  /// True when the link just went down because the lamp ended it, outside a
+  /// reboot-save or firmware push this app started, which own the link.
+  bool _lampEndedLink() =>
+      !_rebootReloadOwnsLink &&
+      !ref.read(firmwareNotifierProvider(_deviceId)).isPushing &&
+      _ble.lastDropCause(_deviceId) == LinkDropCause.lampHungUp;
+
+  /// The lamp pauses Bluetooth while it sends or takes a mesh update and
+  /// advertises again once it is done, so a connect before then cannot land.
+  /// Reconnects on the first broadcast heard after now that does not carry
+  /// the busy bit.
+  void _awaitLampBack() {
+    _reconnectTimer?.cancel();
+    _stopAwaitingLamp();
+    final cur = state.value;
+    if (cur != null) {
+      state = AsyncData(cur.copyWith(lampHungUp: true, reconnectAttempt: 0));
+    }
+    final since = _now().millisecondsSinceEpoch;
+    _lampBackWatch = ref.listen<List<NearbyLamp>>(
+      nearbyLampsNotifierProvider,
+      (_, roster) {
+        final back = roster.any((l) =>
+            l.id == _deviceId &&
+            l.lastSeenEpochMs >= since &&
+            !l.otaDistributing);
+        if (!back) return;
+        _stopAwaitingLamp();
+        unawaited(_tryReconnect());
+      },
+    );
+    _lampBackCap = Timer(lampBackWait, _giveUpOnLampBack);
+  }
+
+  void _giveUpOnLampBack() {
+    _stopAwaitingLamp();
+    final cur = state.value;
+    if (cur == null) return;
+    state = AsyncData(cur.copyWith(lampHungUp: false));
+    _scheduleReconnect();
+  }
+
+  void _stopAwaitingLamp() {
+    _lampBackCap?.cancel();
+    _lampBackCap = null;
+    _lampBackWatch?.close();
+    _lampBackWatch = null;
   }
 
   /// Fires a no-op GATT read against the lamp to verify the link is
@@ -2087,10 +2236,14 @@ class ControlNotifier extends _$ControlNotifier {
     }
     _reconnectInFlight = true;
     final ble = ref.read(bleClientProvider);
-    // A reboot-save reload that starts while this attempt awaits takes the
-    // link over; the attempt leaves it alone from then on.
+    // A reboot-save reload or a build that starts while this attempt awaits
+    // takes the link over; the attempt leaves it alone from then on.
     final reloads = _rebootReloadsStarted;
-    bool standDown() => !ref.mounted || _rebootReloadsStarted != reloads;
+    final builds = _buildsStarted;
+    bool standDown() =>
+        !ref.mounted ||
+        _rebootReloadsStarted != reloads ||
+        _buildsStarted != builds;
     try {
       final attempt = state.value?.reconnectAttempt ?? 0;
       // Tier 3: if soft reconnects have failed enough times, soft-cycle
@@ -2133,17 +2286,19 @@ class ControlNotifier extends _$ControlNotifier {
         // device). Parks the ladder so the UI prompts for it.
         if (!standDown()) state = AsyncError(e, st);
         return;
+      } on LampBusyException catch (e, st) {
+        // Reconnecting again would not free the lamp's heap; the error page
+        // retries on the user's word.
+        if (!standDown()) state = AsyncError(e, st);
+        return;
       }
       await _mirrorIdentityToInventory(fresh);
       if (standDown()) return;
       _reconnectTimer?.cancel();
+      _stopAwaitingLamp();
       _reassertHomeModeFocus = false;
-      _lampQuiet = null;
-      _flagsPending = true;
-      _rereadPending = false;
       state = AsyncData(fresh.copyWith(connected: true, reconnectAttempt: 0));
-      // The lamp dropped the subscription with the link.
-      _subscribeStateNotify(ble);
+      _beginLinkSession(ble);
     } catch (_) {
       // Bail if the notifier was disposed while awaiting; touching
       // `state` after dispose throws. This happens in tests that
@@ -2161,28 +2316,42 @@ class ControlNotifier extends _$ControlNotifier {
       // hadn't yet run, that next call would incorrectly skip itself
       // and the ladder would stall on its current attempt count.
       _reconnectInFlight = false;
+      // A lamp that hangs up again on the way back in is still busy.
+      if (state.value?.lampHungUp == true && _lampEndedLink()) {
+        _awaitLampBack();
+        return;
+      }
+      final cur = state.value;
+      if (cur != null && cur.lampHungUp) {
+        state = AsyncData(cur.copyWith(lampHungUp: false));
+      }
       _scheduleReconnect();
     } finally {
       // Defense-in-depth: the catch branches above clear the flag
       // explicitly; finally covers the success path (and any future
       // catch branch that forgets to).
       _reconnectInFlight = false;
-      if (_rebootReloadsStarted != reloads) _resumeLadderAfterStandDown();
+      if (_rebootReloadsStarted != reloads || _buildsStarted != builds) {
+        _resumeLadderAfterStandDown();
+      }
     }
   }
 
-  /// A try that stood down for a reload arms nothing, and a step that fired
-  /// while it ran returned on [_reconnectInFlight]. When that reload has
-  /// already handed the link back and the link has dropped since, nothing
-  /// else would climb the ladder. A try runs only after a drop, so a reload it
-  /// stood down for started disconnected and holds the state in loading until
-  /// it restores the link; one that gave up leaves its error. Neither is
+  /// A try or a reload that stood down for another owner arms nothing, and a
+  /// step that fired while it ran returned early or was cancelled. When that
+  /// owner has already handed the link back and the link has dropped since,
+  /// nothing else would climb the ladder. A build still bringing the link up
+  /// holds the state in loading, a reload keeps the ladder off its link until
+  /// it returns, and an owner that gave up leaves its error. None is
   /// disturbed.
   void _resumeLadderAfterStandDown() {
     if (!ref.mounted) return;
     if (_reconnectTimer?.isActive ?? false) return;
+    if (_lampBackWatch != null) return;
     final cur = state;
-    if (cur is AsyncData<ControlState> && !cur.value.connected) {
+    if (cur is AsyncData<ControlState> &&
+        !cur.isLoading &&
+        !cur.value.connected) {
       _scheduleReconnect();
     }
   }

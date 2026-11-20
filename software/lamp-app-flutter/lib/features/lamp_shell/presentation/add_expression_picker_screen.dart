@@ -5,13 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../../core/routing/routes.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/empty_state_pane.dart';
-import '../../../core/widgets/friendly_error.dart';
 import '../../control/application/advanced_session.dart';
 import '../../control/application/control_notifier.dart';
 import '../../control/domain/sections.dart';
 import '../domain/expression_catalog.dart';
 import '../domain/expression_presentation.dart';
 import '../../firmware/presentation/firmware_push_lock.dart';
+import '../../control/presentation/lamp_error_page.dart';
 
 /// Entry point for adding a new expression. The user picks Target first
 /// (Shade / Base / Both), then picks one of the expression types from a
@@ -53,15 +53,7 @@ class _AddExpressionPickerScreenState
         lampId: widget.lampId,
         child: async.when(
           loading: () => const SizedBox.expand(),
-          error: (e, _) => FriendlyError.page(
-            title: "Couldn't reach your lamp.",
-            subtitle:
-                "They may have wandered out of range. Bring your phone closer "
-                'and try again.',
-            rawError: e,
-            onRetry: () =>
-                ref.invalidate(controlNotifierProvider(widget.lampId)),
-          ),
+          error: (e, _) => LampErrorPage(lampId: widget.lampId, error: e),
           data: (state) => _Body(
             lampId: widget.lampId,
             target: _target,

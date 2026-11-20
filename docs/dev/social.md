@@ -89,8 +89,10 @@ rule is in score units (127 = one step), from `FondnessTuning`:
   start at glitchy 3, spotty / pulse / shimmer 2, shifty / breathing 1,
   yawn 0, anything else 1, with `energy` 2. Only `eventsPerMin` (4) events
   per peer per minute count.
-- **Overlap.** A counted event of a type this lamp has enabled itself adds
-  `overlap` (2), whatever the mode.
+- **Overlap.** A counted event of a type this lamp plays itself adds
+  `overlap` (2), whatever the mode: one it has enabled, or `yawn` on a lamp
+  that registers it, since yawn is built in and never configured
+  (`isOwnType`). Bloom, built in too, never counts.
 - **Colour.** The COLOR_INFO reply to an organic greet compares its base
   stop 0 with this lamp's: a hue within `hueBand` (30 degrees) of it or of
   its complement adds `colour` (16). A grey on either side (saturation under
@@ -255,7 +257,9 @@ contract: [`moments.md`](moments.md).
 - **Yawns spread.** A tired introvert yawns now and then, and a lamp that
   sees a peer yawn may yawn back, likelier the fonder it is of that peer and
   less likely in a crowd. Both run only while the social engine is on and
-  home mode is off. Detail in
+  home mode is off. Yawn is built in: it is never one of the lamp's
+  configured expressions, yet a peer's yawn still counts toward overlap
+  fondness on a lamp that yawns. Detail in
   [`expressions.md`](expressions.md#yawn-contagion).
 - **OTA outranks personality.** Offering an update is not a social
   behaviour. The offer scan (`tickOtaOffers`, `components/firmware/ota_offer.cpp`)

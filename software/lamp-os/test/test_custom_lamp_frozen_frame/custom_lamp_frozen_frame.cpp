@@ -11,6 +11,7 @@
 
 #include <lampos/clock.hpp>
 
+#include "../../src/behaviors/configurator.cpp"
 #include "../../src/components/input/button.cpp"
 #include "../../src/components/input/touch.cpp"
 #include "../../src/config/disposition_store.cpp"
@@ -20,6 +21,7 @@
 #include "../../src/lamps/staff/staff_input_behavior.cpp"
 #include "../../src/lamps/staff/unlock_combo.cpp"
 #include "../../src/util/color.cpp"
+#include "../../src/util/color_rotation.cpp"
 #include "../../src/util/fade.cpp"
 #include "../../src/util/gradient.cpp"
 #include "../../src/util/heap_guard.cpp"
@@ -35,7 +37,6 @@ void BehaviorContext::forEachNearby(const std::function<bool(const PeerView&)>&)
 void BehaviorContext::setSolidColor(Color c) { g_solid = c; }
 void BehaviorContext::setBrightness(uint8_t) {}
 void BehaviorContext::setSurfaceBrightness(Surface, uint8_t) {}
-void ConfiguratorBehavior::beginFade(const std::vector<Color>&, uint32_t) {}
 }  // namespace lamp
 
 using namespace lamp;

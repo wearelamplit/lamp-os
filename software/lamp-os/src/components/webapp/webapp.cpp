@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "expr_catalog.h"
@@ -29,6 +30,7 @@
 #include "config/config_types.hpp"
 #include "core/pending_json_slot.hpp"
 #include "util/color.hpp"
+#include "util/dropped_write_log.hpp"
 #include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
 
@@ -64,7 +66,7 @@ static void armReboot(uint32_t atMs) {
 // Set only by the save path so rebootNow() fades to black first; the
 // browser-left / idle reboots stay a hard restart (no scene to fade).
 static bool s_fadeOnReboot = false;
-static bool s_apUp = false;
+static SoftApState s_ap;
 static bool s_serverUp = false;
 static bool s_neverExpire = false;
 
@@ -161,6 +163,7 @@ static void handlePutDispositions(AsyncWebServerRequest* req,
     return;
   }
   if (lamp::ota_quiet_mode::isQuiet()) {
+    lamp::logDroppedWrite("webDispositions", "ota quiet");
     req->send(503, "application/json", "{\"ok\":false}");
     return;
   }
@@ -408,6 +411,12 @@ static void onWsEvent(AsyncWebSocket* /*srv*/, AsyncWebSocketClient* /*client*/,
 static void onApStaConnected(arduino_event_id_t) { s_pendingServerStart = true; }
 static void onApStaDisconnected(arduino_event_id_t) { s_pendingServerStop = true; }
 
+// Never auto-format, so an FS-OTA'd image that mounts inconsistent is never
+// silently wiped. A blank or corrupt partition just serves no UI.
+static void mountUiFiles() {
+  SPIFFS.begin(/*formatOnFail=*/false, kUiFsBasePath);
+}
+
 // Stage 2: bring up the AsyncWebServer (spins the AsyncTCP task). Runs on the
 // loop task, never the WiFi event task. Idempotent.
 static void startServer() {
@@ -416,11 +425,7 @@ static void startServer() {
     s_deadlineMs = millis() + LAMP_WEBAPP_IDLE_TIMEOUT_MS;
   }
 
-  // Never auto-format: an FS-OTA'd image that mounts inconsistent must not be
-  // silently wiped. A genuinely blank/corrupt partition just yields no UI
-  // (BLE still works); production USB flash always lays down a valid image.
-  // Coexists with fs_ota's own mount; SPIFFS.begin is a no-op when mounted.
-  SPIFFS.begin(/*formatOnFail=*/false);
+  mountUiFiles();
 
   buildSettingsSnapshot();
 
@@ -460,16 +465,19 @@ static void startServer() {
 #endif
 }
 
+// SoftAP SSID is the lamp's name + "-lamp" so it's recognizable as a lamp's
+// setup network in a Wi-Fi scan.
+static bool startSoftAp() {
+  return wifi::startSoftAp(s_config->lamp.name + "-lamp", s_config->lamp.password);
+}
+
 // Stage 1: softAP only. The heavy server waits for a station to associate.
 void begin(lamp::Config& config) {
-  if (s_apUp) return;
+  if (s_ap.up()) return;
   s_config = &config;
   if (!s_webSaveDone) s_webSaveDone = xSemaphoreCreateBinary();
 
-  // SoftAP SSID is the lamp's name + "-lamp" so it's recognizable as a
-  // lamp's setup network in a Wi-Fi scan.
-  const std::string ssid = config.lamp.name + "-lamp";
-  if (!wifi::startSoftAp(ssid, config.lamp.password)) {
+  if (!startSoftAp()) {
 #ifdef LAMP_DEBUG
     Serial.println("[webapp] softAP failed; webapp not started");
 #endif
@@ -485,7 +493,7 @@ void begin(lamp::Config& config) {
   s_neverExpire = (bootMinutes == 0);
   s_deadlineMs = millis() + bootMinutes * 60000UL;
   s_rebootArmed = false;
-  s_apUp = true;
+  s_ap.markUp();
 
 #ifdef LAMP_DEBUG
   Serial.printf("[webapp] softAP up at %s  auth=%s bootWindow=%umin%s\n",
@@ -500,11 +508,36 @@ void begin(lamp::Config& config) {
 // in-flight lwip FIN/RST events reach the async task after a `delete s_server`
 // and dereference freed memory (LoadProhibited). A resident server is freed
 // only by a clean reboot.
-static void stopAp() {
-  if (!s_apUp) return;
-  MDNS.end();
-  wifi::stopSoftAp();
-  s_apUp = false;
+static bool stopAp() {
+  return s_ap.tearDown([] {
+    MDNS.end();
+    wifi::stopSoftAp();
+  });
+}
+
+// Serializes the pausing task's shutdownForOta with tick's AP work.
+static std::mutex s_otaApMu;
+static OtaApFollower s_otaAp;
+
+// Caller holds s_otaApMu. Station flags from around the pause are stale (a
+// join would take BLE down for no station).
+static void restoreApAfterOta(uint32_t now) {
+  const bool wanted = apWantedAfterOta(now, s_deadlineMs.load(), s_neverExpire, s_serverUp);
+  if (!s_otaAp.restore(lamp::ota_quiet_mode::radioTornDown(), wanted)) return;
+  s_pendingServerStart = false;
+  s_pendingServerStop = false;
+  if (!startSoftAp()) {
+    Serial.println("[webapp] softAP not restored after OTA");
+    if (ble_control::isDownForWebapp()) armReboot(now);  // the lamp has neither AP nor BLE
+    return;
+  }
+  if (s_serverUp && MDNS.begin("lamp")) {
+    MDNS.addService("http", "tcp", kHttpPort);
+  }
+  s_ap.markUp();
+#ifdef LAMP_DEBUG
+  Serial.println("[webapp] softAP back after OTA");
+#endif
 }
 
 static void rebootNow() {
@@ -527,8 +560,8 @@ void tick() {
   drainWebSave();
   const uint32_t now = millis();
   holdPassedDeadline(s_deadlineMs, now, s_deadlineMs.load());
-  // An armed reboot fires even after the AP went down (an OTA's
-  // shutdownForOta): a landed web save freezes config saves until it. It
+  // An armed reboot fires even while an OTA holds the AP down
+  // (shutdownForOta): a landed web save freezes config saves until it. It
   // waits while OTA quiet mode is held. A received update's own reboot loads
   // the save too; a failed one, or a distribution to other lamps (which never
   // reboots this one), leaves quiet mode and this reboot follows. Past
@@ -539,7 +572,12 @@ void tick() {
     rebootNow();  // save path; restart frees the server, never delete s_server
     return;
   }
-  if (!s_apUp) return;
+  // Never waits on the lock; a pass that finds the pausing task holding it
+  // skips its AP work, and the next pass looks again.
+  std::unique_lock<std::mutex> apLock(s_otaApMu, std::try_to_lock);
+  if (!apLock.owns_lock()) return;
+  restoreApAfterOta(now);
+  if (!s_ap.up()) return;
 
   // A BLE client's connect proves no station is associated (association takes
   // BLE down), so the heavy server cannot be up and stopAp() has no server to
@@ -571,12 +609,24 @@ void tick() {
   }
 }
 
-bool isActive() { return s_apUp; }
+bool isActive() { return s_ap.up(); }
 
-bool hasClient() { return s_apUp && WiFi.softAPgetStationNum() > 0; }
+bool hasClient() { return s_ap.up() && WiFi.softAPgetStationNum() > 0; }
+
+void remountUiFiles() {
+  if (!s_serverUp) return;
+  SPIFFS.end();
+  mountUiFiles();
+}
 
 void shutdownForOta() {
-  stopAp();
+  std::lock_guard<std::mutex> lock(s_otaApMu);
+  // An AP tick took down for its own reason is not owed back after the OTA.
+  const bool paused = lamp::ota_quiet_mode::radioTornDown();
+  if (!s_otaAp.stop(paused, paused && stopAp())) return;
+#ifdef LAMP_DEBUG
+  Serial.println("[webapp] softAP down for OTA");
+#endif
 }
 
 }  // namespace webapp

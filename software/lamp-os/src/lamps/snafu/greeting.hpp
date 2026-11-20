@@ -33,8 +33,8 @@ class Greeting : public AnimatedBehavior, public lamp::Greetable {
   void setMeshLink(lamp::MeshLink* m) { meshLink_ = m; }
   void setDotsBehavior(DotsBehavior* d) { dots_ = d; }
   void onColorInfo(const uint8_t srcMac[6],
-                   const std::vector<Color>& baseStops,
-                   const std::vector<Color>& shadeStops) override;
+                   std::span<const Color> baseStops,
+                   std::span<const Color> shadeStops) override;
 
  private:
   void doGreet(const lamp::PeerView& peer);

@@ -10,6 +10,8 @@ import '../../inventory/application/inventory_notifier.dart';
 import '../../nearby/application/ota_busy_seen_provider.dart';
 import '../application/control_notifier.dart';
 import '../application/lamp_auth_required_exception.dart';
+import '../application/lamp_busy_exception.dart';
+import 'lamp_error_page.dart';
 import 'widgets/base_card.dart';
 import 'widgets/base_editor_sheet.dart';
 import 'widgets/brightness_card.dart';
@@ -47,7 +49,8 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
         // A lamp sourcing firmware to a peer is hard to connect to (the OTA
         // bursts starve BLE connect). If the scan saw it busy just before we
         // tried, explain the wait in-voice instead of "out of range".
-        if (ref.read(otaBusySeenProvider.notifier).wasBusyRecently(lampId)) {
+        if (e is! LampBusyException &&
+            ref.read(otaBusySeenProvider.notifier).wasBusyRecently(lampId)) {
           final name = ref
                   .read(inventoryNotifierProvider)
                   .value
@@ -64,15 +67,7 @@ class _ControlScreenState extends ConsumerState<ControlScreen> {
             onRetry: () => ref.invalidate(controlNotifierProvider(lampId)),
           );
         }
-        return FriendlyError.page(
-          title: "Couldn't reach your lamp.",
-          subtitle:
-              "They may have wandered out of range. Bring your phone closer "
-              'and try again.',
-          rawError: e,
-          onRetry: () =>
-              ref.invalidate(controlNotifierProvider(lampId)),
-        );
+        return LampErrorPage(lampId: lampId, error: e);
       },
       data: (state) {
         final notifier =

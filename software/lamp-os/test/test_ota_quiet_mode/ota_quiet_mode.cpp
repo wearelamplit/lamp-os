@@ -20,7 +20,10 @@ using lamp::ota_quiet_mode::isQuiet;
 using lamp::ota_quiet_mode::visibleOtaActive;
 
 void setUp(void) {}
-void tearDown(void) {}
+void tearDown(void) {
+  while (holders() > 0) exitQuiet();
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}};
+}
 
 // Firmware OTA (visible) fully wraps: visible while active, clean exit.
 void test_fw_session_reports_visible(void) {
@@ -168,6 +171,92 @@ void test_last_exit_racing_a_first_entry_leaves_the_radio_paused(void) {
   lamp::ota_quiet_mode::s_radio = {[] {}, [] {}};
 }
 
+// The softAP teardown that follows a radio pause runs outside the transition
+// lock: one stalled on the pausing task never holds another task's enter or
+// exit.
+static std::atomic<int>  s_afterPauses{0};
+static std::atomic<bool> s_stallAfterPause{false};
+static std::atomic<bool> s_afterPauseStalled{false};
+static std::atomic<bool> s_releaseAfterPause{false};
+
+static bool waitFor(const std::atomic<bool>& flag, int ms) {
+  for (int i = 0; i < ms && !flag; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return flag;
+}
+
+static void recordingAfterPause() {
+  ++s_afterPauses;
+  if (s_stallAfterPause.exchange(false)) {
+    s_afterPauseStalled = true;
+    waitFor(s_releaseAfterPause, 2000);
+  }
+}
+
+static void resetAfterPauseFakes() {
+  s_afterPauses = 0;
+  s_stallAfterPause = false;
+  s_afterPauseStalled = false;
+  s_releaseAfterPause = false;
+}
+
+void test_a_stalled_after_pause_holds_no_other_transition(void) {
+  resetAfterPauseFakes();
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}, recordingAfterPause};
+  s_stallAfterPause = true;
+  std::thread entrant([] { enterQuiet(/*tearDownRadio=*/true, /*visible=*/true); });
+  const bool stalled = waitFor(s_afterPauseStalled, 1000);
+
+  std::atomic<bool> otherDone{false};
+  std::thread other([&] {
+    enterQuiet(/*tearDownRadio=*/true, /*visible=*/true);
+    exitQuiet();
+    otherDone = true;
+  });
+  const bool doneWhileStalled = waitFor(otherDone, 500);
+  s_releaseAfterPause = true;
+  entrant.join();
+  other.join();
+
+  TEST_ASSERT_TRUE_MESSAGE(stalled, "the entry never reached its after-pause");
+  TEST_ASSERT_TRUE_MESSAGE(doneWhileStalled, "another task waited on the after-pause");
+  TEST_ASSERT_EQUAL_INT(1, holders());
+  TEST_ASSERT_TRUE(lamp::ota_quiet_mode::radioTornDown());
+  exitQuiet();
+  TEST_ASSERT_FALSE(lamp::ota_quiet_mode::radioTornDown());
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}};
+}
+
+// Once per pause, with the pause already in place; a count bump, an entry
+// that keeps the radio up (a BLE-pushed OTA), an exit and an over-exit run
+// none.
+static std::atomic<bool> s_tornDownAtAfterPause{false};
+static void levelReadingAfterPause() {
+  ++s_afterPauses;
+  s_tornDownAtAfterPause = lamp::ota_quiet_mode::radioTornDown();
+}
+
+void test_after_pause_runs_once_per_pause(void) {
+  resetAfterPauseFakes();
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}, levelReadingAfterPause};
+  enterQuiet(/*tearDownRadio=*/true, /*visible=*/true);
+  TEST_ASSERT_EQUAL_INT(1, s_afterPauses.load());
+  TEST_ASSERT_TRUE(s_tornDownAtAfterPause);
+  enterQuiet(/*tearDownRadio=*/true, /*visible=*/true);
+  exitQuiet();
+  exitQuiet();
+  TEST_ASSERT_EQUAL_INT(1, s_afterPauses.load());
+  exitQuiet();  // over-exit
+  enterQuiet(/*tearDownRadio=*/false, /*visible=*/true);
+  enterQuiet(/*tearDownRadio=*/true, /*visible=*/true);
+  exitQuiet();
+  exitQuiet();
+  TEST_ASSERT_EQUAL_INT(1, s_afterPauses.load());
+  TEST_ASSERT_EQUAL_INT(0, holders());
+  lamp::ota_quiet_mode::s_radio = {[] {}, [] {}};
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
 
@@ -179,6 +268,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_fs_then_fw_no_stale_silent);
   RUN_TEST(test_second_entrant_same_type_keeps_visible_until_last_exit);
   RUN_TEST(test_last_exit_racing_a_first_entry_leaves_the_radio_paused);
+  RUN_TEST(test_a_stalled_after_pause_holds_no_other_transition);
+  RUN_TEST(test_after_pause_runs_once_per_pause);
 
   return UNITY_END();
 }

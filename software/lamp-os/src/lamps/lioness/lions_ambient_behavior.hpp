@@ -18,6 +18,12 @@ class LionsGreetingBehavior;
 // lion easing onto a new lamp reads as a slow dissolve, not a snap. Bench-tunable.
 constexpr uint32_t kCrossfadeFrames = 90;   // ~1.5s at 60Hz
 
+// How long an unanswered MSG_COLOR_QUERY blocks a re-query of the same peer.
+// Shorter re-asks a silent peer (legacy, out of ESP-NOW range) more often, each
+// send taking a WiFi TX buffer; longer leaves a lion on Main longer after a
+// lost reply. Bench-tunable.
+constexpr uint32_t kColorQueryRetryMs = 3000;
+
 // Always-PLAYING base scene owning the Lions base segment (the 2nd base
 // segment). Each 6px lion zone mirrors an assigned nearby peer's base gradient;
 // idle zones mirror Main; peer switches crossfade. Registered as the lamp's
@@ -34,8 +40,8 @@ class LionsAmbientBehavior : public AnimatedBehavior, public lamp::Greetable {
   void triggerGreeting(const lamp::PeerView& peer) override;   // -> greeting_
   lamp::GreetingState greetingState() const override;          // -> greeting_
   void onColorInfo(const uint8_t srcMac[6],
-                   const std::vector<Color>& baseStops,
-                   const std::vector<Color>& shadeStops) override;
+                   std::span<const Color> baseStops,
+                   std::span<const Color> shadeStops) override;
 
   void setMeshLink(lamp::MeshLink* m) { meshLink_ = m; }
   void setGreeting(LionsGreetingBehavior* g) { greeting_ = g; }
@@ -45,6 +51,8 @@ class LionsAmbientBehavior : public AnimatedBehavior, public lamp::Greetable {
 
   Color sampleMainColor() const;
   const std::vector<Color>* stopsFor(const Mac& m) const;
+  bool shown(const Mac& m) const;
+  void requestStops(const Mac& m, uint32_t nowMs);
 
   int lionsSegIndex_ = -1;
   int mainSegIndex_  = -1;
@@ -59,8 +67,18 @@ class LionsAmbientBehavior : public AnimatedBehavior, public lamp::Greetable {
   std::vector<Color> scene_;                       // last full 18px ambient scene
   std::vector<Color> from_;                        // reused crossfade-source buffer
 
+  // Base stops for the peers the lions show; kIdle marks a free entry. An
+  // entry a lion shows is never evicted.
   struct Cached { Mac mac; std::vector<Color> baseStops; };
-  std::vector<Cached> stopCache_;                  // per-peer base stops (<=4 live)
+  std::array<Cached, 3> stopCache_{};
+
+  // Outstanding colour queries, a pool shared by the three lions. A slot is
+  // busy until its peer answers or kColorQueryRetryMs passes, so a silent peer
+  // is asked at most once per window and at most kQuerySlots queries are
+  // outstanding at once.
+  static constexpr size_t kQuerySlots = 3;
+  struct PendingQuery { Mac mac; uint32_t sentMs; };
+  std::array<PendingQuery, kQuerySlots> pending_{};
 
   lamp::MeshLink* meshLink_ = nullptr;
   LionsGreetingBehavior* greeting_ = nullptr;

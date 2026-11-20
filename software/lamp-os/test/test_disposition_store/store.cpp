@@ -19,19 +19,16 @@
 // Native tests don't build src/, so compile the real implementation in.
 #include "../../src/config/disposition_store.cpp"
 #include "../../src/util/heap_guard.cpp"
+#include "../replaced_new/replaced_new.hpp"
 
 // Allocations fail while set, the way a fragmented heap refuses one.
 static bool g_failAllocations = false;
 static int g_allocations = 0;
-void* operator new(size_t size) {
+void* testAllocate(size_t size) {
   ++g_allocations;
-  if (g_failAllocations) throw std::bad_alloc();
-  void* p = std::malloc(size ? size : 1);
-  if (!p) throw std::bad_alloc();
-  return p;
+  return g_failAllocations ? nullptr : std::malloc(size);
 }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete(void* p, size_t) noexcept { std::free(p); }
+void testRelease(void* p) noexcept { std::free(p); }
 
 using namespace lamp;
 

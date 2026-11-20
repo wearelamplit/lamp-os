@@ -20,12 +20,18 @@ import '../../domain/wisp_source_mode.dart';
   required Map<String, ({LampColor base, LampColor shade})> livePaint,
   required List<LampColor> palette,
   required int shuffleSeed,
+  PaletteStyle style = PaletteStyle.gradient,
 }) {
   final live = livePaint[lampId.toUpperCase()];
   if (live != null) return live;
   final mac = parseMacFromBleId(lampId);
   if (mac == null || palette.isEmpty) return null;
-  final p = predictTuple(mac: mac, palette: palette, shuffleSeed: shuffleSeed);
+  final p = predictTuple(
+    mac: mac,
+    palette: palette,
+    shuffleSeed: shuffleSeed,
+    style: style,
+  );
   if (p == null) return null;
   return (base: p.base, shade: p.shade);
 }
@@ -83,7 +89,12 @@ class PaintedLampsList extends ConsumerWidget {
     final notifier = ref.read(wispNotifierProvider(lampId).notifier);
     final status = ref.watch(wispNotifierProvider(lampId)).value;
     final shuffleSeed = status?.shuffleSeed ?? 0;
-    final palette = previewPaletteFor(status?.source, notifier.savedManualPalette);
+    final style = status?.paletteStyle ?? PaletteStyle.gradient;
+    // Until the settings arrive the seed is a placeholder, and a prediction
+    // from it shows colours the wisp never paints.
+    final palette = (status?.configKnown ?? false)
+        ? previewPaletteFor(status?.source, notifier.savedManualPalette)
+        : const <LampColor>[];
     final claimedMacs = notifier.claimedMacs;
     final livePaint = notifier.livePaint;
     final peersAsync = ref.watch(lampNearbyPeersNotifierProvider(lampId));
@@ -133,6 +144,7 @@ class PaintedLampsList extends ConsumerWidget {
             name: e.name,
             palette: palette,
             shuffleSeed: shuffleSeed,
+            style: style,
             livePaint: livePaint,
           ),
       ],
@@ -146,6 +158,7 @@ class _PaintedLampRow extends StatelessWidget {
     required this.name,
     required this.palette,
     required this.shuffleSeed,
+    required this.style,
     required this.livePaint,
   });
 
@@ -153,6 +166,7 @@ class _PaintedLampRow extends StatelessWidget {
   final String name;
   final List<LampColor> palette;
   final int shuffleSeed;
+  final PaletteStyle style;
   final Map<String, ({LampColor base, LampColor shade})> livePaint;
 
   @override
@@ -162,6 +176,7 @@ class _PaintedLampRow extends StatelessWidget {
       livePaint: livePaint,
       palette: palette,
       shuffleSeed: shuffleSeed,
+      style: style,
     );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.sm),

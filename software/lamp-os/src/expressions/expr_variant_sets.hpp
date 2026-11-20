@@ -1,13 +1,13 @@
 #pragma once
-// Single source for each variant's editable-expression NAME list, consumed by
+// Single source for each variant's registered-expression NAME list, consumed by
 // BOTH the runtime registration (Lamp::registerExpressions + variant overrides)
 // and the host catalog generator. Regular naming lets one X-macro drive both:
 // the runtime expands each stem to <Name>Expression::classDescriptor(), the
 // generator to k<Name>DescriptorData. Names only, no Arduino/hardware deps, so
 // the host tool and the framework can both include it.
 //
-// Bloom is internal (serializeCatalog skips it); it rides staff's list so the
-// runtime set and the generated catalog stay symmetric on both sides.
+// Yawn and Bloom are internal (serializeCatalog skips them); they ride the
+// lists so the runtime set and the generated catalog stay symmetric.
 
 #define LAMPOS_BASE_EXPRESSIONS(X) \
   X(Glitchy) X(Pulse) X(Breathing) X(Shifty) X(Spotty) X(Shimmer) X(Yawn)

@@ -23,25 +23,29 @@
 #include "behaviors/fade_out.hpp"
 #include "components/transient_override/brightness_override.hpp"
 #include "components/transient_override/color_override.hpp"
-#include "components/webapp/webapp.hpp"
 #include "util/color.hpp"
 #include "util/dropped_write_log.hpp"
-#include "util/json_escape.hpp"
+#include "util/alloc_boundary.hpp"
+#include "util/heap_guard.hpp"
 #include "util/heap_probe.hpp"
 #include "util/loop_stall.hpp"
 #include "util/loop_watchdog.hpp"
+#include "core/boot_history.hpp"
 #include "core/pending_slot_aggregate.hpp"
 #include "core/override_aggregate.hpp"
 #include "components/firmware/ota_quiet_mode.hpp"
 #include "ble_gap.hpp"
 #include "crypto.hpp"
 #include "components/network/ble/ble_radio_gate.hpp"
+#include "components/network/ble/alloc_guarded_callbacks.hpp"
+#include "components/network/ble/nearby_list.hpp"
+#include "components/network/ble/social_view.hpp"
+#include "components/network/ble/section_page.hpp"
 #include "components/network/ble/gatt_layout.hpp"
 #include "components/network/ble/social_scan.hpp"
 #include "components/network/ble/state_notify.hpp"
 #include "expressions/expression_manager.hpp"
 #include "components/network/mesh/lamp_roster.hpp"
-#include "components/network/mesh/proximity.hpp"
 #include "components/network/mesh/wisp_status_merge.hpp"
 #include "components/network/mesh/mesh_link.hpp"
 #include "components/network/transport/wifi.hpp"
@@ -123,10 +127,8 @@ class NimBleRadio : public BleRadio {
 };
 static NimBleRadio           s_nimBleRadio;
 static BleRadioGate          s_radioGate{s_nimBleRadio};
-// Set by the app (CHAR_EDIT_SESSION social-view selector) while the
-// Social/Network page is open. Gates the duty-cycled passive scan below.
-// Cleared on BLE disconnect.
-static volatile bool         s_socialViewActive = false;
+// Gates the duty-cycled passive scan below.
+static SocialView            s_socialView;
 // millis() of the last throughput-sensitive BLE write (color/brightness/
 // knockout/OTA chunk). The social scan skips a window while a write fired
 // within SocialScanTuning::idleGuardMs so it never competes during a live
@@ -145,6 +147,8 @@ static std::function<lamp::GreetingState()> s_greetingStateProvider;
 // Set on Core 0 when the app enables CHAR_STATE_NOTIFY; tick() sends the
 // current state then, since a notify sent before the subscribe is lost.
 static std::atomic<bool>     s_stateSubscribed{false};
+// Whether the connected client has CHAR_STATE_NOTIFY notifications on.
+static std::atomic<bool>     s_stateNotifyOn{false};
 
 static constexpr uint16_t kTightMinUnits = 12;   //  15.0 ms (units of 1.25 ms)
 static constexpr uint16_t kTightMaxUnits = 24;   //  30.0 ms
@@ -164,20 +168,12 @@ struct ConnSlot {
   uint16_t                    handle;
   bool                        authed;
   lamp::crypto::PerConnState  crypto;
-  std::string                 pageSnapshot;
-  uint16_t                    pageCursor;
-  uint16_t                    pageMtu;
-  // View of the bytes currently being paged out. A heap section serialises
-  // into pageSnapshot and points here at it; a flash section points straight
-  // at its .rodata catalog with zero copy. Empty between sections, so an
-  // unknown/empty section clears this and the next DATA read returns
-  // end-of-section.
-  std::string_view            pageSource;
+  SectionPage                 page;
 };
 static constexpr uint16_t kUnusedHandle = 0xFFFF;
 static constexpr size_t   kMaxConns     = 1;
 static std::array<ConnSlot, kMaxConns> s_conn{{
-  {kUnusedHandle, false, {}, {}, 0, 0, {}},
+  {kUnusedHandle, false, {}, {}},
 }};
 
 // Pinned to ATT_MTU 247 minus the 3-byte ATT header rather than reading
@@ -208,10 +204,7 @@ static ConnSlot* findOrAllocSlot(uint16_t handle) {
     freeSlot->handle = handle;
     freeSlot->authed = false;
     freeSlot->crypto = lamp::crypto::PerConnState{};
-    freeSlot->pageSnapshot.clear();  // keeps capacity
-    freeSlot->pageCursor = 0;
-    freeSlot->pageMtu    = 0;
-    freeSlot->pageSource = {};
+    freeSlot->page.close();
   }
   return freeSlot;
 }
@@ -222,10 +215,7 @@ static void freeSlot(uint16_t handle) {
     s->handle = kUnusedHandle;
     s->authed = false;
     s->crypto = lamp::crypto::PerConnState{};
-    std::string().swap(s->pageSnapshot);  // reclaim, not just .clear()
-    s->pageCursor = 0;
-    s->pageMtu    = 0;
-    s->pageSource = {};
+    s->page.release();
   }
 }
 
@@ -235,10 +225,7 @@ static void clearAllSlots() {
     s.handle = kUnusedHandle;
     s.authed = false;
     s.crypto = lamp::crypto::PerConnState{};
-    std::string().swap(s.pageSnapshot);
-    s.pageCursor = 0;
-    s.pageMtu    = 0;
-    s.pageSource = {};
+    s.page.release();
   }
 }
 
@@ -311,6 +298,9 @@ static bool decodeIncomingOp(const std::string& raw,
   return true;
 }
 
+using AllocGuardedCallbacks =
+    AllocGuarded<NimBLECharacteristicCallbacks, NimBLECharacteristic, NimBLEConnInfo>;
+
 class ControlServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override {
     uint16_t handle = connInfo.getConnHandle();
@@ -342,6 +332,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     s_clientConnected = true;
     s_homeModePageActive = false;
     postPendingApplyEffectiveBrightness();
+    lamp::boot_history::noteClientConnect();
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] Client connected, handle=%u (BT session active)\n", handle);
@@ -355,7 +346,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
 
     s_clientConnected = false;
     s_homeModePageActive = false;
-    s_socialViewActive = false;
+    s_socialView.clear();
     // Clear editing flags so a crashed/backgrounded app can't keep the
     // wisp's overrides locked out; reconnected sessions re-open via
     // CHAR_EDIT_SESSION.
@@ -368,6 +359,7 @@ class ControlServerCallbacks : public NimBLEServerCallbacks {
     lamp::overrides.base.reassertHold();
     lamp::overrides.shade.reassertHold();
     s_currentConnHandle = 0xFFFF;
+    s_stateNotifyOn.store(false);
     postPendingApplyEffectiveBrightness();
     // Force-flush dispositions so the user's final slider value persists
     // if the lamp loses power before the debounce window elapses.
@@ -414,14 +406,20 @@ class AuthCallback : public NimBLECharacteristicCallbacks {
 
 class BrightnessCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("brightness", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("brightness", "ota quiet");
       return;
     }
     noteAppWriteActivity();
     std::string val = c->getValue();
-    if (val.empty()) return;
+    if (val.empty()) {
+      lamp::logDroppedWrite("brightness", "empty");
+      return;
+    }
     uint8_t level = static_cast<uint8_t>(val[0]);
     if (level > 100) level = 100;
 #ifdef LAMP_DEBUG
@@ -432,23 +430,34 @@ class BrightnessCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
+// The app reads it only on its Social, mesh-lamps and wisp-painted-lamps
+// screens, so it is built on the loop while those reads keep coming.
+static NearbyList s_nearby;
+
 class EditSessionCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
-    if (lamp::ota_quiet_mode::isQuiet()) {
-      lamp::logDroppedWrite("editSession", "ota quiet");
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("editSession", "unauthenticated");
       return;
     }
     std::string val = c->getValue();
-    if (val.size() < 2) return;
+    if (val.size() < 2) {
+      lamp::logDroppedWrite("editSession", "short");
+      return;
+    }
     const uint8_t surface = static_cast<uint8_t>(val[0]);
     const bool   open    = (val[1] != 0);
+    const bool quiet = lamp::ota_quiet_mode::isQuiet();
+    // 0x08 is not an edit surface: the app on the Social/Network page toggles
+    // the duty-cycled passive scan that sights BLE-only peers while connected.
+    s_socialView.write(surface, open, quiet, s_nearby);
+    if (quiet) {
+      lamp::logDroppedWrite("editSession", "ota quiet");
+      return;
+    }
     if (surface & 0x01) lamp::overrides.base.setOperatorEditing(open);
     if (surface & 0x02) lamp::overrides.shade.setOperatorEditing(open);
     if (surface & 0x04) lamp::overrides.brightness.setOperatorEditing(open);
-    // 0x08 is not an edit surface: the app on the Social/Network page toggles
-    // the duty-cycled passive scan that sights BLE-only peers while connected.
-    if (surface & 0x08) s_socialViewActive = open;
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] editSession surface=0x%02x %s\n",
                   surface, open ? "open" : "closed");
@@ -458,13 +467,19 @@ class EditSessionCallback : public NimBLECharacteristicCallbacks {
 
 class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("homeModeFocus", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("homeModeFocus", "ota quiet");
       return;
     }
     std::string val = c->getValue();
-    if (val.empty()) return;
+    if (val.empty()) {
+      lamp::logDroppedWrite("homeModeFocus", "empty");
+      return;
+    }
     const bool active = val[0] != 0;
     s_homeModePageActive = active;
     postPendingApplyEffectiveBrightness();
@@ -476,14 +491,20 @@ class HomeModeFocusCallback : public NimBLECharacteristicCallbacks {
 
 class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("knockout", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("knockout", "ota quiet");
       return;
     }
     noteAppWriteActivity();
     std::string val = c->getValue();
-    if (val.size() < 2) return;
+    if (val.size() < 2) {
+      lamp::logDroppedWrite("knockout", "short");
+      return;
+    }
     uint8_t pixelIndex = static_cast<uint8_t>(val[0]);
     uint8_t brightness = static_cast<uint8_t>(val[1]);
     if (brightness > 100) brightness = 100;
@@ -494,266 +515,18 @@ class BaseKnockoutCallback : public NimBLECharacteristicCallbacks {
   }
 };
 
-// No separate per-flag recency window: a recency cutoff shorter than the
-// prune cutoff produces "ghost rows" (entry visible, both badges gone)
-// between the two deadlines.
-//
-// Direct string emit, no JsonDocument: at roster capacity the payload is
-// ~15 KB and an ArduinoJson build peaks at ~3x that. Colors emit as 8
-// uppercase hex chars "RRGGBBWW" (the app also parses the legacy 4-int
-// array). Zero/idle values are omitted to keep the JSON compact.
-static inline void fnv1a(uint32_t& h, const void* data, size_t len) {
-  const uint8_t* p = static_cast<const uint8_t*>(data);
-  while (len--) { h ^= *p++; h *= 16777619u; }
-}
-
-// A BLE section OOM degrades to a graceful-empty serve; keep it visible on
-// every channel, throttled to one line per 5000ms.
+// A BLE section the heap cannot serve reads empty, or "!" for a config
+// section; keep it visible on every channel, throttled to one line per 5000ms.
 static void logBleSectionOom(const char* what) {
   static uint64_t lastMs = 0;
   const uint64_t now = lamp::uptimeMs();
   if (now - lastMs < 5000 && lastMs != 0) return;
   lastMs = now;
-  Serial.printf("[ble_control] %s OOM; serving graceful-empty\n", what);
+  Serial.printf("[ble_control] %s OOM\n", what);
 }
-
-static void logNearbyHeapSkip(uint32_t largest, uint32_t needed, uint32_t lamps) {
-  static uint64_t lastMs = 0;
-  const uint64_t now = lamp::uptimeMs();
-  if (now - lastMs < 5000 && lastMs != 0) return;
-  lastMs = now;
-  Serial.printf("[ble_control] nearby build skipped, low heap: largest=%u needed=%u lamps=%u\n",
-                largest, needed, lamps);
-}
-
-static constexpr uint32_t kNearbyHeapMargin = 1024;
-
-// Builds a fresh string into `out`, reserved to the worst-case size of `lamps`
-// so the build never reallocates mid-string.
-static void buildNearbyJson(uint32_t& membershipHashOut,
-                            std::vector<lamp::ListedPeer>& lamps,
-                            std::string& out) {
-  // Sort by name for stable rendering.
-  std::sort(lamps.begin(), lamps.end(),
-            [](const lamp::ListedPeer& a, const lamp::ListedPeer& b) {
-              return std::strcmp(a.name, b.name) < 0;
-            });
-  out.clear();
-  // Upper bound: ~240 B of fixed fields per entry (fwChannel added) plus
-  // worst-case 6 B per escaped name char, so the string never reallocs
-  // mid-build.
-  size_t cap = 2;
-  for (const auto& p : lamps) cap += 240 + 6 * std::strlen(p.name);
-  out.reserve(cap);
-  out += '[';
-  char buf[96];
-  bool first = true;
-  const uint32_t now = millis();
-  uint32_t hash = 2166136261u;
-  for (const auto& p : lamps) {
-    if (!first) out += ',';
-    first = false;
-    // Membership hash over the app-visible fields only. lastSeenMs and rssi
-    // freshen on every BLE adv (~30 Hz); folding them would churn the rev.
-    const uint8_t flags =
-        (p.lastSeenNearMs != 0 ? 1 : 0) | (p.lastSeenMeshMs != 0 ? 2 : 0) |
-        (lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? 4 : 0) |
-        (p.hasMac ? 8 : 0) | (p.hasOtaSendingTo ? 16 : 0);
-    fnv1a(hash, p.name, std::strlen(p.name));
-    fnv1a(hash, &flags, 1);
-    if (p.hasMac) fnv1a(hash, p.mac, 6);
-    fnv1a(hash, &p.shadeColor, 4);
-    fnv1a(hash, &p.baseColor, 4);
-    fnv1a(hash, &p.firmwareVersion, sizeof(p.firmwareVersion));
-    fnv1a(hash, p.fwChannel, std::strlen(p.fwChannel));
-    fnv1a(hash, &p.otaState, 1);
-    if (p.hasOtaSendingTo) fnv1a(hash, p.otaSendingTo, 6);
-    out += "{\"name\":\"";
-    lamp::appendJsonEscaped(out, p.name);
-    const uint32_t lastSeenMs = lamp::mostRecentSeenMs(p.lastSeenNearMs, p.lastSeenMeshMs, now);
-    snprintf(buf, sizeof(buf), "\",\"lastSeenMs\":%lu,\"viaBle\":%s,\"viaEspNow\":%s,\"near\":%s",
-             static_cast<unsigned long>(lastSeenMs),
-             p.lastSeenNearMs != 0 ? "true" : "false",
-             p.lastSeenMeshMs != 0 ? "true" : "false",
-             lamp::isNearNow(p.lastSeenNearMs, now, LAMP_PRUNE_TIME_MS) ? "true" : "false");
-    out += buf;
-    if (p.hasMac) {
-      char macBuf[18];
-      lamp::formatBdAddr(p.mac, macBuf);
-      out += ",\"lampId\":\"";
-      out += macBuf;
-      out += '"';
-    }
-    if (p.lastRssi != -127) {
-      snprintf(buf, sizeof(buf), ",\"rssi\":%d", p.lastRssi);
-      out += buf;
-    }
-    snprintf(buf, sizeof(buf),
-             ",\"shade\":\"%02x%02x%02x%02x\",\"base\":\"%02x%02x%02x%02x\"",
-             p.shadeColor.r, p.shadeColor.g, p.shadeColor.b, p.shadeColor.w,
-             p.baseColor.r, p.baseColor.g, p.baseColor.b, p.baseColor.w);
-    out += buf;
-    if (p.firmwareVersion != 0) {
-      snprintf(buf, sizeof(buf), ",\"fwVersion\":%lu",
-               static_cast<unsigned long>(p.firmwareVersion));
-      out += buf;
-    }
-    snprintf(buf, sizeof(buf), ",\"fwChannel\":\"%s\"", p.fwChannel);
-    out += buf;
-    if (p.otaState != 0) {
-      snprintf(buf, sizeof(buf), ",\"otaState\":%u", p.otaState);
-      out += buf;
-    }
-    if (p.hasOtaSendingTo) {
-      char macBuf[18];
-      lamp::formatBdAddr(p.otaSendingTo, macBuf);
-      out += ",\"otaSendingTo\":\"";
-      out += macBuf;
-      out += '"';
-    }
-    out += '}';
-  }
-  out += ']';
-  membershipHashOut = hash;
-}
-
-// nearby JSON is app-facing only (the Social/Network screens, webapp
-// /api/nearby); the lamp's own logic reads roster structs directly. It is
-// materialized on Core 1 only while an app or webapp client is connected and
-// freed the moment neither is, so a crowded lamp with no app open holds zero
-// nearby-JSON heap. copyNearbyJson serves it under the mutex, so the Core 0
-// host task never reads a string Core 1 is reallocating.
-static SemaphoreHandle_t nearbyCacheMutex() {
-  static SemaphoreHandle_t m = xSemaphoreCreateMutex();
-  return m;
-}
-static std::string s_nearbyJson  = "[]";   // guarded by nearbyCacheMutex()
-static bool        s_nearbyReady = false;  // guarded by nearbyCacheMutex()
-
-// Contiguous build is bounded to ~N*276 B regardless of fleet size. The cut
-// keeps the most-relevant peers, so a crowd past this many drops the farthest
-// and stalest first; the app surfaces "there may be more".
-static constexpr size_t kNearbyMaxLamps = 25;
-
-// Bumped by maintainNearbyJson when the app-visible fields of the served
-// (top-N) set change (excluding the ~30 Hz rssi/lastSeen churn). Surfaced in
-// every stateNotify payload so the app re-reads nearby on a push, not a poll.
-static uint32_t s_nearbyRev = 0;
 
 void copyNearbyJson(std::string& out) {
-  xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  out = s_nearbyJson;
-  xSemaphoreGive(nearbyCacheMutex());
-}
-
-// Keep the kNearbyMaxLamps most-relevant entries at the front of `lamps` and
-// drop the rest: near peers before mesh-only, then most-recently-seen, then
-// strongest RSSI. buildNearbyJson re-sorts the survivors by name.
-static void capNearby(std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
-  if (lamps.size() <= kNearbyMaxLamps) return;
-  std::partial_sort(lamps.begin(), lamps.begin() + kNearbyMaxLamps,
-                    lamps.end(),
-                    [now](const lamp::ListedPeer& a,
-                          const lamp::ListedPeer& b) {
-                      return lamp::nearbyMoreRelevant(a, b, now,
-                                                      LAMP_PRUNE_TIME_MS);
-                    });
-  lamps.resize(kNearbyMaxLamps);
-}
-
-static void releaseNearby() {
-  xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  if (s_nearbyReady) {
-    std::string("[]").swap(s_nearbyJson);  // SSO, reclaims the build heap
-    s_nearbyReady = false;
-  }
-  xSemaphoreGive(nearbyCacheMutex());
-  lamp::lampRoster.releaseAll();
-}
-
-// Core 1 only (tick). Materializes the nearby JSON while an app/webapp client
-// is connected, rebuilding when the roster changes (throttled to 1 Hz;
-// BLE advs freshen lastSeen at ~30 Hz per peer). Frees the buffer the moment
-// no client is connected, so no nearby-JSON heap is resident in the
-// crowded-no-app case. ponytail: boundary rssi jitter at >kNearbyMaxLamps can
-// churn the served set at up to the 1 Hz rebuild rate; add a hysteresis
-// margin only if that shows up as rev thrash.
-static void maintainNearbyJson() {
-  static uint32_t builtGen    = 0;
-  static uint64_t lastBuildMs = 0;
-  static uint32_t lastHash    = 0;
-  static bool     seeded      = false;
-
-  bool wanted = s_clientConnected;
-#if LAMP_WEBAPP_ENABLED
-  wanted = wanted || webapp::hasClient();
-#endif
-  if (!wanted) {
-    releaseNearby();
-    builtGen    = 0;
-    lastBuildMs = 0;
-    seeded      = false;
-    return;
-  }
-
-  const uint32_t gen = lamp::lampRoster.generation();
-  if (gen == builtGen && s_nearbyReady) return;
-  const uint32_t now = millis();
-  const uint64_t up = lamp::uptimeMs();
-  // lastBuildMs is 0 only before the first attempt since connect; after a
-  // failed attempt it holds the retry to the same 1 Hz.
-  if (lastBuildMs != 0 && up - lastBuildMs < 1000) return;
-
-  std::vector<lamp::ListedPeer>* all = nullptr;
-  try {
-    all = &lamp::lampRoster.getAll();
-  } catch (const std::bad_alloc&) {
-    logBleSectionOom("nearby roster");
-    lastBuildMs = up;
-    return;
-  }
-  auto& lamps = *all;
-  capNearby(lamps, now);
-  uint32_t needed = 2;
-  for (auto& e : lamps) needed += 240 + 6 * std::strlen(e.name);
-  const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-  if (largest < needed + kNearbyHeapMargin) {
-    lastBuildMs = up;
-    logNearbyHeapSkip(largest, needed, lamps.size());
-    return;
-  }
-
-  uint32_t hash = 0;
-  std::string local;
-  try {
-    buildNearbyJson(hash, lamps, local);
-  } catch (const std::bad_alloc&) {
-    logBleSectionOom("nearby");
-    lastBuildMs = up;
-    return;
-  }
-  if (local.size() < 2 || local.front() != '[') {
-    logBleSectionOom("nearby");
-    lastBuildMs = up;
-    return;
-  }
-  xSemaphoreTake(nearbyCacheMutex(), portMAX_DELAY);
-  s_nearbyJson.swap(local);
-  s_nearbyReady = true;
-  xSemaphoreGive(nearbyCacheMutex());
-  builtGen    = gen;
-  lastBuildMs = up;
-  // The first build after a (re)connect always notifies: a heap-skip can defer
-  // it past the app's first read of the idle "[]", and without a push the app
-  // wouldn't know to re-read the now-populated list. Subsequent builds keep the
-  // rssi/lastSeen churn-exclusion and only notify on a real membership change.
-  const bool firstSinceConnect = !seeded;
-  seeded = true;
-  if (firstSinceConnect || hash != lastHash) {
-    lastHash = hash;
-    ++s_nearbyRev;
-    notifyStateChange();
-  }
+  if (!s_nearby.copy(out)) out = "[]";
 }
 
 // Auth-gated on read and write: the disposition map reveals peer
@@ -778,13 +551,19 @@ class SocialDispositionsCallback : public NimBLECharacteristicCallbacks {
     logBleSectionOom("dispositions");
   }
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
-    if (!isAuthed(connInfo.getConnHandle())) return;
+    if (!isAuthed(connInfo.getConnHandle())) {
+      lamp::logDroppedWrite("socialDispositions", "unauthenticated");
+      return;
+    }
     if (lamp::ota_quiet_mode::isQuiet()) {
       lamp::logDroppedWrite("socialDispositions", "ota quiet");
       return;
     }
     std::string val = c->getValue();
-    if (val.size() > lamp::kPendingJsonOp) return;
+    if (val.size() > lamp::kPendingJsonOp) {
+      lamp::logDroppedWrite("socialDispositions", "oversize");
+      return;
+    }
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] WRITE socialDispositions len=%u\n",
                   (unsigned)val.size());
@@ -805,7 +584,9 @@ class WispStatusCallback : public NimBLECharacteristicCallbacks {
       c->setValue("");
       return;
     }
-    c->setValue(lamp::lampRoster.getWispStatusReadJson(lamp::kWispStatusCharMaxLen));
+    std::string json;
+    lamp::lampRoster.getWispStatusReadJson(json, lamp::kWispStatusCharMaxLen);
+    c->setValue(json);
   }
 };
 
@@ -814,7 +595,8 @@ void notifyWispStatus() {
   // No subscriber to push to, and the onRead callback rebuilds fresh, so
   // skip the serialize+notify churn on every wisp mesh event with no client.
   if (!s_clientConnected) return;
-  auto json = lamp::lampRoster.getWispStatusReadJson(lamp::kWispStatusCharMaxLen);
+  std::string json;
+  if (!lamp::lampRoster.getWispStatusReadJson(json, lamp::kWispStatusCharMaxLen)) return;
 #ifdef LAMP_DEBUG
   const bool sawCB = json.find("\"controllingBase\":true") != std::string::npos;
   const bool sawCS = json.find("\"controllingShade\":true") != std::string::npos;
@@ -910,7 +692,10 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
     const std::string raw = c->getValue();
     // Anything larger than this cannot decode into a payload that fits the
     // pending slot. NimBLE enforces MTU on the link; this is a sanity ceiling.
-    if (raw.size() > lamp::kPendingSettingsBlob + lamp::crypto::WIRE_OVERHEAD) return;
+    if (raw.size() > lamp::kPendingSettingsBlob + lamp::crypto::WIRE_OVERHEAD) {
+      lamp::logDroppedWrite("settingsBlob", "oversize");
+      return;
+    }
     std::string json;
     bool authed = false;
     if (!decodeIncomingOp(raw, handle, uuid.data(), "settingsBlob", json, authed)) {
@@ -930,7 +715,10 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 #endif
       return;
     }
-    if (json.empty()) return;
+    if (json.empty()) {
+      lamp::logDroppedWrite("settingsBlob", "empty");
+      return;
+    }
 
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] WRITE settingsBlob len=%u (decoded)\n", (unsigned)json.size());
@@ -964,15 +752,15 @@ class SettingsBlobCallback : public NimBLECharacteristicCallbacks {
 // <=kPageMaxChunkSize bytes forces the app to issue a new read per chunk
 // rather than using ATT_READ_BLOB_REQ against a cached value.
 
-using SectionSerializer = void(*)(std::string&);
-
-// A section serves one of two ways. fn serialises into the connection's
-// pageSnapshot on open (heap). flashData/flashLen instead point the page
-// source straight at a committed .rodata buffer, served by reference with
-// zero heap; fn is null for those.
+// A section serves one of three ways, exactly one of these set. fn serialises
+// into the connection's page buffer on open (heap). config copies a Config
+// section the same way, and reads as SectionPage::kBusy when the heap cannot
+// build or copy it. flashData/flashLen point the page straight at a committed
+// .rodata buffer, served by reference with zero heap.
 struct SectionEntry {
   const char*                 name;
-  SectionSerializer           fn;
+  SectionPage::Serializer     fn;
+  SectionPage::ConfigCopy     config    = nullptr;
   const char*                 flashData = nullptr;
   size_t                      flashLen  = 0;
 };
@@ -981,9 +769,10 @@ struct SectionEntry {
 // (no std::function footprint). Cached() accessors rebuild and copy out
 // under Config's cache mutex, so calling here on the Core 0 host task is
 // safe against a concurrent Core 1 rebuild; tick() pre-warms the caches so
-// the rebuild rarely runs here. nearby copies its Core 1-built cache out
-// under a mutex; exprcat serves the committed per-variant flash catalog by
-// reference, so it can never OOM.
+// the rebuild rarely runs here. nearby waits up to NearbyList::kReadWaitMs
+// for the loop to build it, then copies it out under a mutex, and reads
+// empty when it is not built; exprcat serves the committed per-variant flash
+// catalog by reference, so it can never OOM.
 // wispclaims is binary, not JSON: the full accumulated fleet blob exceeds
 // the 512-byte ATT ceiling that caps the CHAR_WISP_CLAIMS direct read.
 // wisppalette is binary too (raw RGBW): a dedicated read path so the
@@ -992,13 +781,14 @@ struct SectionEntry {
 // wispconfig serves the cached wispConfig, "{}" until one arrives, so an
 // empty read means a lamp that predates both.
 static const std::array<SectionEntry, 11> kSections = {{
-  {"lamp",    [](std::string& out) { s_config->lampSectionJsonCached(out); }},
-  {"base",    [](std::string& out) { s_config->baseSectionJsonCached(out); }},
-  {"shade",   [](std::string& out) { s_config->shadeSectionJsonCached(out); }},
-  {"expr",    [](std::string& out) { s_config->expressionsSectionJsonCached(out); }},
-  {"home",    [](std::string& out) { s_config->homeSectionJsonCached(out); }},
-  {"nearby",  [](std::string& out) { copyNearbyJson(out); }},
-  {"exprcat", nullptr, lamp::kExprCatalog, lamp::kExprCatalogLen},
+  {"lamp",  nullptr, [](std::string& out) { return s_config->lampSectionJsonCached(out); }},
+  {"base",  nullptr, [](std::string& out) { return s_config->baseSectionJsonCached(out); }},
+  {"shade", nullptr, [](std::string& out) { return s_config->shadeSectionJsonCached(out); }},
+  {"expr",  nullptr,
+   [](std::string& out) { return s_config->expressionsSectionJsonCached(out); }},
+  {"home",  nullptr, [](std::string& out) { return s_config->homeSectionJsonCached(out); }},
+  {"nearby",  [](std::string& out) { s_nearby.read(out, millis()); }},
+  {"exprcat", nullptr, nullptr, lamp::kExprCatalog, lamp::kExprCatalogLen},
   {"wispclaims", [](std::string& out) {
     static uint8_t buf[1 + lamp::WispFleetCache::kCapacity *
                               lamp::WispFleetCache::kBlobEntrySize];
@@ -1012,8 +802,7 @@ static const std::array<SectionEntry, 11> kSections = {{
     out.assign(reinterpret_cast<const char*>(buf), n);
   }},
   {"wispstatus", [](std::string& out) {
-    const std::string json = lamp::lampRoster.getWispStatusReadJson(0);
-    out.assign(json.data(), json.size());
+    if (!lamp::lampRoster.getWispStatusReadJson(out, 0)) throw std::bad_alloc();
   }},
   {"wispconfig", [](std::string& out) {
     lamp::lampRoster.copyWispConfigJson(out);
@@ -1023,55 +812,49 @@ static const std::array<SectionEntry, 11> kSections = {{
 class PageCtrlCallback : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     const uint16_t handle = connInfo.getConnHandle();
-    if (!isAuthed(handle)) return;
+    if (!isAuthed(handle)) {
+      lamp::logDroppedWrite("pageCtrl", "unauthenticated");
+      return;
+    }
     const std::string name = c->getValue();
-    if (name.empty() || name.size() > 16) return;
+    if (name.empty() || name.size() > 16) {
+      lamp::logDroppedWrite("pageCtrl", name.empty() ? "empty" : "oversize");
+      return;
+    }
 
     ConnSlot* slot = findSlot(handle);
     if (!slot) return;
 
     for (const auto& entry : kSections) {
       if (name == entry.name) {
-        if (entry.flashData) {
-          // Serve the committed catalog straight from .rodata; no heap.
-          slot->pageSource = std::string_view(entry.flashData, entry.flashLen);
-        } else {
-          // Serialises into pageSnapshot, reusing its existing capacity.
-          try {
-            entry.fn(slot->pageSnapshot);
-          } catch (const std::bad_alloc&) {
-            slot->pageSnapshot.clear();
-            slot->pageCursor = 0;
-            slot->pageMtu    = 0;
-            slot->pageSource = {};
-            logBleSectionOom(entry.name);
-            return;
-          }
-          slot->pageSource = slot->pageSnapshot;
-        }
-        slot->pageCursor = 0;
         // Cap the chunk at the baseline-MTU page size even when this link
         // negotiated higher; the app reads until an empty terminator, so
         // chunk size is a transport bound, not an end-of-section signal.
         const uint16_t mtu = connInfo.getMTU();
         const uint16_t cap = mtu > 3 ? mtu - 3 : 0;
-        slot->pageMtu = (cap > 0 && cap < kPageMaxChunkSize) ? cap
-                                                              : kPageMaxChunkSize;
+        const uint16_t chunk =
+            (cap > 0 && cap < kPageMaxChunkSize) ? cap : kPageMaxChunkSize;
+        bool served = true;
+        if (entry.flashData) {
+          slot->page.openStatic(std::string_view(entry.flashData, entry.flashLen), chunk);
+        } else if (entry.config) {
+          served = slot->page.openConfig(entry.config, chunk);
+        } else {
+          served = slot->page.open(entry.fn, chunk);
+        }
+        if (!served) logBleSectionOom(entry.name);
 #ifdef LAMP_DEBUG
         Serial.printf("[ble_control] page CTRL section=%s len=%u mtu=%u chunk=%u\n",
-                      entry.name, (unsigned)slot->pageSource.size(),
-                      (unsigned)mtu, (unsigned)slot->pageMtu);
+                      entry.name, (unsigned)slot->page.size(), (unsigned)mtu,
+                      (unsigned)chunk);
 #endif
         return;
       }
     }
 
-    // Unknown section: clear so the next DATA read returns empty, which
-    // the app treats as "section not found".
-    slot->pageSnapshot.clear();
-    slot->pageCursor = 0;
-    slot->pageMtu    = 0;
-    slot->pageSource = {};
+    // Unknown section: the next DATA read returns empty, which the app
+    // treats as "section not found".
+    slot->page.close();
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page CTRL unknown section='%.*s'\n",
                   (int)name.size(), name.data());
@@ -1082,29 +865,19 @@ class PageCtrlCallback : public NimBLECharacteristicCallbacks {
 class PageDataCallback : public NimBLECharacteristicCallbacks {
   void onRead(NimBLECharacteristic* c, NimBLEConnInfo& connInfo) override {
     const uint16_t handle = connInfo.getConnHandle();
-    if (!isAuthed(handle)) {
-      c->setValue("");
-      return;
-    }
     ConnSlot* slot = findSlot(handle);
-    if (!slot || slot->pageMtu == 0 ||
-        slot->pageCursor >= slot->pageSource.size()) {
+    const std::string_view chunk =
+        slot ? slot->page.read(isAuthed(handle)) : std::string_view{};
+    if (chunk.empty()) {
       // Empty response signals end-of-section: the app reads chunks until empty.
       c->setValue("");
       return;
     }
-    const size_t remaining = slot->pageSource.size() - slot->pageCursor;
-    const size_t take      = remaining < slot->pageMtu ? remaining
-                                                       : slot->pageMtu;
-    c->setValue(reinterpret_cast<const uint8_t*>(slot->pageSource.data() +
-                                                  slot->pageCursor),
-                static_cast<size_t>(take));
-    slot->pageCursor += static_cast<uint16_t>(take);
+    c->setValue(reinterpret_cast<const uint8_t*>(chunk.data()), chunk.size());
 #ifdef LAMP_DEBUG
     Serial.printf("[ble_control] page DATA cursor=%u/%u take=%u\n",
-                  (unsigned)slot->pageCursor,
-                  (unsigned)slot->pageSource.size(),
-                  (unsigned)take);
+                  (unsigned)slot->page.cursor(), (unsigned)slot->page.size(),
+                  (unsigned)chunk.size());
 #endif
   }
 };
@@ -1198,6 +971,7 @@ class FwControlCallback : public NimBLECharacteristicCallbacks {
 class StateNotifyCallback : public NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic*, NimBLEConnInfo&,
                    uint16_t subValue) override {
+    s_stateNotifyOn.store(subValue != 0);
     if (subValue != 0) s_stateSubscribed.store(true);
   }
 };
@@ -1215,7 +989,8 @@ class FwChunkCallback : public NimBLECharacteristicCallbacks {
     }
     // Direct call on the BLE host task; bounded ~0.5 ms (one OTA write +
     // bitmap set). A missed chunk triggers the receiver's REQ watchdog.
-    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble);
+    s_firmwareReceiver->handleChunkOnRecvTask(p, lamp::FirmwareTransportKind::Ble,
+                                              connInfo.getConnHandle());
   }
 };
 
@@ -1247,7 +1022,7 @@ void tick() {
   // holds the link; onDisconnect resumes the continuous scan itself.
   {
     const bool active =
-        s_socialViewActive && s_clientConnected && !s_radioGate.otaPaused();
+        s_socialView.active() && s_clientConnected && !s_radioGate.otaPaused();
     const uint64_t upMs = lamp::uptimeMs();
     if (active && !s_socialScanPrevActive) s_socialScan.arm(upMs);
     s_socialScanPrevActive = active;
@@ -1265,9 +1040,11 @@ void tick() {
   // a client holds the link: a mesh cascade dirties the expressions section
   // with no reader, and a rebuild per cascade is pure heap churn.
   static StateNotifyTrigger s_stateNotifyTrigger;
-  if (s_stateNotifyTrigger.step(s_clientConnected,
-                                s_stateSubscribed.exchange(false))) {
-    notifyStateChange();
+  const uint32_t notifyNowMs = millis();
+  if (s_stateNotifyTrigger.step(s_clientConnected && s_stateNotifyOn.load(),
+                                s_stateSubscribed.exchange(false), notifyNowMs) &&
+      !notifyStateChange()) {
+    s_stateNotifyTrigger.failed(notifyNowMs);
   }
 
   if (!s_clientConnected) {
@@ -1279,29 +1056,32 @@ void tick() {
     s_config->expressionsSectionRebuildIfDirty();
     s_config->homeSectionRebuildIfDirty();
   }
-  maintainNearbyJson();
+  if (s_nearby.tick(lamp::lampRoster, s_clientConnected, millis())) notifyStateChange();
 }
 
 void setGreetingStateProvider(std::function<lamp::GreetingState()> fn) {
   s_greetingStateProvider = std::move(fn);
 }
 
-void notifyStateChange() {
+bool notifyStateChange() {
   // A greeting edge fires this with no phone attached; the payload has no
   // reader then, and a connecting client reads the state fresh.
-  if (!s_stateNotify || !s_clientConnected) return;
-  StateNotifyFields fields;
-  fields.previewActive = ::expressionManager.isAnyTestActive();
-  lamp::GreetingState gs;
-  if (s_greetingStateProvider) {
-    gs = s_greetingStateProvider();
-    fields.greeting = &gs;
-  }
-  fields.nearbyRev = s_nearbyRev;
-  std::string payload;
-  buildStateNotifyJson(fields, payload);
-  s_stateNotify->setValue(payload);
-  s_stateNotify->notify();
+  if (!s_stateNotify || !s_clientConnected) return false;
+  const StateNotifySend result = sendStateNotify(
+      s_stateNotifyOn.load(), s_currentConnHandle,
+      [](StateNotifyFields& fields, lamp::GreetingState& greeting) {
+        fields.previewActive = ::expressionManager.isAnyTestActive();
+        if (s_greetingStateProvider) {
+          greeting = s_greetingStateProvider();
+          fields.greeting = &greeting;
+        }
+        fields.nearbyRev = s_nearby.rev();
+      },
+      [](const uint8_t* data, size_t len, uint16_t connHandle) {
+        return s_stateNotify->notify(data, len, connHandle);
+      });
+  if (result == StateNotifySend::NoHeap) logBleSectionOom("stateNotify");
+  return result == StateNotifySend::Sent;
 }
 
 void disableBtModemSleep() {
@@ -1471,7 +1251,7 @@ void start(lamp::Config* config) {
                     def.uuid);
       continue;
     }
-    if (bound->cb) c->setCallbacks(bound->cb);
+    if (bound->cb) c->setCallbacks(new AllocGuardedCallbacks(bound->cb));
     if (bound->out) *bound->out = c;
   }
   for (size_t j = 0; j < kBindingCount; ++j) {
@@ -1482,9 +1262,18 @@ void start(lamp::Config* config) {
     }
   }
 
-  if (s_wifiStateChar) s_wifiStateChar->setValue(buildWifiStateJson(false));
+  if (s_wifiStateChar) {
+    try {
+      s_wifiStateChar->setValue(buildWifiStateJson(false));
+    } catch (const std::bad_alloc&) {
+      s_wifiStateChar->setValue("");
+      logBleSectionOom("wifi");
+    }
+  }
   if (s_wispStatusChar) {
-    s_wispStatusChar->setValue(lamp::lampRoster.getWispStatusReadJson(lamp::kWispStatusCharMaxLen));
+    std::string json;
+    lamp::lampRoster.getWispStatusReadJson(json, lamp::kWispStatusCharMaxLen);
+    s_wispStatusChar->setValue(json);
   }
   if (s_stateNotify) s_stateNotify->setValue("{}");
   if (schemaVersionChar) {
@@ -1527,7 +1316,7 @@ void stop() {
   s_server  = nullptr;
   s_running = false;
   clearAllSlots();
-  releaseNearby();
+  s_nearby.release(lamp::lampRoster);
 
 #ifdef LAMP_DEBUG
   Serial.printf("[ble_control] GATT control service stopped\n");
@@ -1541,16 +1330,8 @@ void pauseRadioForOta() {
   // during BLE windows. Phone app loses connection briefly; reconnects
   // on resumeRadioAfterOta or after the OTA-driven reboot.
   if (!s_radioGate.pauseForOta()) return;
-  // Also tear down the boot-window SoftAP webapp. AP beacons fire every
-  // ~100 ms and contend with the ESP-NOW chunk stream for WiFi airtime;
-  // shutting the AP off frees the band for the OTA. The webapp is a
-  // first-boot config UI; it tears itself down after the 120 s boot
-  // window regardless, so this just brings the inevitable forward.
-#if LAMP_WEBAPP_ENABLED
-  webapp::shutdownForOta();
-#endif
 #ifdef LAMP_DEBUG
-  Serial.println("[ble_control] paused adv + scan + softAP for OTA");
+  Serial.println("[ble_control] paused adv + scan for OTA");
 #endif
 }
 

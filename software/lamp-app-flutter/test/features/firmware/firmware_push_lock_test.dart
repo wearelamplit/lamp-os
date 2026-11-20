@@ -341,6 +341,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a lamp that reports quiet with no push here freezes editing '
+      'until it listens or the bound passes', (tester) async {
+    final rig = await _pump(tester);
+    _lampQuiet(rig, true);
+    await _settle(tester);
+    expect(find.textContaining(_settling), findsOneWidget);
+    await _tapBrightnessMax(tester);
+    expect(rig.brightness, 50);
+
+    // About 1 s has passed since the report.
+    await tester.pump(
+      ControlNotifier.quietAfterPushBound - const Duration(seconds: 2),
+    );
+    expect(find.textContaining(_settling), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await _settle(tester);
+    expect(find.textContaining(_settling), findsNothing);
+    await _tapBrightnessMax(tester);
+    expect(rig.brightness, 100);
+  });
+
+  testWidgets('each quiet report restarts the bound', (tester) async {
+    final rig = await _pump(tester);
+    _lampQuiet(rig, true);
+    await _settle(tester);
+    await tester.pump(const Duration(seconds: 50));
+    _lampQuiet(rig, true);
+    await _settle(tester);
+    await tester.pump(
+      ControlNotifier.quietAfterPushBound - const Duration(seconds: 49),
+    );
+    expect(find.textContaining(_settling), findsOneWidget);
+    await tester.pump(const Duration(seconds: 50));
+    await _settle(tester);
+    expect(find.textContaining(_settling), findsNothing);
+  });
+
   testWidgets('a rebuild during the hold keeps the bound', (tester) async {
     final rig = await _pump(tester);
     await _failWhileQuiet(tester, rig);
@@ -659,7 +696,9 @@ void main() {
     final rig = await _pump(tester);
     rig
         .firmware(_lampId)
-        .emit(FirmwareStreaming(footer: _footer, chunksSent: 3, totalChunks: 10));
+        .emit(
+          FirmwareStreaming(footer: _footer, chunksSent: 3, totalChunks: 10),
+        );
     _lampQuiet(rig, true);
     await _settle(tester);
     expect(find.textContaining(_banner), findsOneWidget);
@@ -702,7 +741,11 @@ void main() {
     }
 
     /// Drops the link and lets the ladder bring the lamp back on [fwVersion].
-    Future<void> rebootInto(WidgetTester tester, _Rig rig, int fwVersion) async {
+    Future<void> rebootInto(
+      WidgetTester tester,
+      _Rig rig,
+      int fwVersion,
+    ) async {
       await seedControlBle(
         rig.ble,
         deviceId: _lampId,
@@ -805,8 +848,7 @@ void main() {
       await _failWhileQuiet(tester, rig, failure: _stored);
       // The failure landed 500 ms ago; stop 100 ms short of the bound.
       await tester.pump(
-        ControlNotifier.quietAfterPushBound -
-            const Duration(milliseconds: 600),
+        ControlNotifier.quietAfterPushBound - const Duration(milliseconds: 600),
       );
       expect(rig.container.read(quietAfterPushProvider(_lampId)), isTrue);
       await rig.ble.disconnect(_lampId);
@@ -875,21 +917,22 @@ void main() {
       FirmwareFailure.busy,
       FirmwareFailure.untrustedAtOffer,
     ]) {
-      testWidgets('an offer the lamp declines (${declined.name}) says nothing', (
-        tester,
-      ) async {
-        final rig = await _pump(tester);
-        rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
-        _lampQuiet(rig, true);
-        await _settle(tester);
-        rig
-            .firmware(_lampId)
-            .emit(FirmwareFailed(reason: 'declined', failure: declined));
-        await _settle(tester);
-        _lampQuiet(rig, false);
-        await _settle(tester);
-        expect(find.text(missed), findsNothing);
-      });
+      testWidgets(
+        'an offer the lamp declines (${declined.name}) says nothing',
+        (tester) async {
+          final rig = await _pump(tester);
+          rig.firmware(_lampId).emit(FirmwareOfferSent(footer: _footer));
+          _lampQuiet(rig, true);
+          await _settle(tester);
+          rig
+              .firmware(_lampId)
+              .emit(FirmwareFailed(reason: 'declined', failure: declined));
+          await _settle(tester);
+          _lampQuiet(rig, false);
+          await _settle(tester);
+          expect(find.text(missed), findsNothing);
+        },
+      );
     }
 
     testWidgets('a download that fails its checks before the offer says '
@@ -1038,9 +1081,8 @@ void main() {
       return rig;
     }
 
-    Finder raw(String text) => find.byWidgetPredicate(
-      (w) => w is SelectableText && w.data == text,
-    );
+    Finder raw(String text) =>
+        find.byWidgetPredicate((w) => w is SelectableText && w.data == text);
 
     testWidgets('a failure leads with a friendly line, the reason beneath', (
       tester,

@@ -21,6 +21,24 @@ config page, so `ble_control::deinitForWebapp()` tears BLE (NimBLE host + BT
 controller) down on client-connect to give the serve headroom. BLE comes back
 only via a reboot on session end (`webapp::tick()`), never an in-place re-init.
 
+SPIFFS (the web UI files, `webapp::kUiFsBasePath`) is mounted only while
+something reads it. The web server mounts it through Arduino's `SPIFFS` when it
+starts (`startServer`) and reads from it until the reboot that ends the
+session. `fs_ota`'s digest passes (the boot digest, `fsVerify` after a web UI
+update over the mesh, the `fsFinalize` recompute) mount it through IDF
+(`esp_vfs_spiffs_register`) for the pass and unregister it after
+(`DigestPassMount`), or reuse the server's mount when one is up. IDF frees all
+of its mount on unregister; Arduino's first `SPIFFS.begin` creates a mutex it
+never frees (rule 5), so only the web server, which runs after boot, mounts
+through Arduino. The pass reads files through `open`/`lseek`/`read` and walks
+with `opendir`/`readdir`/`stat`, so it opens no stdio `FILE`. A `FILE` carries
+a 4 KB buffer while open, and a second open `FILE` makes newlib allocate a
+448 B glue block it never frees (rule 5). Before a web UI update writes the
+partition raw, `fsRecvPartition` drops whichever mount holds it (`SPIFFS.end`
+unregisters the unlabelled SPIFFS mount, Arduino's or IDF's), and `fsVerify`
+gives a running server a fresh mount of the new files
+(`webapp::remountUiFiles`).
+
 ## The recurring anti-pattern
 
 Fleet-awareness features (crowd-dim, claims, nearby lists, greetings, personality)
@@ -54,6 +72,20 @@ Two properties make it lethal:
    the resting state of a lamp whose colours flow, draws every frame without
    allocating (`test_configurator_rotation` counts zero allocations over 1,000
    rotating draws); the loop pattern is built once per colour or rotation change.
+   A write retargets its from-frame in place, so it allocates nothing either, and
+   the snafu dots build each scene into the buffer it replaces.
+   A buffer a pass needs only while it runs (a greeting's frames, the OTA
+   indicator's settle frame, a borrowed palette) is swapped empty when the pass
+   ends (`std::vector<T>().swap(v)`); `clear()` keeps the capacity. A native test
+   proves it with `test/replaced_new/heap_tally.hpp`, which tallies the bytes
+   `new` holds live, and asserts the tally is back where it started. The
+   compositor's call that ends the OTA indicator's settle when quiet mode ends,
+   and `Lamp::drainColorInfo`'s stack copy, have no test: no native test links
+   `compositor.cpp` (tests stub `Compositor`) or `lamp_drains.cpp`.
+   Home presence keeps the SSIDs a scan saw as fixed hashes (`SsidPresence`),
+   exact up to 64 distinct SSIDs per scan; the scan list exists only for the
+   app, published by an app-requested scan and dropped once the app
+   disconnects.
 3. **No per-entry `std::string` for addresses or short keys.** Use a fixed
    `char[18]` or the raw 6-byte address. Anything past ~15 chars heap-allocates.
 4. **Scan in place, do not snapshot.** "Closest Smitten peer", "nearest by RSSI",
@@ -82,11 +114,17 @@ Two properties make it lethal:
    the ESP-NOW receive path's bounded takes. The near and mesh buffers are
    `reserve()`d to `kCapacity` (50) when the roster is constructed at boot, so
    a growing roster never reallocates them. The `getAll` buffer serves only the
-   app-facing nearby list: it is reserved to `kCapacity` in one allocation on
-   the first build after an app or webapp client connects and released when the
-   last one disconnects, and the build skips (logging OOM) if that reservation
-   throws. A new roster consumer reads one of these views, adding a field to its
-   projection if needed, and never takes a full `RosterEntry` copy per peer.
+   app-facing nearby list, which exists only while the app reads it (see the
+   nearby section in [`networking.md`](networking.md), which also covers the
+   list's measured sizing and the Social-close release): it is sized to the
+   roster's count, reallocated only when the count moves (at most once a
+   second), and released with the list, and the build skips (logging OOM) if
+   that allocation throws. It is the exception to rules 2 and 5: it is held
+   while a phone is connected, when the largest block is tightest, so it holds
+   what the lamps there need, never the 50-slot maximum, and it holds nothing
+   on a screen that does not show the list. A new roster consumer reads one of
+   these views, adding a field to its projection if needed, and never takes a
+   full `RosterEntry` copy per peer.
 
    The buffers are **single-task and non-reentrant**: loop task (Core 1) only,
    and a reference is invalidated by the next call to the same getter.
@@ -134,7 +172,9 @@ Two properties make it lethal:
    4 per byte of the longest string (built by doubling, so up to twice it,
    then kept and copied into the model) and 4 KB for the model, which carries
    some slack. A parse that runs out of memory all the same answers 500. Largest
-   block: a 4 KB slot pool, or twice the longest string plus 128 bytes.
+   block: a 4 KB slot pool, the model's expression list at its cap
+   (`kRawExpressionListBytes`, 21 `ExpressionConfig`s: 3.6 KB on the ESP32,
+   4.2 KB on a 64-bit Linux host), or twice the longest string plus 128 bytes.
    Those are a counting allocator's host figures with margin
    (`test_config_persist_validate`: a 5.4 KB document peaks at 16 KB, the
    standard variant's 18 full expressions at 23 KB, a lamp at every cap at
@@ -220,14 +260,14 @@ the same model's JSON, so every BLE section and the web document are
 byte-identical to what a JSON store gives (`test_config_settings_codec`,
 over 500 seeded models among others).
 
-Outside it, 171 entries (`systemKeys` in `test_config_records`):
+Outside it, 173 entries (`systemKeys` in `test_config_records`):
 
 - 5 namespace entries: `lamp`, `crash`, `phy`, `nvs.net80211`, `nimble_bond`.
 - PHY calibration: a 1904-byte blob (62), a 6-byte blob (3), a u32 (1): 66.
 - The WiFi driver's namespace: empty. The lamp keeps WiFi config in RAM and
   erases that namespace at boot.
 - The `crash` namespace: the crash record (`last`, an 80-byte blob, 5) and the
-  boot history (`boots`, a 64-byte blob, 4): 9.
+  boot history (`boots`, a 104-byte blob, 6): 11.
 - NimBLE's bond store (`ble_store_nvs.c`, `nimble_bond`; bonding and
   host-based privacy are on, so legacy bonds may be present): with
   `MAX_BONDS` 3, `MAX_CCCDS` 8 and `MAX_CSFCS` 1 (the connection count),
@@ -240,24 +280,24 @@ Outside it, 171 entries (`systemKeys` in `test_config_records`):
 The arithmetic, every case with at least 29 entries to spare
 (`test_config_records`, `kMargin`):
 
-- **Entries.** Live at the caps: 171 + 2 + 40 + 126 + 2 + 32 = 373.
+- **Entries.** Live at the caps: 173 + 2 + 40 + 126 + 2 + 32 = 375.
   Rewriting the largest blob, PHY calibration (62) or the settings blob (32),
-  peaks at 435 of 504: 69 spare.
+  peaks at 437 of 504: 67 spare.
 - **Strings.** The only strings are `xn` and `lampType` (2 entries each):
-  rewritten beside every key, 375 live against a bound of 4 x 124 + 3 = 499.
+  rewritten beside every key, 377 live against a bound of 4 x 124 + 3 = 499.
 - **Small blobs.** The largest is a dispositions blob just under 400 bytes
-  (33 peers), 14 entries, at 373 live: bound 451, 78 spare. A record (6) is smaller.
+  (33 peers), 14 entries, at 375 live: bound 451, 76 spare. A record (6) is smaller.
 - **The migration.** The first save over a 1.3.3 split store at its worst
   writes the settings blob beside every legacy key (records shared, `ko` 10,
-  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 437 live,
-  peak 469, 35 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
-  entries) it peaks at 429.
+  the rest blob 59, the lamp-only `cfg` 13 and a staged `cfgl` 14): 439 live,
+  peak 471, 33 spare, once. Over a 1.3.3 whole store (at most 1759 bytes, 56
+  entries) it peaks at 431.
 - **The first save after an update from an older release.** An older
   release's `cfg` string can hold 4,000 bytes (127 entries), beside its
   dispositions JSON (about 2.2 KB, 71 entries, migrated to the 40-entry blob
   at the first load). The first save keeps that string until the new keys
   land, but those keys copy only what the string held. Over every such shape
-  up to 4,000 bytes the page model leaves 95 entries spare at the tightest
+  up to 4,000 bytes the page model leaves 93 entries spare at the tightest
   (`test_the_first_save_after_an_update_fits`).
 
 Those bounds hold for any arrangement of entries across the pages. The
@@ -268,7 +308,7 @@ its worst, every store shape (empty, the largest 1.3.3 whole config, every
 escaped worst case, the standard variant's 18 full expressions) is saved in
 seeded order with system keys and dispositions rewritten between saves and
 29 padding entries beside them; every write must land and every save load
-back as saved, and the same churn still holds with 47 padding entries. The
+back as saved, and the same churn still holds with 45 padding entries. The
 budget sizes `disp` at `DispositionStore::kMaxBlobLen`, so a longer
 dispositions blob flows into every figure.
 
@@ -380,6 +420,30 @@ of the unchanged config at first boot must load whole at every cut.
   `[cfg] store binary` and saves nothing at boot. A migration that fails
   leaves the lamp on its legacy store, which keeps loading, and the save
   retries.
+- **A store the C firmware wrote.** The C firmware (before the mesh
+  releases, and the catch_ota build) kept one `cfg` string with
+  `lamp.homeMode` as a boolean, which no later writer stores. `loadConfig`
+  loads such a string alone (`isOldCStore`): `fromJson`, then `migrateOldC`,
+  form `whole`, no records, rest or lamp blob read. The C firmware drove each
+  pixel raw from colour index i; this firmware sends every channel through
+  `gamma8` and drives a `reversed` strip from the far end. So every base,
+  shade and expression colour the string carries takes `inverseGamma8`
+  (exact up to 66, within one above), the base and shade stops reverse for
+  a role whose first strip is `reversed` (`windingOf`), each `{p, b}`
+  knockout pair lands on pixel p (mirrored the same way; p past the base px
+  dropped) at the level whose gamma-corrected scale best matches b%. The
+  stored shade px is dropped (the last C firmware ignored it and drove the
+  variant default). A C-era board reflashed as a lioness or snafu with
+  its NVS kept would report shade px 0; no such board exists, so it stays
+  unfixed (owner ruling 2026-11-16). `lamp.homeMode` / `homeModeSSID` / `homeModeBrightness`
+  (80 when absent) become the home mode, network-bound when the SSID is
+  set. Pixels between
+  two stops and fades still render a little darker, and the strip level
+  caps at 170 where the C firmware capped at 180. The string stays the authority until a save of the migrated model
+  reads back (the first-boot save), so a save cut short re-runs the same
+  migration and a completed one is never migrated again. A lamp that booted
+  any mesh release from the C firmware already saved the unmigrated load;
+  firmware cannot repair it.
 - **A write that ran out of heap.** Two allocations inside a blob write can
   fail. The 12-byte `UsedPageNode` that records a chunk fails after the chunk
   is written: that chunk stays, uncleaned and named by no index, in the
@@ -501,15 +565,14 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   both halves takes both), and only when the largest free block holds 2 KB
   per target plus the 4 KB headroom (8 KB for both halves, 6 KB for one), so
   a transient that starts can finish allocating. Under that, the lamp's own
-  Test plays nothing here and logs `[expr] transient drop` (every build, at
-  most every 5 s), but its cascade still goes out to the crowd
-  (`cascadesFrom`), built from the invocation with no Expression made for
-  it; a peer's invocation never cascades, and a mirrored copy sends at most
-  one MSG_EVENT of its own. That type then waits a second
-  (`LocalCooldown`) before the lamp tries it again, so a Test tapped over
-  and over while the lamp is short neither retries nor resends each tap. The vector is reserved at
-  `ExpressionManager::begin`, and the compositor reserves 16 behavior slots
-  past its boot list for transients and live upserts.
+  Test plays nothing here, logs `[expr] transient drop` (every build, at
+  most every 5 s) and sends nothing to the crowd, since a Test announces and
+  cascades only after it plays; a peer's invocation never cascades, and a
+  mirrored copy sends at most one MSG_EVENT of its own. Each Test tap is
+  admitted afresh, so one tapped again once memory frees plays. The
+  vector is reserved at `ExpressionManager::begin`, and the compositor
+  reserves 16 behavior slots past its boot list for transients and live
+  upserts.
 - **Mirror rolls.** `SocialEchoObserver` holds its roll cooldown in a fixed
   16-slot `RollCooldownTable` (about 200 bytes) and 4 pending copies, so a
   crowd of any size takes no heap to decide a copy; a full table rolls
@@ -585,32 +648,32 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   fixed .bss, 16 bytes each with the `millis()` stamp that ages a tuple out
   after 20 s: about 7.3 KB off free heap. Ring capacity is the knob; a slot
   added to one ring costs 16 bytes.
-- **Cascade fan-out.** A locally fired cascade (a cascading expression, or the
-  app's Test) reaches every mesh peer, closest first. `CascadeScheduler`
-  (`expressions/cascade_scheduler.hpp`) holds up to two fan-outs (peers and one
-  serialized invocation each, about 2.2 KB of .bss: 50 MACs and a 768-byte
-  payload per fan-out, above the 536-byte worst case). The loop sends up to 6
-  frames per pass (`kBatchSize`, held to the 6 TX credits), only while credits
-  remain (`TxCredit::available`, which applies the 2 s reset itself, so
-  credits lost on a quiet link never hold the drain; a frame with none
-  waits for a later pass), and passes are 100 ms
-  apart, past a command's two resend copies
-  40 ms apart, so a batch never overwrites the previous batch's resends in the
-  10-slot ring. Each frame's `delayMs` is rewritten in place to keep the
-  peer's intended fire time, (i + 1) x stagger capped at 1 s from the original
-  fire, less the time the drain has taken, never below zero. Fifty peers take
-  9 passes, so the last leaves at least 800 ms after the fire, and with a
-  short stagger the far end of a 50-lamp crowd fires up to about a second
-  late. A second cascade waits behind the one draining, its first batch a
-  full gap after the last batch of the one before, so it never overwrites
-  that batch's resends; a third replaces the one waiting. Fired together, the second starts its 9 passes after the
-  first's, so its far end leaves about 1.7 s after its fire and fires that
-  late. Those are floors on an idle link: relay traffic and mesh resends
-  (each command's two copies 40 ms apart) take the same 6 credits, so a pass
-  under contention sends fewer frames and the far end is later still, and a
-  resend refused for want of a credit is dropped and counted in `txrefused`.
-  An OTA start stops the drain, and a frame whose delay rewrite would
-  overflow is dropped and logged.
+- **Cascade fan-out.** A locally fired cascade (a cascading expression firing
+  on its own or tested from the app) reaches every mesh peer, closest first.
+  `CascadeScheduler` (`expressions/cascade_scheduler.hpp`) holds up to two
+  fan-outs (peers and one serialized invocation each, about 2.2 KB of .bss: 50
+  MACs and a 768-byte payload per fan-out, above the 536-byte worst case). The
+  loop sends up to 6 frames per pass (`kBatchSize`, held to the 6 TX credits),
+  only while credits remain (`TxCredit::available`, which applies the 2 s
+  reset itself, so credits lost on a quiet link never hold the drain; a frame
+  with none waits for a later pass), and passes are 100 ms apart, past a
+  command's two resend copies 40 ms apart, so a batch never overwrites the
+  previous batch's resends in the 10-slot ring. Each frame's `delayMs` is
+  rewritten in place to keep the peer's intended fire time, (i + 1) x stagger
+  capped at 1 s from the original fire, less the time the drain has taken,
+  never below zero. Fifty peers take 9 passes, so the last leaves at least 800
+  ms after the fire, and with a short stagger the far end of a 50-lamp crowd
+  fires up to about a second late. A second cascade waits behind the one
+  draining, its first batch a full gap after the last batch of the one before,
+  so it never overwrites that batch's resends; a third replaces the one
+  waiting. Fired together, the second starts its 9 passes after the first's,
+  so its far end leaves about 1.7 s after its fire and fires that late. Those
+  are floors on an idle link: relay traffic and mesh resends (each command's
+  two copies 40 ms apart) take the same 6 credits, so a pass under contention
+  sends fewer frames and the far end is later still, and a resend refused for
+  want of a credit is dropped and counted in `txrefused`. An OTA start stops
+  the drain, and a frame whose delay rewrite would overflow is dropped and
+  logged.
 - **Reads nobody asked for.** The section caches warm, and the state notify
   builds its payload, only while a BLE client holds the link; with no client
   the caches are freed every tick and rebuild on the next read, and the tick
@@ -618,8 +681,28 @@ scale with the number of peers or the mesh's message rate, so each is bounded:
   expressions section (about 4 KB at the worst case) is measured, then written
   by `JsonWriter` into one exactly-sized block; the smaller sections build
   their document only with the headroom free. A heap check cannot reserve
-  the block, so the cache assign and the copy-out also catch `bad_alloc`
-  (best effort, with no exception emergency pool).
+  the block, so the section rebuilds, the cache assign and the copy-out also
+  catch `bad_alloc` (best effort, with no exception emergency pool). A section
+  that failed to build or copy out (`SectionCache::copyOut` false) reads as `!`
+  over BLE, served from flash, never as a stale or empty section, and a failed
+  build is retried on the next read.
+- **The task boundary.** A `std::bad_alloc` that no closer catch takes ends at
+  `catchBadAlloc` (`util/alloc_boundary.hpp`), which wraps each loop
+  iteration's `Lamp::tick`, every GATT characteristic callback
+  (`AllocGuarded`) and the BLE scan callback: it logs
+  `[heap] bad_alloc caught in <stage>` at most every 5 s and drops the rest of
+  that tick, write or read (a read answers empty), where an uncaught one
+  aborts the lamp. The boundary cannot give back a lock the thrower held, so
+  a path that allocates under a lock (the wisp status and config cache
+  writes and the wispconfig copy) catches inside the lock, and a hot path
+  whose loss should not cost the rest of the tick (the wisp-status merge on
+  every entry, the state notify payload, the colour-info drain) catches where
+  it allocates. A path that sets shared state before an allocation restores
+  it on the unwind: a transient's trigger takes its behavior back out of the
+  compositor, and the cascade suppression is a scoped guard. The boundary
+  reaches only firmware frames: NimBLE's own allocations on its host task
+  have none to catch in, and with no exception emergency pool a heap too
+  exhausted to hold the exception object itself still aborts.
 - **OTA sessions.** The receiver's chunk bitmap (up to 8 KB per OFFER) is
   allocated only when `heapCanSpare` allows it; otherwise the OFFER is declined
   busy and the sender retries.
@@ -678,23 +761,125 @@ Feed `pc` and `bt` to `xtensa-esp32-elf-addr2line -e firmware.elf` for the build
 matching `fw` (packed `major<<16 | minor<<8 | patch`).
 
 A stalled loop task records as `reset` 6 with `core` 1. The loop task is on the
-ESP-IDF task watchdog from the end of `setup()` (`util/loop_watchdog.hpp`): it
-feeds before every loop iteration, and between the steps of its longest blocking
-work (each 64 KB block of the OTA upfront erase, the post-stream verify, the BLE
-teardown for the web config). The timeout is the task watchdog's 5 s, widened to
-30 s while a firmware or filesystem image is being received. The watchdog
-interrupts whatever is running on core 1: for a loop that spins, `pc` and `bt`
-point at the stall; for a loop blocked on a lock they point at the task that
-ran instead (often the idle task), and only the serial log names `loopTask`.
+ESP-IDF task watchdog from the start of `setup()`, right after `Serial.begin`
+(`util/loop_watchdog.hpp`, the one owner of the watchdog's configuration). In
+setup the timeout is 30 s per stage: each stage the boot history records
+(`core/setup_stage.hpp`) feeds it, so a hang anywhere in setup resets the lamp
+within 30 s of the last stage instead of leaving it dark. From the end of setup
+it feeds before every loop iteration and between the steps of its longest
+blocking work (each 64 KB block of the OTA upfront erase, the post-stream
+verify, the BLE teardown for the web config), at the task watchdog's 5 s,
+widened to 30 s while a firmware or filesystem image is being received. The
+timeout is global, so in setup the core 0 idle task is checked at 30 s too. The
+watchdog interrupts whatever is running on core 1: for a loop that spins, `pc`
+and `bt` point at the stall; for a loop blocked on a lock they point at the
+task that ran instead (often the idle task), and only the serial log names
+`loopTask`. A malformed compiled-in `HwConfig` halts with a blink and feeds the
+watchdog inside the halt, since a reset could only fail the same way again.
+
+The task watchdog was chosen over a setup-only watchdog and the RTC watchdog.
+It is the watchdog the loop already used, its panic goes through the crash
+record's handler (reset 6, `core`, `pc`, `bt`), and the boot-loop streak
+already counts it. The interrupt watchdog (1 s, both cores) covers a core with
+interrupts off, which the task watchdog cannot see. The RTC watchdog would add
+a bare `wdt` reset with no backtrace, timed on the inaccurate RC slow clock,
+and would catch nothing the two miss once the app has started; the
+bootloader's RTC watchdog is off before `setup()` (no
+`CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE`), so the ESP-IDF and Arduino
+start-up before `setup()` is not watched.
+
 After 3 task-watchdog resets in a row, each from a boot whose loop never
-started an iteration 60 s into uptime, the next boot leaves the loop unwatched
-and prints `[loopwd] 3 watchdog resets in a row` on every build, so a loop that
-stalls on every boot freezes and stops resetting. The streak lives in RTC
-memory, and any other reset (a power cycle, an update, a web save's reboot)
-starts the watch again. A stall within 30 s of a firmware update's first boot
-makes the bootloader roll back, and the record's `fw` is then the version that
-booted after it. `setup()` runs unwatched: a hang there leaves the lamp dark
-with no record until a power cycle.
+started an iteration 32 minutes into uptime (`kSettledUptimeMs`), the next
+boot backs off: it prints `[loopwd] 3 watchdog resets in a row; timeout 300 s
+until the loop runs 60 s` on every build and holds the task watchdog at 300 s,
+through setup and the loop, until the loop's first iteration at the end of its
+backoff window puts the normal timeouts back (`[loopwd] loop ran 60 s; timeout
+back to 5 s`). The window is 60 s (`kFirstBackoffWindowMs`) and doubles on
+each further reset of a boot whose loop ran to its window, up to 16 minutes
+(`backoffWindowMs`, `kBackoffDoublings`); a reset of a boot whose loop never
+got there keeps it. So a boot that hangs every time resets every 5 minutes
+or so and is never left dark until a power cycle, and a boot that only stalls
+early, for longer than 5 s but less than 300 s, gets through and is watched
+normally again in the same boot. A stall that recurs later in every boot,
+the core 0 idle task starved two minutes in say, resets the lamp four or five
+times at its own cadence, then less often as the window grows past it. A
+stall shorter than 5 minutes then resets the lamp at most about every 16
+minutes. The timeout is global, so inside the
+window a stall of the core 0 idle task is caught at 300 s too. A subscribe that
+fails (`[loopwd] subscribe FAILED; retrying`) is retried at most once a second
+from every loop-task feed, setup stages included. The streak lives in RTC
+memory; any other reset (a power cycle, an update, a web save's reboot) and any
+reset of a boot that ran 32 minutes start it again. A loop that stalls for more
+than 5 s again and again, through the whole boot, cycles: three quick resets,
+then backoff boots that each get the normal timeouts back at the end of their
+window and reset at their next stall, the window growing each time until it
+reaches 16 minutes and holding there.
+Each boot writes about 17 NVS entries (the boot history twice, the crash
+record once). An estimate of the worst case, a boot that hangs every time: a
+reset about every 5 minutes, some 280 boots and 4,800 entries a day, so each
+of the five NVS pages is erased about 8 times a day and the flash's 100,000
+erase cycles last decades of it nonstop.
+
+## Rollback after an update
+
+Rollback is on. An image the bootloader boots for the first time after an
+update (`ESP_OTA_IMG_PENDING_VERIFY`) stays unverified until the lamp marks it
+valid, and any reset before that boots the previous image instead. Arduino's
+`initArduino()` would mark it valid before `setup()` runs; the lamp overrides
+the core's weak C hook with `extern "C" bool verifyRollbackLater() { return
+true; }` in `components/firmware/ota_mark_valid.cpp`, so its own check
+(`MarkValidCheck` in `components/firmware/ota_mark_valid.hpp`) decides.
+Without `extern "C"` the override is an unrelated C++ symbol and rollback
+silently stays off; the symbol in the built ELF is the check.
+
+The 30 s window: the check arms at the end of setup, and 30 s later, once BLE
+has run at some point this boot, marks the image valid (`[ota] new partition
+marked valid`). A phone joining the lamp's Wi-Fi takes BLE down for the web
+app; BLE had run, so the image is still marked valid, though a phone that
+leaves inside the window reboots the lamp (to bring BLE back) and that reboot
+rolls back like any other. A failed mark is asked again every 5 s. Without BLE
+it asks again every 5 s, and an image whose BLE has not run 120 s after the
+window is rolled back on purpose (`[ota] BLE never started; rolling back`),
+since the app could never reach it. An unverified image whose setup halts on
+a malformed `HwConfig` rolls back the same way (`[ota] unverified image halted
+in setup; rolling back`). Both go through `rollBackToPreviousImage`, which
+restarts even when IDF refuses the rollback (on a lamp whose otadata was
+erased the previous slot reads as invalid, so IDF reports no app to return
+to); the bootloader then sets the unverified image aside and boots `ota_0`. A
+hang in that time resets through the watchdog (within 30 s in setup, 5 s in
+the loop) and the bootloader rolls back. The watchdog's
+boot-loop backoff cannot hold an unverified image: the first boot of an
+update follows the receiver's restart, which ends any streak, and the first
+reset of an unverified image is already the rollback. So does every other
+reset in that window: a brownout, a power cycle, a USB plug-in, or a restart
+the lamp asks for itself (a settings save that reboots). In each case the
+lamp comes back on its previous firmware, and the mesh offers the update
+again later.
+
+Until the mark, the receiver declines every OFFER, firmware and filesystem,
+mesh and BLE (`DeclineBusy`; a mesh sender backs off that lamp for 10
+minutes, and the app reports "Another update is already in progress on this
+lamp."). The receiver's gate is `checkFwOfferPrecheck`
+(`components/network/protocol/fw_ota.hpp`, natively tested). A firmware
+image is written raw into the other OTA slot, which holds the image a rollback returns to. A
+filesystem image waits too, so the web UI is never replaced for a firmware
+that may not stay. The lamp offers neither image to its peers until the mark
+either, so an update spreads only from lamps it has run on: `tickOtaOffers`,
+the one place both firmware and filesystem offers start, holds its scan while
+`offerBusy` (`components/firmware/ota_offer.hpp`) reads the image unverified.
+
+A lamp whose bootloader predates rollback never boots an image as
+`PENDING_VERIFY` (it stays `NEW`), so the check never arms and it keeps every
+update as before. The bootloader built from this repo has rollback:
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is on in the Arduino core's prebuilt
+sdkconfig, which `custom_sdkconfig` in `platformio.ini` does not override. OTA
+never replaces a bootloader.
+
+The boot history marks the rolled-back boot (see below): `end <reset>
+rolledback` on the boot that ran the update, the next line on the previous
+firmware. The marker needs the rolled-back-to firmware to read this history
+layout, so a rollback to a firmware older than the one that added it shows
+only the history starting over.
 
 ## Reading the boot history
 
@@ -705,9 +890,9 @@ lamp:tap` resets it through the auto-reset circuit, so the history prints at
 once. One line per boot, oldest first, `-1` the boot before this one:
 
 ```
-[boots] -3 fw1.3.2 up 5h12m free 21480 big 1300 end panic
-[boots] -2 fw1.3.2 up >1h00m free 30112 big 18200 end power
-[boots] -1 fw1.3.2 up 42s free 40960 big 38000 end taskwdt
+[boots] -3 fw1.3.7 up 5h12m free 21480 big 1300 end panic refused 4 conn 2 connbig 1300
+[boots] -2 fw1.3.7 up >1h00m free 30112 big 18200 end power refused 0 conn 1 connbig 18200
+[boots] -1 fw1.3.7 up >0s free - big - end taskwdt setup mesh refused 0 conn 0 connbig -
 ```
 
 `up` is the uptime the boot reached, `free` its lowest free heap and `big` its
@@ -718,17 +903,53 @@ clean `esp_restart`: OTA, web reboot), `panic`, `intwdt`, `taskwdt`, `wdt`,
 `lamp:tap` cause reports as a power-on on the ESP32, so the boot they
 interrupt reads `end power`.
 
-The figures come from the crash record's RTC snapshot, sampled each second
-from the first loop iteration on: when it survives the reset they are those
-of the last sample, and after a panic or watchdog abort in a boot its loop
-had sampled, `up` is the uptime at the fault. When it does not (a power cut,
-often a brownout), the boot keeps the figures from the last milestone it
-reached, 1 min, 1 h or 1 day, and `up` reads `>` that milestone.
-`free - big -` means the boot died before any figure was taken: in `setup()`,
-in its first loop iteration, or in its first minute after a power cut. Past
-49.7 days the snapshot's uptime saturates and reads `>49d17h`. A boot writes
-the history once at start and once per milestone, so at most four NVS writes
-per boot.
+`setup <stage>` appears only on a boot that never finished setup, and names
+the last setup step it finished, in order: `boot` (the history opened),
+`variant`, `config`, `wifi`, `ble`, `webapp`, `leds` (the strips built and
+blanked), `behaviors`, `mesh`, `ota`, then `loop` (setup done, not printed). So
+`setup mesh` means it hung or crashed bringing up the OTA receiver and
+distributors. A `>` before the stage marks a lower bound: the RTC state did not
+survive the reset, so only what NVS holds is known, `>boot` while setup ran.
+
+`rolledback` after the reset marks a boot that ran an update the lamp never
+marked valid, followed by a boot of other firmware: the bootloader rolled it
+back at that reset (see "Rollback after an update"). The flag is set when the
+boot's entry is first written and cleared when the image is marked valid, so
+it is lost when that first write never lands. A USB reflash of other firmware
+during an update's first 30 s reads the same.
+
+`refused` counts this lamp's own one-shot expressions refused because the heap
+could not spare them (`[expr] transient drop ... (local`): the app's Tests, its
+greetings, a tired yawn, a copycat replay, the serial `yawn` command. A refusal
+for full slots does not count. `conn` counts the BLE client connects, and `connbig`
+the smallest largest free block sampled each second while a client was
+connected (`-` when none was). They saturate at 65535 and read `-` when they
+were never taken. Boots an older firmware recorded print without the stage and
+counters.
+
+The figures come from RTC memory (the crash record's snapshot, sampled each
+second from the first loop iteration on, and the history's own stage and
+counters): when it survives the reset they are those of the last sample, and
+after a panic or watchdog abort in a boot its loop had sampled, `up` is the
+uptime at the fault. When it does not (a power cut, often a brownout), the boot
+keeps the figures from the last milestone it reached, 1 min, 1 h or 1 day, and
+`up` reads `>` that milestone. `free - big -` means the boot died before any
+figure was taken: in `setup()`, in its first loop iteration, or in its first
+minute after a power cut. Past 49.7 days the snapshot's uptime saturates and
+reads `>49d17h`. A boot writes the history at start, at the end of setup, at
+each milestone and, on an update's first boot, when the image is marked
+valid, so at most six NVS writes per boot. When none of a boot's
+writes lands, the next boot rebuilds that boot's entry from the RTC state
+(firmware, the reset that started it, stage, counters) when it survived, so
+the boot before it keeps its own figures and end.
+
+A hang before the history opens (in `Serial.begin` or `initFlash`, the first
+steps of `setup()`) still resets through the watchdog, but leaves no entry of
+its own: the line before it reads `end taskwdt`, and the crash record folds the
+earlier boot's snapshot with that reset. A firmware that predates this layout
+(history version 2) cannot read it and starts its own, so
+reflashing or rolling back to one loses the lines that recorded the boot it
+replaced.
 
 ## Why it recurs
 

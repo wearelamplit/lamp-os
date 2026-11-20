@@ -47,7 +47,8 @@ void ArtnetEmitter::emitNow() {
   }
 
   uint8_t buf[kArtnetFrameSize];
-  size_t n = buildArtnetDmxFrame(*palette_, seq_++, buf, sizeof(buf));
+  size_t n = buildArtnetDmxFrame(palette_->colors(), seq_++, buf, sizeof(buf),
+                                 style_);
   if (n != kArtnetFrameSize) {
     Serial.println("[artnet] frame build failed");
     return;

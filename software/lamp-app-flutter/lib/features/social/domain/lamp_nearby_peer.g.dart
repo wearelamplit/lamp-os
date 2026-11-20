@@ -10,7 +10,8 @@ _LampNearbyPeer _$LampNearbyPeerFromJson(Map<String, dynamic> json) =>
     _LampNearbyPeer(
       name: json['name'] as String,
       lampId: json['lampId'] as String? ?? '',
-      rssi: (json['rssi'] as num?)?.toInt() ?? -127,
+      rssi: (json['rssi'] as num?)?.toInt() ?? kNoRssi,
+      mrssi: (json['mrssi'] as num?)?.toInt(),
       baseRgbw: json['base'] == null
           ? const <int>[0, 0, 0, 0]
           : _rgbwFromJson(json['base']),
@@ -32,6 +33,7 @@ Map<String, dynamic> _$LampNearbyPeerToJson(_LampNearbyPeer instance) =>
       'name': instance.name,
       'lampId': instance.lampId,
       'rssi': instance.rssi,
+      'mrssi': instance.mrssi,
       'base': instance.baseRgbw,
       'shade': instance.shadeRgbw,
       'viaBle': instance.viaBle,

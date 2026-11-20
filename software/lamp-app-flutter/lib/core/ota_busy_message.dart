@@ -10,3 +10,8 @@ String otaBusyMessage({required String lampName, String? targetName}) {
       : 'a lamp';
   return '$lampName is busy teaching $pupil new tricks 🎓';
 }
+
+/// Copy for a lamp that hung up on the phone for a mesh firmware update,
+/// whether it is sending one or taking one.
+String otaSwapMessage({required String lampName}) =>
+    '$lampName is swapping new tricks with a friend 🎓';

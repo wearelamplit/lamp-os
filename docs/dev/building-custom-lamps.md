@@ -70,7 +70,11 @@ lone `Base`). `pixelCount=0` means "resolve from `Config` at runtime" — the co
 roles do this; a fixed-geometry strip like snafu's dots states its own count.
 Exactly one strip per role may set `broadcast=1`: that's the representative
 segment whose color the lamp advertises to peers (snafu's `Stem`).
-`reversed=true` when pixel 0 is the far end of the winding.
+`reversed=true` when pixel 0 is the far end of the winding. The flag on each
+role's first strip also decides how a store the C firmware wrote migrates: that
+firmware drove pixel i from colour index i, so its stops and knockout pixels
+are mirrored onto a reversed strip ([embedded-heap.md](embedded-heap.md), "A
+store the C firmware wrote").
 `pin` is the default data GPIO. A lamp can override it per strip from the
 app's LED setup screen in advanced mode: the role's config segments pair with
 its strips in declaration order, and a segment's saved `pin` (0 = the
@@ -239,10 +243,10 @@ rotated, even on a surface whose saved scene rotates. `setGradient` builds an
 open gradient and keeps the first 8 stops.
 
 **Brightness.** Two axes, both composing (never a raw strip write — a raw write
-would fight crowd-dim, the OTA pulse, and the wisp override):
+would fight crowd-dim and the wisp override):
 
 - `setBrightness(uint8_t level)` — master brightness, through the user-brightness
-  micro-fade. Stacks with crowd-dim and the OTA pulse.
+  micro-fade. Stacks with crowd-dim.
 - `setSurfaceBrightness(Surface, uint8_t level)` — a 0–100 percent per-surface
   trim riding *under* master. Scales one surface down without touching the
   other; `100` clears the trim.
@@ -326,7 +330,11 @@ them in the app's editable catalog for this variant.
 that editable catalog is an **internal** descriptor. Set `internal = true` on
 the `ExpressionDescriptor` (`expressions/expression_schema.hpp`); it stays
 registry-backed so `triggerInvocation` can fire it by id, but
-`ExpressionRegistry::serializeCatalog` skips it, so it never reaches the app.
+`ExpressionRegistry::serializeCatalog` skips it, so it never reaches the app or
+Web Config, an expression upsert of it is refused, and a saved entry of it is
+dropped at boot ([`expressions.md`](expressions.md#exprcat-wire-format)). `yawn`
+is internal too: the lamp plays it from its own social rules, a peer's yawn and
+the serial command.
 `bloom` (`expressions/bloom/bloom_expression.hpp`) is the shipped example: a
 one-shot white-ward luminance swell carrying `.internal = true`, fired
 programmatically as a transient (staff fires it from a friend-arrival
@@ -416,14 +424,25 @@ apart) to the next lamp not shown by the other two, so over time every nearby
 lamp gets shown, the trio stays distinct, and no two lions switch on the same
 tick (0 → all idle / mirror `Main`; 1 → all three show it; 2 → two lions show
 the pair, the third holds idle; ≥3 → the walk). It pulls stops via
-`MSG_COLOR_QUERY`/`onColorInfo` and renders with the pure `renderLions()`
-(`lions_scene.cpp`), crossfading a switched zone over `kCrossfadeFrames` with
-`util/fade`. `LionsGreetingBehavior::startGreeting()` snaps all three lions to
+`MSG_COLOR_QUERY`/`onColorInfo` and renders each zone with the pure
+`renderZone()` (`lions_scene.cpp`), crossfading a switched zone over
+`kCrossfadeFrames` with `util/fade`. A settled scene allocates nothing per
+frame. The stop cache holds one entry per lion and never evicts a peer a lion
+shows. A query holds one of three shared slots until its peer answers or
+`kColorQueryRetryMs` passes, so a peer that never answers is asked once per
+window and at most three queries are outstanding at once. An answer whose stops
+the heap refuses to copy leaves its slot held. A lion sends only while
+`MeshLink::colorQueryResendFree()`, so an answer that frees a slot inside the
+resend window never costs an earlier query its resends; the held query goes
+out as soon as a resend slot frees.
+`LionsGreetingBehavior::startGreeting()` snaps all three lions to
 the newcomer's `peer.baseColor`, breathes `kPulses` times via the pure
 `pulseEnvelope()` (`lions_greeting.hpp`), eases into the ambient pixels
 underneath, and fires the shared `GlitchyExpression` on the shade
 (`triggerInvocation(..., broadcast=false)` — already in the base catalog, no
-internal descriptor needed). `LionsDirector` / `renderLions` / `pulseEnvelope`
+internal descriptor needed). A greeting plays through before the next arrival
+is greeted: arrivals wait unacked while one plays.
+`LionsDirector` / `renderZone` / `pulseEnvelope`
 are pure and frame-driven, each with its own native test.
 
 One item wants a hardware pass: `maxBrightness=230` / `supplyBudgetMa=1400`

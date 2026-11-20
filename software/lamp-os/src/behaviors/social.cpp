@@ -188,6 +188,8 @@ void SocialBehavior::control() {
     maybeColourHint_(up);
     greetedHasMac_ = false;
     appGreeting_ = false;
+    std::vector<Color>().swap(gradientCache_);
+    std::vector<Color>().swap(greetedBaseStops_);
     if (onGreetingChange_) onGreetingChange_();
   }
   greetingWasActive_ = greetingNowActive;
@@ -299,6 +301,8 @@ void SocialBehavior::cancelGreeting() {
   greetingWasActive_ = false;
   greetedHasMac_ = false;
   appGreeting_ = false;
+  std::vector<Color>().swap(gradientCache_);
+  std::vector<Color>().swap(greetedBaseStops_);
   if (onGreetingChange_) onGreetingChange_();
 }
 
@@ -324,13 +328,13 @@ void SocialBehavior::triggerGreeting(const PeerView& peer) {
 }
 
 void SocialBehavior::onColorInfo(const uint8_t srcMac[6],
-                                 const std::vector<Color>& baseStops,
-                                 const std::vector<Color>& /*shadeStops*/) {
+                                 std::span<const Color> baseStops,
+                                 std::span<const Color> /*shadeStops*/) {
   if (animationState == STOPPED) return;
   if (context_ && context_->ignoresPeers()) return;
   if (!greetedHasMac_ || std::memcmp(srcMac, greetedMac_, 6) != 0) return;
   if (baseStops.empty()) return;
-  greetedBaseStops_ = baseStops;
+  greetedBaseStops_.assign(baseStops.begin(), baseStops.end());
 }
 
 bool SocialBehavior::tracking_() const {

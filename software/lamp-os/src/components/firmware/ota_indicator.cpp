@@ -46,7 +46,9 @@ constexpr uint32_t kBaseSettleDurationMs = 600;
 
 // Per-surface settle state. Shade and base settle independently (silent
 // mode drives both), so each needs its own entry timestamp + start frame
-// rather than sharing one set of function-local statics.
+// rather than sharing one set of function-local statics. The start frame is
+// freed once the settle completes or quiet mode ends; past that a fade lands
+// on its target.
 struct SettleState {
   uint32_t entryMs = 0;
   std::vector<Color> start;
@@ -75,6 +77,7 @@ void settleSurface(FrameBuffer* fb, uint32_t nowMs, bool quietEntered,
     const Color& start = i < state.start.size() ? state.start[i] : target;
     fb->buffer[i] = fade(start, target, kBaseSettleDurationMs, settleStep);
   }
+  if (settleStep == kBaseSettleDurationMs) std::vector<Color>().swap(state.start);
 }
 
 SettleState s_baseSettle;
@@ -97,6 +100,7 @@ void blendShadeToFrozen(FrameBuffer* fb, uint32_t nowMs) {
     fb->buffer[i] =
         fade(s_shadeSettle.start[i], fb->buffer[i], kBaseSettleDurationMs, settleStep);
   }
+  if (settleStep == kBaseSettleDurationMs) std::vector<Color>().swap(s_shadeSettle.start);
 }
 
 }  // namespace
@@ -290,6 +294,11 @@ void paintSilent(FrameBuffer* shadeFb, FrameBuffer* baseFb, uint32_t nowMs,
                  bool quietEntered) {
   settleSurface(shadeFb, nowMs, quietEntered, s_shadeSettle);
   settleSurface(baseFb, nowMs, quietEntered, s_baseSettle);
+}
+
+void quietExited() {
+  std::vector<Color>().swap(s_shadeSettle.start);
+  std::vector<Color>().swap(s_baseSettle.start);
 }
 
 }  // namespace ota_indicator

@@ -188,7 +188,8 @@ void PaintDistributor::assignDriftColor(size_t idx, uint32_t nowMs) {
   const uint8_t* mac = driftMacs_[idx];
   const uint32_t fadeMs = storeTupleDrift(
       *roster_, mac,
-      sampleTupleAtPositions(palette_->colors(), esp_random(), esp_random()),
+      sampleTupleAtPositions(palette_->colors(), esp_random(), esp_random(),
+                             style_),
       nowMs, driftIntervalMs_, driftFadePct_, esp_random());
 #ifdef LAMP_DEBUG
   Serial.printf("[drift] %02X:%02X:%02X:%02X:%02X:%02X fade=%lums\n", mac[0],
@@ -201,7 +202,8 @@ void PaintDistributor::assignPaintColor(const uint8_t mac[6]) {
   // paintMode can flip on before the source's first palette lands; an empty
   // palette would paint every claimed lamp black.
   if (palette_->colors().empty()) return;
-  storeTuplePaint(*roster_, mac, sampleTupleForMac(*palette_, mac, shuffleSeed_));
+  storeTuplePaint(*roster_, mac, sampleTupleForMac(palette_->colors(), mac,
+                                                   shuffleSeed_, style_));
 }
 
 }  // namespace wisp

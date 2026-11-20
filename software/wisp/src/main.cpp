@@ -83,7 +83,7 @@ String buildInstanceId() {
 wisp::SerialConsole serialConsole(
     paintDistributor, wispConfig, stageBeacon,
     wifi, statusEmitter, inventory,
-    [](wisp::WispSourceMode m) { controller.applySourceModeTransition(m); });
+    [](wisp::DispatchResult r) { controller.applyOpResult(r); });
 
 wisp::OscListener oscListener(controller, wispConfig);
 
@@ -135,11 +135,13 @@ void setup() {
   wifi.startSoftAp(ssid.c_str(), kStageApPass);
   stageBeacon.advertiseCreds(ssid, kStageApPass);
   artnetEmitter.begin(&currentPalette, &wifi);
+  artnetEmitter.setPaletteStyle(wispConfig.paletteStyle());
   wispOpDispatcher.setWifiSinks(&wifi, &stageBeacon);
   wispOpDispatcher.setNonces(&wispOpNonces);
 
   paintDistributor.begin(&inventory, &mesh, &currentPalette, &wispRoster);
   paintDistributor.setShuffleSeed(wispConfig.shuffleSeed());
+  paintDistributor.setPaletteStyle(wispConfig.paletteStyle());
   paintDistributor.setDrift(wispConfig.driftIntervalMs(),
                             wispConfig.driftFadePct());
   paintDistributor.setBrightness(wispConfig.brightness());
@@ -157,8 +159,9 @@ void setup() {
   controller.applySourceModeTransition(wispConfig.sourceMode());
 
   Serial.println("[wisp] paint distributor + status beacon online");
-  Serial.println("[wisp] cmds: paint:on/off  stage:on/off");
+  Serial.println("[wisp] cmds: paint:on/off  paint:swatches on|off  stage:on/off");
   Serial.println("[wisp] cmds: src:off/manual/osc  osc:role <primary|secondary|tertiary|fill>");
+  Serial.println("[wisp] cmds: osc:mode <straylight|maestro|custom>  osc:slot <1-10>  osc:addr </path>");
   Serial.println("[wisp] cmds: wifi:set <ssid> <pass>  wifi:show  eth:show");
 }
 

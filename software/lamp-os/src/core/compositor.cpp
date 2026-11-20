@@ -123,6 +123,7 @@ void Compositor::tick() {
 #endif
     return;
   }
+  if (otaQuietPainted_) ota_indicator::quietExited();
   otaQuietPainted_ = false;
 
 #ifdef LAMP_DEBUG

@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_spacing.dart';
+import '../../../../core/widgets/app_snackbar.dart';
 import '../../../../core/widgets/section_header.dart';
+import '../../domain/wisp_config.dart';
 import '../../domain/wisp_source_mode.dart';
+import '../../domain/wisp_status.dart';
+import 'wisp_settings_pending.dart';
 
-/// Inline notice shown under the Straylight source pill while the wisp has
-/// no live palette stream. The wisp holds the lamps at Off meanwhile and
-/// resumes painting on its own when palettes arrive.
-class WaitingForStraylightNotice extends StatelessWidget {
-  const WaitingForStraylightNotice({super.key});
+/// Inline notice shown under the OSC source pill while the wisp has
+/// no live palette stream from [sender]. The wisp holds the lamps at Off
+/// meanwhile and resumes painting on its own when palettes arrive.
+class WaitingForOscNotice extends StatelessWidget {
+  const WaitingForOscNotice({super.key, required this.sender});
+
+  final String sender;
 
   @override
   Widget build(BuildContext context) {
@@ -32,13 +39,313 @@ class WaitingForStraylightNotice extends StatelessWidget {
           const SizedBox(width: AppSpace.sm),
           Expanded(
             child: Text(
-              'Waiting for Straylight.\n'
+              'Waiting for $sender.\n'
               'Lamps stay on their own colours until a palette arrives.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Picks which OSC sender the wisp listens to. [current] is
+/// [OscMode.unknown] for a sender this app cannot name: nothing is selected
+/// and a line asks for an app update. Without [customAvailable] (a wisp that
+/// predates Custom) Custom is disabled and a line asks for a wisp update.
+class OscModeSwitch extends StatelessWidget {
+  const OscModeSwitch({
+    super.key,
+    required this.current,
+    required this.customAvailable,
+    required this.onSelect,
+  });
+
+  final OscMode current;
+  final bool customAvailable;
+  final ValueChanged<OscMode> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('OSC sender'),
+        const SizedBox(height: AppSpace.sm),
+        SegmentedButton<OscMode>(
+          key: const Key('wisp-osc-mode'),
+          style: SegmentedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.card),
+            ),
+          ),
+          segments: [
+            const ButtonSegment(
+              value: OscMode.straylight,
+              label: Text('Straylight'),
+            ),
+            const ButtonSegment(value: OscMode.maestro, label: Text('Maestro')),
+            ButtonSegment(
+              value: OscMode.custom,
+              label: const Text('Custom'),
+              enabled: customAvailable,
+            ),
+          ],
+          selected: {if (current != OscMode.unknown) current},
+          emptySelectionAllowed: current == OscMode.unknown,
+          showSelectedIcon: false,
+          onSelectionChanged: (set) {
+            if (set.isEmpty) return;
+            onSelect(set.first);
+          },
+        ),
+        if (current == OscMode.unknown) ...[
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            "This wisp listens to an OSC sender this app doesn't know. "
+            'Update the app to see it.',
+            key: const Key('wisp-osc-mode-unknown'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+        if (!customAvailable) ...[
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            'Update this wisp to use Custom.',
+            key: const Key('wisp-osc-update-custom'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Sets the Custom OSC address the wisp listens to: typed, or picked from
+/// [presets] kept on the phone. [address] is the wisp's address while
+/// [active] (the wisp is in Custom), and [onSend] is only ever given an
+/// address the wisp's rule takes. [sendTo] is the wisp's send-to address,
+/// empty while it has none.
+class CustomOscAddress extends StatefulWidget {
+  const CustomOscAddress({
+    super.key,
+    required this.address,
+    required this.active,
+    required this.sendTo,
+    required this.presets,
+    required this.onSend,
+    required this.onSavePreset,
+    required this.onDeletePreset,
+  });
+
+  final String address;
+  final bool active;
+  final String sendTo;
+  final List<String> presets;
+  final ValueChanged<String> onSend;
+  final ValueChanged<String> onSavePreset;
+  final ValueChanged<String> onDeletePreset;
+
+  @override
+  State<CustomOscAddress> createState() => _CustomOscAddressState();
+}
+
+class _CustomOscAddressState extends State<CustomOscAddress> {
+  late final TextEditingController _text = TextEditingController(
+    text: widget.address,
+  );
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void didUpdateWidget(CustomOscAddress old) {
+    super.didUpdateWidget(old);
+    if (widget.address != old.address && !_focus.hasFocus) {
+      _text.text = widget.address;
+    }
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  bool _isCurrent(String a) => widget.active && a == widget.address;
+
+  void _send(String a) {
+    if (!oscCustomAddressValid(a) || _isCurrent(a)) return;
+    _focus.unfocus();
+    _text.text = a;
+    widget.onSend(a);
+  }
+
+  static String _problemText(OscAddressProblem p) => switch (p) {
+    OscAddressProblem.empty =>
+      'Custom needs an address before the wisp can switch.',
+    OscAddressProblem.noLeadingSlash => 'Start with /.',
+    OscAddressProblem.tooLong => '$kOscCustomAddressMaxLen characters at most.',
+    OscAddressProblem.badCharacter =>
+      'No spaces, accents or " \\ # * , ? [ ] { }.',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final shown = widget.address;
+    final target = widget.sendTo.isEmpty ? "the wisp's address" : widget.sendTo;
+    final canSave =
+        widget.active &&
+        oscCustomAddressValid(shown) &&
+        !widget.presets.contains(shown);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Custom address'),
+        const SizedBox(height: AppSpace.sm),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _text,
+          builder: (context, value, _) {
+            final problem = oscCustomAddressProblem(value.text);
+            final sendable = problem == null && !_isCurrent(value.text);
+            return TextField(
+              key: const Key('wisp-osc-custom-address'),
+              controller: _text,
+              focusNode: _focus,
+              maxLength: kOscCustomAddressMaxLen,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.send,
+              style: const TextStyle(fontFamily: 'monospace'),
+              onSubmitted: _send,
+              decoration: InputDecoration(
+                hintText: '/lamp/palette',
+                helperText: problem == OscAddressProblem.empty
+                    ? _problemText(problem!)
+                    : null,
+                errorText: problem == null || problem == OscAddressProblem.empty
+                    ? null
+                    : _problemText(problem),
+                helperMaxLines: 2,
+                errorMaxLines: 2,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                ),
+                suffixIcon: IconButton(
+                  key: const Key('wisp-osc-custom-send'),
+                  tooltip: 'Use this address',
+                  icon: const Icon(Icons.send),
+                  onPressed: sendable ? () => _send(value.text) : null,
+                ),
+              ),
+            );
+          },
+        ),
+        if (widget.presets.isNotEmpty || canSave) ...[
+          const SizedBox(height: AppSpace.sm),
+          Wrap(
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (final a in widget.presets)
+                InputChip(
+                  key: Key('wisp-osc-preset-$a'),
+                  label: Text(
+                    a,
+                    style: const TextStyle(fontFamily: 'monospace'),
+                  ),
+                  selected: _isCurrent(a),
+                  showCheckmark: false,
+                  onPressed: () => _send(a),
+                  onDeleted: () => widget.onDeletePreset(a),
+                  deleteButtonTooltipMessage: 'Delete preset',
+                ),
+              if (canSave)
+                TextButton.icon(
+                  key: const Key('wisp-osc-save-preset'),
+                  onPressed: () => widget.onSavePreset(shown),
+                  icon: const Icon(Icons.bookmark_add_outlined),
+                  label: const Text('Save as preset'),
+                ),
+            ],
+          ),
+        ],
+        if (widget.active && shown.isNotEmpty) ...[
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            'Send palettes on $shown to $target, port ${WispConfig.kOscPort}. '
+            'Colours as RGB 0 to 1 in threes, 0xRRGGBB whole numbers, '
+            'or a Limbic layout.',
+            key: const Key('wisp-osc-custom-help'),
+            style: textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Picks the Maestro palette slot the wisp reads, and says what to set on
+/// the Maestro to reach it at [address] (the wisp's send-to address, empty
+/// while it has none).
+class MaestroSlotPicker extends StatelessWidget {
+  const MaestroSlotPicker({
+    super.key,
+    required this.current,
+    required this.address,
+    required this.onSelect,
+  });
+
+  final int? current;
+  final String address;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final slot = current;
+    final target = address.isEmpty ? "the wisp's address" : address;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Maestro palette slot'),
+        const SizedBox(height: AppSpace.sm),
+        InputDecorator(
+          decoration: InputDecoration(
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpace.md,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadius.card),
+            ),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              key: const Key('wisp-maestro-slot'),
+              isExpanded: true,
+              value: slot,
+              items: [
+                for (var n = kMaestroSlotMin; n <= kMaestroSlotMax; n++)
+                  DropdownMenuItem(value: n, child: Text('Slot $n')),
+              ],
+              onChanged: (n) {
+                if (n != null && n != slot) onSelect(n);
+              },
+            ),
+          ),
+        ),
+        if (slot != null) ...[
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            'On the Maestro, send palette slot $slot to $target, '
+            'port ${WispConfig.kOscPort}.',
+            key: const Key('wisp-maestro-help'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ],
     );
   }
 }
@@ -93,6 +400,131 @@ class OscRolePicker extends StatelessWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// Where an OSC sender should send, from the wisp's own reports, with a copy
+/// button. Calls [onLinkDisagrees] for each new status whose link state
+/// contradicts the held address, so the caller can ask for the config again.
+class OscSendTo extends StatefulWidget {
+  const OscSendTo({
+    super.key,
+    required this.lampId,
+    required this.status,
+    required this.onLinkDisagrees,
+  });
+
+  final String lampId;
+  final WispStatus status;
+  final VoidCallback onLinkDisagrees;
+
+  @override
+  State<OscSendTo> createState() => _OscSendToState();
+}
+
+class _OscSendToState extends State<OscSendTo> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.status.ipDisagreesWithLink) widget.onLinkDisagrees();
+  }
+
+  @override
+  void didUpdateWidget(OscSendTo old) {
+    super.didUpdateWidget(old);
+    if (widget.status != old.status && widget.status.ipDisagreesWithLink) {
+      widget.onLinkDisagrees();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = widget.status;
+    final address = status.oscSendTo;
+    final Widget body;
+    if (address.isNotEmpty) {
+      body = _AddressBox(address: address);
+    } else if (!status.configKnown) {
+      body = WispSettingsPending(lampId: widget.lampId);
+    } else if (status.ip != null) {
+      body = Text(
+        'Connect to a network to receive OSC.',
+        key: const Key('wisp-osc-no-address'),
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    } else {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Listening on'),
+        const SizedBox(height: AppSpace.sm),
+        body,
+      ],
+    );
+  }
+}
+
+class _AddressBox extends StatelessWidget {
+  const _AddressBox({required this.address});
+
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Semantics(
+      button: true,
+      label: 'Copy address $address',
+      excludeSemantics: true,
+      child: InkWell(
+        key: const Key('wisp-osc-send-to'),
+        onTap: () async {
+          await Clipboard.setData(ClipboardData(text: address));
+          if (context.mounted) AppSnackbar.info(context, 'Copied $address');
+        },
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpace.md,
+            vertical: AppSpace.sm,
+          ),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(AppRadius.card),
+            border: Border.all(
+              color: colorScheme.primary.withValues(alpha: 0.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              Text(
+                address,
+                style: TextStyle(
+                  color: colorScheme.primary,
+                  fontSize: 15,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Text(
+                  'port ${WispConfig.kOscPort}',
+                  style: textTheme.bodySmall,
+                ),
+              ),
+              Icon(
+                Icons.copy,
+                color: colorScheme.onSurfaceVariant,
+                size: 16, // deliberate dimension, not spacing
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

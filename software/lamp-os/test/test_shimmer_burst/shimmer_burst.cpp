@@ -47,10 +47,10 @@ struct Surfaces {
 const Color kBlueTint(0, 0, 255, 0);
 
 void burstOn(ShimmerExpression& e, Surfaces& s, bool transient,
-             std::vector<Color> colors = {}) {
+             std::vector<Color> colors = {}, uint32_t burstMs = kBurstMs) {
   e.configure(colors, 60, 900, TARGET_SHADE);
   e.configureFromParameters(
-      {{"fire", 0}, {"count", kStars}, {"durationMax", kBurstMs}, {"opacity", 100}});
+      {{"fire", 0}, {"count", kStars}, {"durationMax", burstMs}, {"opacity", 100}});
   e.isTransient = transient;
   e.autoTriggerEnabled = !transient;
   e.setBehaviorContext(&s.ctx);
@@ -234,6 +234,32 @@ void test_stars_spread_over_the_whole_zone() {
   TEST_ASSERT_TRUE_MESSAGE(share > 0.42f && share < 0.58f, "stars cluster at one end");
 }
 
+// A burst past the 2 s swell runs its whole length: every star stays lit
+// through the hold, all are dark by the end, and it completes at its length.
+void test_a_long_burst_holds_its_stars_and_completes_at_its_length() {
+  constexpr uint32_t kLongMs = 5000;
+  Surfaces s;
+  ShimmerExpression e(&s.shade);
+  burstOn(e, s, /*transient=*/true, {}, kLongMs);
+  TEST_ASSERT_TRUE(e.trigger());
+  uint32_t now = 1000;
+  size_t fewestHeld = kStars;
+  size_t lastLit = 0;
+  for (; now - 1000 < kLongMs; now += kFrameMs) {
+    TEST_ASSERT_FALSE_MESSAGE(e.isAnimationComplete(), "long burst ended early");
+    lastLit = frame(e, s, now);
+    const uint32_t elapsed = now - 1000;
+    if (elapsed >= 1000 && elapsed < kLongMs - 1000) {
+      fewestHeld = lastLit < fewestHeld ? lastLit : fewestHeld;
+    }
+  }
+  TEST_ASSERT_EQUAL_UINT32(kStars, fewestHeld);
+  TEST_ASSERT_EQUAL_UINT32(0, lastLit);
+  frame(e, s, now);
+  frame(e, s, now += kFrameMs);
+  TEST_ASSERT_TRUE(e.isAnimationComplete());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_a_transient_burst_completes_for_the_gc);
@@ -246,5 +272,6 @@ int main(int, char**) {
   RUN_TEST(test_a_burst_lights_exactly_count_stars);
   RUN_TEST(test_a_burst_falls_dark_before_it_completes);
   RUN_TEST(test_stars_spread_over_the_whole_zone);
+  RUN_TEST(test_a_long_burst_holds_its_stars_and_completes_at_its_length);
   return UNITY_END();
 }

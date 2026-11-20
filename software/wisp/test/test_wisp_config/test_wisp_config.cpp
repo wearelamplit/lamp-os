@@ -3,6 +3,8 @@
 #include "config/wisp_config.cpp"  // NOLINT(build/include)
 
 #include <unity.h>
+
+#include "status/wisp_config_fields.hpp"
 #include <lampos/led_types.hpp>
 
 // kv_reset() is defined inside Preferences.h's anonymous namespace.
@@ -171,6 +173,173 @@ void test_corrupt_osc_role_loads_as_primary() {
   TEST_ASSERT_EQUAL_INT((int)wisp::OscRole::Primary, (int)cfg.oscRole());
 }
 
+// A fresh wisp reads Straylight, slot 1, and the stored target is Straylight's
+// own address (P1).
+void test_osc_defaults_to_straylight_slot_1() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(1, cfg.oscSlot());
+  char addr[wisp::kOscTargetAddressCap];
+  wisp::oscTargetAddress(cfg.oscTarget(), addr, sizeof(addr));
+  TEST_ASSERT_EQUAL_STRING("/straylight/palette/primary/colours", addr);
+}
+
+void test_osc_settings_persist() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setOsc(wisp::OscMode::Maestro, 7, "");
+  wisp::WispConfig reload;
+  reload.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)reload.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(7, reload.oscSlot());
+  const wisp::OscTarget t = reload.oscTarget();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)t.mode);
+  TEST_ASSERT_EQUAL_UINT8(7, t.slot);
+}
+
+// setOsc asks for a hold only in Osc and only when the listened address
+// moves; a resend, even after a reboot reloads the same target, never does.
+void test_set_osc_holds_only_a_live_retarget() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 3, ""));  // source Off
+  cfg.setSourceMode(wisp::WispSourceMode::Manual);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4, ""));
+  cfg.setSourceMode(wisp::WispSourceMode::Osc);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 4, ""));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 5, ""));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Straylight, 5, ""));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Straylight, 9, ""));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 9, ""));
+  wisp::WispConfig reboot;
+  reboot.begin();
+  TEST_ASSERT_FALSE(reboot.setOsc(wisp::OscMode::Maestro, 9, ""));
+}
+
+void test_corrupt_osc_settings_load_as_straylight_slot_1() {
+  {
+    Preferences p;
+    p.putUChar("oscMode", 9);
+    p.putUChar("oscSlot", 0);
+  }
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(1, cfg.oscSlot());
+  {
+    Preferences p;
+    p.putUChar("oscMode", 1);
+    p.putUChar("oscSlot", 11);
+  }
+  wisp::WispConfig high;
+  high.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Maestro, (int)high.oscMode());
+  TEST_ASSERT_EQUAL_UINT8(1, high.oscSlot());
+}
+
+// The Custom address persists, and the stored target carries it.
+void test_custom_address_persists() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_STRING("", cfg.oscAddress());
+  cfg.setOsc(wisp::OscMode::Custom, 1, "/lamp/palette");
+  wisp::WispConfig reload;
+  reload.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)reload.oscMode());
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", reload.oscAddress());
+  char addr[wisp::kOscTargetAddressCap];
+  wisp::oscTargetAddress(reload.oscTarget(), addr, sizeof(addr));
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", addr);
+  // Storing the address already held, as a slot-only change does.
+  reload.setOsc(wisp::OscMode::Custom, 4, reload.oscAddress());
+  TEST_ASSERT_EQUAL_STRING("/lamp/palette", reload.oscAddress());
+}
+
+// A stored address the rule refuses loads as "" (P9).
+void test_invalid_stored_custom_address_loads_empty() {
+  for (const char* bad : {"lamp", "/a b", "/0123456789abcde", "/a#"}) {
+    kv_reset();
+    {
+      Preferences p;
+      p.putString("oscAddr", bad);
+    }
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("", cfg.oscAddress(), bad);
+  }
+}
+
+// Custom stored with no usable address loads as Straylight, never as a
+// Custom that listens to nothing.
+void test_custom_without_address_loads_as_straylight() {
+  for (const char* stored : {static_cast<const char*>(nullptr), "", "/a b"}) {
+    kv_reset();
+    {
+      Preferences p;
+      p.putUChar("oscMode", 2);
+      p.putUChar("oscSlot", 4);
+      if (stored) p.putString("oscAddr", stored);
+    }
+    wisp::WispConfig cfg;
+    cfg.begin();
+    TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Straylight, (int)cfg.oscMode());
+    TEST_ASSERT_EQUAL_UINT8(4, cfg.oscSlot());
+  }
+  kv_reset();
+  {
+    Preferences p;
+    p.putUChar("oscMode", 2);
+    p.putString("oscAddr", "/kept");
+  }
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)cfg.oscMode());
+}
+
+// wispConfig reports what the wisp holds, every field off its default, so
+// the app confirms a change on it.
+void test_config_fields_report_the_stored_settings() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setLedFormat(lampos::led::ByteOrder::BGR);
+  cfg.setPixelCount(61);
+  cfg.setBrightness(42);
+  cfg.setDrift(90000, 33);
+  cfg.bumpShuffleSeed();
+  cfg.bumpOpSeq();
+  cfg.bumpOpSeq();
+  cfg.setPaletteStyle(wisp::PaletteStyle::Swatches);
+  cfg.setOsc(wisp::OscMode::Custom, 6, "/lamp/x");
+  const wisp::WispConfigFields f = wisp::wispConfigFields(cfg);
+  TEST_ASSERT_EQUAL_STRING("BGR", f.ledType);
+  TEST_ASSERT_EQUAL_UINT16(61, f.pixelCount);
+  TEST_ASSERT_EQUAL_UINT8(42, f.brightness);
+  TEST_ASSERT_EQUAL_UINT32(90000, f.driftIntervalMs);
+  TEST_ASSERT_EQUAL_UINT8(33, f.driftFadePct);
+  TEST_ASSERT_EQUAL_UINT8(1, f.shuffleSeed);
+  TEST_ASSERT_EQUAL_UINT32(2, f.opSeq);
+  TEST_ASSERT_TRUE(f.swatches);
+  TEST_ASSERT_EQUAL_INT((int)wisp::OscMode::Custom, (int)f.oscMode);
+  TEST_ASSERT_EQUAL_UINT8(6, f.oscSlot);
+  TEST_ASSERT_EQUAL_STRING("/lamp/x", f.oscAddr);
+}
+
+// In Osc, a Custom address change asks for a hold; the same address, or a
+// slot change, does not.
+void test_set_osc_custom_holds_only_on_an_address_change() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Custom, 1, "/a"));  // source Off
+  cfg.setSourceMode(wisp::WispSourceMode::Osc);
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Custom, 1, "/a"));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Custom, 6, "/a"));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Custom, 6, "/b"));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Maestro, 6, "/b"));
+  TEST_ASSERT_FALSE(cfg.setOsc(wisp::OscMode::Maestro, 6, "/c"));
+  TEST_ASSERT_TRUE(cfg.setOsc(wisp::OscMode::Custom, 6, "/c"));
+}
+
 void test_osc_address_built_per_role() {
   TEST_ASSERT_EQUAL_STRING("/straylight/palette/primary/colours",
                            wisp::oscPaletteAddress(wisp::OscRole::Primary));
@@ -199,6 +368,99 @@ void test_clearing_unset_settings_removes_no_missing_key() {
   TEST_ASSERT_EQUAL_INT(0, s_removeMissing);
 }
 
+// The status reports the stored Manual palette in every source mode: "" when
+// it is empty, its id otherwise.
+void test_manual_palette_status_reports_the_stored_palette() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  const wisp::WispSourceMode modes[] = {wisp::WispSourceMode::Off,
+                                        wisp::WispSourceMode::Manual,
+                                        wisp::WispSourceMode::Osc};
+  for (const auto mode : modes) {
+    cfg.setSourceMode(mode);
+    cfg.setManualPalette({});
+    TEST_ASSERT_EQUAL_STRING("", cfg.manualPaletteStatus().id);
+    cfg.setManualPalette({{10, 20, 30, 0}, {40, 50, 60, 70}});
+    TEST_ASSERT_EQUAL_STRING("59a8ae37", cfg.manualPaletteStatus().id);
+  }
+}
+
+// The status echoes the seq of the save that stored the palette, and 0 once a
+// save without one replaces it.
+void test_manual_palette_status_echoes_the_save_seq() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  TEST_ASSERT_EQUAL_UINT16(0, cfg.manualPaletteStatus().seq);
+  cfg.setManualPalette({{1, 2, 3, 0}}, 42);
+  TEST_ASSERT_EQUAL_UINT16(42, cfg.manualPaletteStatus().seq);
+  cfg.setManualPalette({});
+  TEST_ASSERT_EQUAL_UINT16(0, cfg.manualPaletteStatus().seq);
+  TEST_ASSERT_EQUAL_STRING("", cfg.manualPaletteStatus().id);
+}
+
+// 20 colours, each distinct in every channel, so a kept tail or a shifted
+// window shows.
+static std::vector<wisp::ManualPaletteColor> twentyColours() {
+  std::vector<wisp::ManualPaletteColor> out;
+  for (uint8_t i = 0; i < 20; ++i) {
+    out.push_back({static_cast<uint8_t>(i + 1), static_cast<uint8_t>(40 + i),
+                   static_cast<uint8_t>(200 - i), static_cast<uint8_t>(i * 3)});
+  }
+  return out;
+}
+
+static void assertFirstSixteen(const wisp::WispConfig& cfg) {
+  const auto all = twentyColours();
+  const auto& pal = cfg.manualPalette();
+  TEST_ASSERT_EQUAL(16, (int)pal.size());
+  for (size_t i = 0; i < pal.size(); ++i) {
+    TEST_ASSERT_EQUAL_UINT8(all[i].r, pal[i].r);
+    TEST_ASSERT_EQUAL_UINT8(all[i].g, pal[i].g);
+    TEST_ASSERT_EQUAL_UINT8(all[i].b, pal[i].b);
+    TEST_ASSERT_EQUAL_UINT8(all[i].w, pal[i].w);
+  }
+  const std::vector<wisp::ManualPaletteColor> first(all.begin(),
+                                                    all.begin() + 16);
+  TEST_ASSERT_EQUAL_STRING(wisp::statusManualId(first).c_str(),
+                           cfg.manualPaletteStatus().id);
+}
+
+// A Manual palette holds at most 16 colours, the most a Straylight palette
+// carries; a longer one keeps its first 16, in RAM and in NVS.
+void test_manual_palette_keeps_its_first_16_colours() {
+  wisp::WispConfig cfg;
+  cfg.begin();
+  cfg.setManualPalette(twentyColours());
+  assertFirstSixteen(cfg);
+
+  wisp::WispConfig reloaded;
+  reloaded.begin();
+  assertFirstSixteen(reloaded);
+}
+
+// A palette stored before the cap, RGBW or legacy RGB, loads as its first 16.
+void test_longer_stored_palette_loads_its_first_16_colours() {
+  const auto all = twentyColours();
+  Preferences prefs;
+  std::vector<uint8_t> rgbw;
+  for (const auto& c : all) rgbw.insert(rgbw.end(), {c.r, c.g, c.b, c.w});
+  prefs.putBytes("manualPal4", rgbw.data(), rgbw.size());
+  wisp::WispConfig cfg;
+  cfg.begin();
+  assertFirstSixteen(cfg);
+
+  kv_reset();
+  std::vector<uint8_t> rgb;
+  for (const auto& c : all) rgb.insert(rgb.end(), {c.r, c.g, c.b});
+  prefs.putBytes("manualPal", rgb.data(), rgb.size());
+  wisp::WispConfig legacy;
+  legacy.begin();
+  const auto& pal = legacy.manualPalette();
+  TEST_ASSERT_EQUAL(16, (int)pal.size());
+  TEST_ASSERT_EQUAL_UINT8(all[15].r, pal[15].r);
+  TEST_ASSERT_EQUAL_UINT8(all[15].b, pal[15].b);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_name_default_is_empty);
@@ -222,6 +484,19 @@ int main(int, char**) {
   RUN_TEST(test_osc_role_defaults_primary_and_persists);
   RUN_TEST(test_corrupt_osc_role_loads_as_primary);
   RUN_TEST(test_osc_address_built_per_role);
+  RUN_TEST(test_osc_defaults_to_straylight_slot_1);
+  RUN_TEST(test_osc_settings_persist);
+  RUN_TEST(test_corrupt_osc_settings_load_as_straylight_slot_1);
+  RUN_TEST(test_set_osc_holds_only_a_live_retarget);
+  RUN_TEST(test_custom_address_persists);
+  RUN_TEST(test_invalid_stored_custom_address_loads_empty);
+  RUN_TEST(test_custom_without_address_loads_as_straylight);
+  RUN_TEST(test_config_fields_report_the_stored_settings);
+  RUN_TEST(test_set_osc_custom_holds_only_on_an_address_change);
   RUN_TEST(test_clearing_unset_settings_removes_no_missing_key);
+  RUN_TEST(test_manual_palette_status_reports_the_stored_palette);
+  RUN_TEST(test_manual_palette_status_echoes_the_save_seq);
+  RUN_TEST(test_manual_palette_keeps_its_first_16_colours);
+  RUN_TEST(test_longer_stored_palette_loads_its_first_16_colours);
   return UNITY_END();
 }

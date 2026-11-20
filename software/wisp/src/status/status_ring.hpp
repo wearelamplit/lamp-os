@@ -74,6 +74,24 @@ inline bool computeRingGradient(const uint8_t* stopsRgb,
   return true;
 }
 
+// Render numStops RGB stops into outRgb as solid blocks in order, pixel i
+// showing stop (i * numStops) / pixelCount, so the ring shows only colours
+// lamps get in swatches. Same contract as computeRingGradient otherwise.
+inline bool computeRingBlocks(const uint8_t* stopsRgb, size_t numStops,
+                              uint8_t* outRgb, size_t pixelCount) {
+  if (numStops == 0 || pixelCount == 0 || stopsRgb == nullptr ||
+      outRgb == nullptr) {
+    return false;
+  }
+  for (size_t i = 0; i < pixelCount; ++i) {
+    const uint8_t* s = stopsRgb + ((i * numStops) / pixelCount) * 3;
+    outRgb[i * 3 + 0] = s[0];
+    outRgb[i * 3 + 1] = s[1];
+    outRgb[i * 3 + 2] = s[2];
+  }
+  return true;
+}
+
 // Fill `outRgb` (length pixelCount*3) with the warm-white fallback color.
 inline void fillRingWarmWhite(uint8_t* outRgb, size_t pixelCount) {
   if (outRgb == nullptr) return;

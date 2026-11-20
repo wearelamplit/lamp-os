@@ -13,9 +13,9 @@ void renderZone(std::vector<Color>& out, const Zone& zn,
     for (uint16_t i = 0; i < sz; ++i) out[zn.posMin + i] = mainColor;
     return;
   }
-  std::vector<Color> grad = buildGradientWithStops(static_cast<uint8_t>(sz), stops);
-  for (uint16_t i = 0; i < sz; ++i)
-    out[zn.posMin + i] = (i < grad.size()) ? grad[i] : mainColor;
+  const auto gradLen = static_cast<uint8_t>(sz);
+  buildGradientWithStopsInto(gradLen, stops, &out[zn.posMin]);
+  for (uint16_t i = gradLen; i < sz; ++i) out[zn.posMin + i] = mainColor;
 }
 
 void renderLions(std::vector<Color>& out, uint16_t windowSize,
