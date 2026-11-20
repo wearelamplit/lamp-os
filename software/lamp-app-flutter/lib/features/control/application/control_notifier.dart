@@ -2099,8 +2099,9 @@ class ControlNotifier extends _$ControlNotifier {
       _ble.lastDropCause(_deviceId) == LinkDropCause.lampHungUp;
 
   /// The lamp pauses Bluetooth while it sends or takes a mesh update and
-  /// advertises again once it is done, so a connect before then cannot land. Reconnects on
-  /// the first broadcast heard after now that does not carry the busy bit.
+  /// advertises again once it is done, so a connect before then cannot land.
+  /// Reconnects on the first broadcast heard after now that does not carry
+  /// the busy bit.
   void _awaitLampBack() {
     _reconnectTimer?.cancel();
     _lampBackWatch?.close();

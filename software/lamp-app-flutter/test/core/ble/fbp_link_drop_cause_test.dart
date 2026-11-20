@@ -58,6 +58,21 @@ void main() {
     expect(client.lastDropCause(id), LinkDropCause.lampHungUp);
   });
 
+  test('the cause is current when the false edge reaches a listener',
+      () async {
+    const id = 'AA:00:00:00:00:05';
+    await client.connect(id);
+    final atEdge = <LinkDropCause>[];
+    final sub = client.watchConnected(id).listen((up) {
+      if (!up) atEdge.add(client.lastDropCause(id));
+    });
+    addTearDown(sub.cancel);
+    await pumpEventQueue();
+    lamp.drop(id, 0x13);
+    await pumpEventQueue();
+    expect(atEdge, [LinkDropCause.lampHungUp]);
+  });
+
   test('a supervision timeout reads as some other drop', () async {
     const id = 'AA:00:00:00:00:02';
     await client.connect(id);
