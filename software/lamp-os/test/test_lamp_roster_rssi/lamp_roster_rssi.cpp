@@ -4,7 +4,7 @@
 // lastRssi is written only by the BLE scan path (~30 Hz) so the
 // RSSI-descending sort key never compares values from two different radio
 // transports (which have different absolute readings on the same physical
-// link). espnowRssi carries the mesh-side reading separately.
+// link). directRssi carries the mesh-side reading separately.
 //
 // Identity keys on the mesh (STA) MAC: a mesh sighting stores it raw, a BLE
 // sighting recovers it as (scanned address - 2). Two sightings with the same
@@ -45,8 +45,27 @@ RosterEntry entryByName(LampRoster& r, const std::string& name) {
   return out;
 }
 
+// The direct ESP-NOW reading the nearby list renders as `mrssi`.
 int8_t espnowRssiByName(LampRoster& r, const std::string& name) {
-  return entryByName(r, name).espnowRssi;
+  for (const auto& e : r.getAll()) {
+    if (name == e.name) return e.espnowRssi;
+  }
+  return -127;
+}
+
+bool otaLinkHeld(LampRoster& r, const uint8_t mac[6]) {
+  for (const auto& p : r.getMesh(LAMP_PRUNE_TIME_MS)) {
+    if (std::memcmp(p.mac, mac, 6) == 0) return p.otaLinkHeld;
+  }
+  return false;
+}
+
+void hello(LampRoster& r, const uint8_t mac[6], const uint8_t frameSrc[6], int8_t rssi,
+           uint32_t atMs) {
+  set_mock_millis(atMs);
+  r.addOrUpdateFromEspNow("peer", mac, kNoColor, kNoColor, 0x010203, 0, 5, nullptr, nullptr,
+                          false, 0, false, nullptr, false,
+                          helloRosterRssi(frameSrc, mac, rssi));
 }
 
 std::string macStrByName(LampRoster& r, const std::string& name) {
@@ -102,7 +121,7 @@ void test_ble_scan_sentinel_does_not_clobber_existing_value() {
 void test_esp_now_does_not_write_last_rssi() {
   // Same physical lamp: BLE address AA:..:FF recovers MAC AA:..:FD, so a
   // later HELLO carrying that raw MAC merges into the same entry. The HELLO
-  // must not touch lastRssi (it lives on espnowRssi instead).
+  // must not touch lastRssi (it lives on directRssi instead).
   LampRoster r;
   r.addOrUpdateFromBle("jacko", "AA:BB:CC:DD:EE:FF", kNoColor, kNoColor, -72);
   const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFD};
@@ -146,6 +165,61 @@ void test_relay_only_peer_has_unknown_espnow_rssi() {
                           nullptr, false, 0, false, nullptr, false,
                           helloRosterRssi(relay, far, -51));
   TEST_ASSERT_EQUAL_INT8(-127, espnowRssiByName(r, "far"));
+}
+
+// Direct HELLOs at the floor on the steady cadence open the OTA gate once the
+// hold has run, and not a millisecond before.
+void test_direct_hellos_at_the_floor_hold_the_ota_link() {
+  LampRoster r;
+  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x62};
+  const uint32_t t0 = 100000;
+  hello(r, mac, mac, lamp_protocol::kOtaMinRssiDbm, t0);
+  hello(r, mac, mac, lamp_protocol::kOtaMinRssiDbm, t0 + 30000);
+  set_mock_millis(t0 + DirectRssi::kOtaHoldMs - 1);
+  TEST_ASSERT_FALSE(otaLinkHeld(r, mac));
+  set_mock_millis(t0 + DirectRssi::kOtaHoldMs);
+  TEST_ASSERT_TRUE(otaLinkHeld(r, mac));
+}
+
+// Strong relayed copies on the same cadence never stand in for direct ones.
+void test_relayed_copies_never_hold_the_ota_link() {
+  LampRoster r;
+  const uint8_t mac[6]   = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x63};
+  const uint8_t relay[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  const uint32_t t0 = 100000;
+  hello(r, mac, mac, lamp_protocol::kOtaMinRssiDbm, t0);
+  for (uint32_t t = t0 + 30000; t <= t0 + 4 * DirectRssi::kOtaHoldMs; t += 30000) {
+    hello(r, mac, relay, -40, t);
+  }
+  TEST_ASSERT_FALSE(otaLinkHeld(r, mac));
+}
+
+// The nearby list shows a direct reading while it is fresh and drops it once
+// stale, though relayed copies keep the peer listed.
+void test_direct_reading_leaves_the_list_once_stale() {
+  LampRoster r;
+  const uint8_t mac[6]   = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x64};
+  const uint8_t relay[6] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60};
+  const uint32_t t0 = 100000;
+  hello(r, mac, mac, -77, t0);
+  hello(r, mac, relay, -40, t0 + DirectRssi::kMaxAgeMs);
+  TEST_ASSERT_EQUAL_INT8(-77, espnowRssiByName(r, "peer"));
+  hello(r, mac, relay, -40, t0 + DirectRssi::kMaxAgeMs + 1);
+  TEST_ASSERT_EQUAL_INT8(-127, espnowRssiByName(r, "peer"));
+}
+
+// The roster's stamp retirement covers the direct reading, so one millis()
+// wrap later it does not come back as fresh.
+void test_retired_direct_reading_stays_stale_across_the_wrap() {
+  LampRoster r;
+  const uint8_t mac[6] = {0xC4, 0xDD, 0x57, 0xEB, 0x64, 0x65};
+  const uint32_t t0 = 100000;
+  hello(r, mac, mac, -66, t0);
+  for (uint64_t t = t0; t <= uint64_t{t0} + (uint64_t{1} << 32); t += 3600000) {
+    r.retireSightings(static_cast<uint32_t>(t));
+  }
+  set_mock_millis(t0 + 1000);  // one wrap past the reading
+  TEST_ASSERT_EQUAL_INT8(-127, espnowRssiByName(r, "peer"));
 }
 
 // ---- MAC identity --------------------------------------------------------
@@ -343,6 +417,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_empty_ble_name_does_not_clobber_known_name);
   RUN_TEST(test_relayed_hello_keeps_direct_espnow_rssi);
   RUN_TEST(test_relay_only_peer_has_unknown_espnow_rssi);
+  RUN_TEST(test_direct_hellos_at_the_floor_hold_the_ota_link);
+  RUN_TEST(test_relayed_copies_never_hold_the_ota_link);
+  RUN_TEST(test_direct_reading_leaves_the_list_once_stale);
+  RUN_TEST(test_retired_direct_reading_stays_stale_across_the_wrap);
 
   return UNITY_END();
 }

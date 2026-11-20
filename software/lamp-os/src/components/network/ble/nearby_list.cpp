@@ -9,6 +9,8 @@
 #include <cstring>
 #include <new>
 
+#include <lampos/clock.hpp>
+
 #include "components/network/mesh/proximity.hpp"
 #include "util/bd_addr.hpp"
 #include "util/json_escape.hpp"
@@ -50,7 +52,8 @@ void keepMostRelevant(std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
 }
 
 // Over the app-visible fields only. lastSeenMs and rssi freshen on every BLE
-// adv (~30 Hz); folding them would churn the rev.
+// adv (~30 Hz) and mrssi on every direct HELLO; folding them would churn the
+// rev.
 uint32_t membershipHash(const std::vector<lamp::ListedPeer>& lamps, uint32_t now) {
   uint32_t hash = 2166136261u;
   for (const auto& p : lamps) {
@@ -104,6 +107,10 @@ void renderInto(const std::vector<lamp::ListedPeer>& lamps, uint32_t now, Out& o
     }
     if (p.lastRssi != -127) {
       snprintf(buf, sizeof(buf), ",\"rssi\":%d", p.lastRssi);
+      out += buf;
+    }
+    if (p.espnowRssi != -127) {
+      snprintf(buf, sizeof(buf), ",\"mrssi\":%d", p.espnowRssi);
       out += buf;
     }
     snprintf(buf, sizeof(buf),
@@ -191,8 +198,9 @@ void NearbyList::release(lamp::LampRoster& roster) {
   std::string().swap(json_);
   xSemaphoreGive(mutex_);
   roster.releaseAll();
-  tried_   = false;
-  holding_ = false;
+  tried_       = false;
+  holding_     = false;
+  mrssiListed_ = false;
 }
 
 bool NearbyList::tick(lamp::LampRoster& roster, bool clientConnected, uint32_t nowMs) {
@@ -201,7 +209,8 @@ bool NearbyList::tick(lamp::LampRoster& roster, bool clientConnected, uint32_t n
     return false;
   }
   const uint32_t gen = roster.generation();
-  if (built_.load() && gen == builtGen_) return false;
+  const bool mrssiStale = mrssiListed_ && lampos::timeReached(nowMs, mrssiStaleAtMs_);
+  if (built_.load() && gen == builtGen_ && !mrssiStale) return false;
   if (tried_ && nowMs - lastTryMs_ < kRebuildGapMs) return false;
   tried_     = true;
   lastTryMs_ = nowMs;
@@ -269,6 +278,13 @@ bool NearbyList::rebuild(lamp::LampRoster& roster, uint32_t gen, uint32_t nowMs)
   }
 
   builtGen_ = gen;
+  mrssiListed_ = false;
+  for (const auto& p : lamps) {
+    if (p.espnowRssi == -127) continue;
+    const uint32_t staleAt = nowMs + p.espnowRssiFreshS * 1000u;
+    if (!mrssiListed_ || lampos::isLater(mrssiStaleAtMs_, staleAt)) mrssiStaleAtMs_ = staleAt;
+    mrssiListed_ = true;
+  }
   if (first || hash != lastHash_) {
     lastHash_ = hash;
     rev_.fetch_add(1);

@@ -9,6 +9,7 @@
 #include "ota_channel.hpp"
 #include "components/network/ble/ble_control.hpp"  // pauseRadioForOta / resumeRadioAfterOta
 #include "components/firmware/ota_quiet_mode.hpp"     // enterQuiet / exitQuiet
+#include "components/network/mesh/direct_rssi.hpp"
 #include "components/network/protocol/lamp_protocol.hpp"
 #include "../../version.hpp"
 
@@ -711,7 +712,7 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                                              uint32_t nowMs,
                                              const char* peerFwChannel,
                                              uint16_t peerMaxChunk,
-                                             int8_t peerRssi,
+                                             bool peerLinkHeld,
                                              bool peerBeingServed) {
   if (state_ != State::Idle) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
@@ -733,18 +734,6 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
                 (unsigned)peerVersion, (unsigned)peerProtocolVersion,
                 (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MIN,
                 (unsigned)lamp_protocol::PROTOCOL_VERSION_RX_MAX);
-    return;
-  }
-  // Skip peers below the OTA signal floor: a weak direct hop thrashes/fails
-  // regardless of chunk size. Unknown RSSI (-127 sentinel) isn't gated;
-  // cascade OTA reaches this peer later via a nearer upgraded lamp.
-  if (peerRssi != -127 && peerRssi < lamp_protocol::kOtaMinRssiDbm) {
-    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
-                "rssi=%d below floor %d\n",
-                peerMac[0], peerMac[1], peerMac[2],
-                peerMac[3], peerMac[4], peerMac[5],
-                (unsigned)peerVersion, (int)peerRssi,
-                (int)lamp_protocol::kOtaMinRssiDbm);
     return;
   }
 #if defined(ARDUINO) || defined(ESP_PLATFORM)
@@ -775,6 +764,17 @@ void FirmwareDistributor::considerPeerForOta(const uint8_t peerMac[6],
       // version-only gate. Receiver's otaAcceptable is the downstream backstop.
       if (peerVersion >= lamp::FIRMWARE_VERSION) return;
     }
+  }
+  // A weak direct hop thrashes or fails regardless of chunk size; cascade OTA
+  // reaches this peer later via a nearer upgraded lamp.
+  if (!peerLinkHeld) {
+    FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
+                "direct link has not held %d dBm for %u ms\n",
+                peerMac[0], peerMac[1], peerMac[2],
+                peerMac[3], peerMac[4], peerMac[5],
+                (unsigned)peerVersion, (int)lamp_protocol::kOtaMinRssiDbm,
+                (unsigned)DirectRssi::kOtaHoldMs);
+    return;
   }
   if (peerBeingServed) {
     FWDIST_LOGF("[fwdist] consider %02X:%02X:%02X:%02X:%02X:%02X v=0x%08X skip: "
