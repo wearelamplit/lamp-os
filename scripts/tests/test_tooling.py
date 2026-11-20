@@ -9,11 +9,83 @@ WF = ROOT / ".github/workflows"
 
 class ReleaseWorkflows(unittest.TestCase):
     def test_every_release_workflow_ships_the_wisp_image(self):
-        for name in ("release.yml", "release-main.yml", "release-beta.yml"):
-            text = (WF / name).read_text()
-            self.assertIn("name: wisp-firmware", text, name)
-            self.assertIn("release/wisp-firmware-signed.bin", text.split("files:")[-1], name)
-            self.assertRegex(text, r"mv signed/wisp/firmware-signed\.bin\s+release/wisp-firmware-signed\.bin", name)
+        paths = sorted(WF.glob("release*.yml"))
+        self.assertLessEqual({"release.yml", "release-beta.yml"}, {p.name for p in paths})
+        for p in paths:
+            text = p.read_text()
+            self.assertIn("name: wisp-firmware", text, p.name)
+            self.assertIn("release/wisp-firmware-signed.bin", text.split("files:")[-1], p.name)
+            self.assertRegex(text, r"mv signed/wisp/firmware-signed\.bin\s+release/wisp-firmware-signed\.bin", p.name)
+
+    def test_a_tag_release_redeploys_the_site_from_main(self):
+        text = (WF / "release.yml").read_text()
+        site = re.search(r"^  site:\n((?:    .*\n|\n)*)", text, re.M)
+        self.assertIsNotNone(site)
+        self.assertRegex(site.group(1), r"needs: publish\n")
+        self.assertRegex(site.group(1), r"actions: write\n")
+        self.assertRegex(site.group(1), r"gh workflow run pages\.yml --ref main ")
+        self.assertRegex((WF / "pages.yml").read_text(), r"\n  workflow_dispatch:")
+
+
+GH_STUB = """#!/bin/sh
+echo "$*" >> "$GH_LOG"
+if [ -n "$GH_FAIL" ]; then echo "HTTP 502" >&2; exit 1; fi
+echo "$GH_TAG"
+"""
+
+
+class SiteVersionStamp(unittest.TestCase):
+    STEP = "name: Stamp stable manifest version from the Latest release"
+
+    @classmethod
+    def stamp_script(cls):
+        text = (WF / "pages.yml").read_text()
+        body = re.compile(r"^( +)run: \|\n((?:\1  .*\n|\n)*)", re.M).search(text, text.index(cls.STEP))
+        return "".join(l[len(body.group(1)) + 2:] + "\n" for l in body.group(2).splitlines())
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "docs/update-site").mkdir(parents=True)
+        (self.tmp / "runner").mkdir()
+        self.manifest = self.tmp / "docs/update-site/manifest_format.json"
+        shutil.copy(ROOT / "docs/update-site/manifest_format.json", self.manifest)
+        self.before = self.manifest.read_bytes()
+        gh = self.tmp / "bin/gh"
+        gh.parent.mkdir()
+        gh.write_text(GH_STUB)
+        gh.chmod(0o755)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def stamp(self, tag, fail=False):
+        env = dict(os.environ, PATH=f"{self.tmp / 'bin'}:{os.environ['PATH']}", GH_TAG=tag, GH_FAIL="1" if fail else "",
+                   GH_LOG=str(self.tmp / "gh.log"), GITHUB_REPOSITORY="owner/repo", RUNNER_TEMP=str(self.tmp / "runner"))
+        return subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", self.stamp_script()],
+                              cwd=self.tmp, env=env, capture_output=True, text=True)
+
+    def test_stamps_the_latest_release_version(self):
+        r = self.stamp("v2.10.0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.manifest.read_text())["version"], "2.10.0")
+        self.assertIn("repos/owner/repo/releases/latest", (self.tmp / "gh.log").read_text())
+
+    def test_keeps_every_other_field(self):
+        self.stamp("v2.10.0")
+        before, after = json.loads(self.before), json.loads(self.manifest.read_text())
+        before.pop("version"), after.pop("version")
+        self.assertEqual(before, after)
+
+    def test_a_failed_or_malformed_read_fails_and_leaves_the_manifest(self):
+        for tag, fail in (("v2.10.0", True), ("", False), ("beta", False), ("v2.10.0-rc1", False), ("null", False)):
+            r = self.stamp(tag, fail)
+            self.assertNotEqual(r.returncode, 0, (tag, fail))
+            self.assertEqual(self.manifest.read_bytes(), self.before, (tag, fail))
+
+    def test_stamp_runs_before_the_site_is_uploaded(self):
+        text = (WF / "pages.yml").read_text()
+        self.assertLess(text.index("actions/checkout@"), text.index(self.STEP))
+        self.assertLess(text.index(self.STEP), text.index("actions/upload-pages-artifact@"))
 
 
 class BuildCache(unittest.TestCase):
