@@ -12,4 +12,7 @@ This folder holds:
   browser firmware flasher (`update.lamplit.ca`): `index.html`, the ESP Web
   Tools `manifest_*.json`, `CNAME`, onboarding image. Deployed by
   [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) (Pages source
-  must be set to "GitHub Actions"). Don't put developer docs here.
+  must be set to "GitHub Actions"). Don't put developer docs here. The
+  `version` in `manifest_format.json` is stamped at deploy from the Latest
+  GitHub release, and `release.yml` redeploys the site after each `vX.Y.Z`
+  release, so the committed value is never bumped by hand.
