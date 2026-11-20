@@ -29,7 +29,7 @@ import 'package:lamp_app/features/inventory/domain/inventory_lamp.dart';
 import 'package:lamp_app/features/nearby/application/nearby_lamps_notifier.dart';
 
 const _devId = 'lamp-busy';
-const _busyCopy = 'Jacko is busy teaching a lamp new tricks 🎓';
+const _busyCopy = 'Jacko is swapping new tricks with a friend 🎓';
 
 /// Counts connects; can fail them, or have the lamp hang up right after one.
 /// A failed connect reports a disconnect of its own, as flutter_blue_plus

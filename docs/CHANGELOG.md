@@ -8,13 +8,13 @@ Highlights grouped Added / Fixed / Changed, not every commit.
 ## Unreleased
 
 ### Fixed
-- **A lamp busy teaching another lamp says so, then comes back by itself.**
-  When a lamp hangs up on the phone to send or take a firmware update over the
-  mesh, the app shows "<Name> is busy teaching a lamp new tricks 🎓" instead
-  of a minute of "Reaching out…" ending in "Couldn't reach your lamp", makes
-  no connect attempts meanwhile, and reconnects on its own as soon as it hears
-  the lamp again. Other drops (out of range, a reboot) reconnect as before.
-  On an iPhone every drop behaves as before.
+- **A lamp swapping an update with another lamp says so, then comes back by
+  itself.** When a lamp hangs up on the phone to send or take a firmware update
+  over the mesh, the app shows "<Name> is swapping new tricks with a friend 🎓"
+  instead of a minute of "Reaching out…" ending in "Couldn't reach your lamp",
+  makes no connect attempts meanwhile, and reconnects on its own as soon as it
+  hears the lamp again. Other drops (out of range, a reboot) reconnect as
+  before. On an iPhone every drop behaves as before.
 - **Lamp Network shows the mesh signal.** Each lamp's row shows how strongly
   the connected lamp hears it over the mesh ("Wi-Fi -58 dBm"), falls back to
   its Bluetooth reading ("BT -66 dBm") for a lamp with no mesh reading, and

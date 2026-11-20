@@ -28,7 +28,7 @@ String? activeLampId(String uri) => _lampRoute.firstMatch(uri)?.group(1);
 
 /// App-level gate: shows a whimsical blocking overlay whenever the app is
 /// actively reaching the lamp of the current route (initial connect, drop, or
-/// save-reboot), or waiting out a lamp that hung up to teach another one.
+/// save-reboot), or waiting out a lamp that hung up for a mesh update.
 /// Mounted above the router so it covers pushed routes too.
 /// Also hosts the current lamp's [FirmwarePushBanner].
 ///
@@ -77,7 +77,7 @@ class _ReachingLampGateState extends ConsumerState<ReachingLampGate> {
         overlay = _ReachingOverlay(
           lampId: id,
           name: name,
-          busyLine: hungUp ? otaBusyMessage(lampName: name) : null,
+          busyLine: hungUp ? otaSwapMessage(lampName: name) : null,
           onPickAnother: () => _router.go(AppRoutes.myLamps),
         );
       }
