@@ -5,7 +5,7 @@ add an entry here in the **same change** that bumps it. Entries describe what's
 new for someone upgrading — what changed for you, not how it was built.
 Highlights grouped Added / Fixed / Changed, not every commit.
 
-## Unreleased
+## 1.3.9
 
 ### Fixed
 - **A lamp no longer starts an update over a link too weak to finish it.** A
