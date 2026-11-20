@@ -1,12 +1,6 @@
 # Publishes the firmware-flasher site (update.lamplit.ca) to GitHub Pages
-# from docs/update-site/.
-#
-# ONE-TIME SETUP REQUIRED: in repo Settings -> Pages, set
-# "Build and deployment -> Source" to "GitHub Actions". This replaces the
-# legacy "Deploy from a branch: main /docs" config (which could only serve
-# / or /docs, not a subfolder). Until that switch is made this workflow is
-# inert and the old branch-deploy keeps serving — so there is no outage
-# window when the two land together.
+# from docs/update-site/. Repo Settings -> Pages -> Source must be
+# "GitHub Actions".
 name: Deploy flasher site to Pages
 
 on:
